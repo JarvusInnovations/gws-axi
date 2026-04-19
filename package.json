@@ -41,5 +41,12 @@
   "license": "MIT",
   "engines": {
     "node": ">=20"
+  },
+  "dependencies": {
+    "@toon-format/toon": "^2.1.0",
+    "axi-sdk-js": "^0.1.4",
+    "google-auth-library": "^10.6.2",
+    "googleapis": "^171.4.0",
+    "open": "^11.0.0"
   }
 }
