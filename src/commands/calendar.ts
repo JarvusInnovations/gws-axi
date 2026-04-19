@@ -1,6 +1,8 @@
 import { AxiError } from "axi-sdk-js";
 import { resolveAccount } from "../google/account.js";
+import { calendarCalendarsCommand, CALENDARS_HELP } from "./calendar/calendars.js";
 import { calendarEventsCommand, EVENTS_HELP } from "./calendar/events.js";
+import { calendarGetCommand, GET_HELP } from "./calendar/get.js";
 
 interface CalendarSubcommand {
   name: string;
@@ -11,8 +13,8 @@ interface CalendarSubcommand {
 
 const SUBCOMMANDS: CalendarSubcommand[] = [
   { name: "events", mutation: false, help: EVENTS_HELP, handler: calendarEventsCommand },
-  { name: "get", mutation: false, help: "not yet implemented" },
-  { name: "calendars", mutation: false, help: "not yet implemented" },
+  { name: "get", mutation: false, help: GET_HELP, handler: calendarGetCommand },
+  { name: "calendars", mutation: false, help: CALENDARS_HELP, handler: calendarCalendarsCommand },
   { name: "search", mutation: false, help: "not yet implemented" },
   { name: "freebusy", mutation: false, help: "not yet implemented" },
   { name: "create", mutation: true, help: "not yet implemented" },
