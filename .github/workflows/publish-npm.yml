@@ -21,7 +21,9 @@ jobs:
         registry-url: 'https://registry.npmjs.org'
 
     - name: Upgrade npm for trusted publishing
-      run: npm install -g npm@latest
+      # Pin to npm 11.x — `@latest` intermittently ships with a broken
+      # dependency tree (promise-retry MODULE_NOT_FOUND) on GitHub runners.
+      run: npm install -g npm@11
 
     - uses: oven-sh/setup-bun@v2
       with:
