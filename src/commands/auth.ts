@@ -379,18 +379,19 @@ async function runLogin(args: string[]): Promise<Record<string, unknown>> {
     ]);
   }
   const htmlPath = collapseHome(prepared.htmlPath);
+  const normalizedAccount = account ? normalizeEmail(account) : undefined;
   return {
     status: "prepared",
-    ...(account ? { account: normalizeEmail(account) } : {}),
+    ...(normalizedAccount ? { account: normalizedAccount } : {}),
     setup_html: htmlPath,
     expires_at: prepared.pending.expires_at,
     instructions: [
-      `Tell the user to switch to their gws-axi setup page (${htmlPath}) — it auto-refreshes within 10 seconds to show an "Authenticate with Google" button`,
-      `The user clicks the button and signs in${account ? ` as ${normalizeEmail(account)}` : " to the target Google account"}; they approve the requested scopes; they see a success page`,
-      "AFTER instructing the user, run `gws-axi auth login --wait` to block on the callback (up to 5 minutes)",
+      `The gws-axi setup page (${htmlPath}) must be open in the browser PROFILE/SESSION where the user is signed into ${normalizedAccount ? `\`${normalizedAccount}\`` : "the target Google account"}. This may be a DIFFERENT browser profile than the one used for initial setup (e.g., personal Chrome profile vs work). If the setup page is open in the wrong profile, tell the user to open ${htmlPath} in the correct profile.`,
+      `In that setup page tab, the user waits for the yellow "Authenticate with Google" button to appear (up to 10s auto-refresh), clicks it, signs in${normalizedAccount ? ` as \`${normalizedAccount}\`` : ""}, approves the requested scopes, and sees the success page.`,
+      "AFTER confirming the user is ready, run `gws-axi auth login --wait` in a NEW bash turn to block on the callback (up to 5 minutes).",
     ],
     help: [
-      "This command DID NOT start waiting yet. Relay instructions to the user, then run `gws-axi auth login --wait`.",
+      "This command DID NOT start waiting yet. Relay instructions to the user, confirm they have setup.html open in the correct browser profile, then run `gws-axi auth login --wait`.",
       "The pending flow expires in 10 minutes — if you don't --wait by then, re-run this prepare step",
     ],
   };

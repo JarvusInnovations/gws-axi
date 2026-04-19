@@ -514,17 +514,15 @@ export async function advanceTokensObtained(
       instructions: ["Re-run: `gws-axi auth setup --credentials-json <path>`"],
     };
   }
+  const expected = prepared.pending.expected_account;
   return {
     step,
     advanced: false,
     title: "Step 7 of 7: Authenticate in your browser",
     instructions: [
-      `Switch to your gws-axi setup page (${collapseHome(prepared.htmlPath)}) — it will refresh within 10 seconds to show an "Authenticate with Google" button`,
-      "Click the button and sign in to Google (as the target account if one was specified). Approve the requested scopes.",
-      "After your browser shows the success page, run `gws-axi auth login --wait` to complete the flow (it will block until the callback is received or 5 min timeout).",
-      prepared.pending.expected_account
-        ? `Expected sign-in account: ${prepared.pending.expected_account}`
-        : "No specific account expected — you'll pick in Google's account chooser",
+      `The gws-axi setup page (${collapseHome(prepared.htmlPath)}) must be open in the browser PROFILE/SESSION where the user is signed into ${expected ? `\`${expected}\`` : "the target Google account"}. If initial setup ran in a different browser profile, tell the user to open ${collapseHome(prepared.htmlPath)} in the correct profile first.`,
+      `In that setup page, the user waits for the yellow "Authenticate with Google" button (up to 10s auto-refresh), clicks it${expected ? `, signs in as \`${expected}\`` : ""}, approves scopes, and sees a success page.`,
+      "After confirming the user is ready, run `gws-axi auth login --wait` in a NEW bash turn to block on the callback (up to 5 min timeout).",
     ],
   };
 }
