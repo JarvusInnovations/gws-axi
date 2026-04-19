@@ -64,7 +64,14 @@ export function renderListResponse(options: {
   if (options.header) blocks.push(renderObject(options.header));
   if (options.summary) blocks.push(renderObject(options.summary));
   if (options.items.length === 0) {
-    blocks.push(`${options.name}: ${options.emptyMessage ?? `no ${options.name} found`}`);
+    // Emit an empty array so `<name>` stays polymorphically-stable as a
+    // list type (strict parsers don't need to handle string-valued
+    // variants of the same field). Put the human-readable reason in a
+    // separate `message` sibling when provided.
+    blocks.push(renderObject({ [options.name]: [] }));
+    if (options.emptyMessage) {
+      blocks.push(renderObject({ message: options.emptyMessage }));
+    }
   } else {
     blocks.push(renderList(options.name, options.items, options.schema));
   }

@@ -13,22 +13,32 @@ import {
 export const EVENTS_HELP = `usage: gws-axi calendar events [flags]
 flags[8]:
   --calendar <id>      Calendar to query (default: "primary")
-  --from <iso-or-rel>  Earliest event start (default: now)
-  --to <iso-or-rel>    Latest event start (default: 7 days from now)
+  --from <iso>         Earliest event start (default: now)
+  --to <iso>           Latest event start (default: 7 days from now)
   --limit <n>          Max events to return (default: 25, max: 2500)
   --query <text>       Full-text search across summary/description/location/attendees
   --single-events      Expand recurring events into individual instances (default: true)
-  --fields <list>      Comma-separated extra fields to include in output
+  --fields <list>      Extra columns: status, organizer, location, attendees, description, htmlLink, hangoutLink
   --account <email>    Account override when 2+ are configured
 examples:
   gws-axi calendar events
   gws-axi calendar events --from 2026-04-20T00:00 --to 2026-04-21T00:00
   gws-axi calendar events --calendar team@jarv.us --limit 50
   gws-axi calendar events --query standup
+  gws-axi calendar events --fields status,attendees,location
 time formats:
-  ISO 8601: 2026-04-20T14:00:00-04:00 (precise, timezone explicit)
-  ISO short: 2026-04-20T14:00 (local time)
-  date only: 2026-04-20 (midnight local)
+  Timed events:  ISO 8601 with offset — 2026-04-20T14:00:00-04:00
+  Local time:    2026-04-20T14:00 (interpreted as local tz)
+  Date-only:     2026-04-20 (midnight local)
+output note:
+  The start/end columns use datetime (with offset) for timed events
+  and date-only strings for all-day events. Agents parsing these
+  columns must handle both formats.
+default columns:
+  id, summary, start, end, my_response (your responseStatus if you're
+  an attendee; blank for self-organized events with no attendee list).
+  status column suppressed by default (most events are "confirmed" —
+  add --fields status to see cancelled/tentative).
 `;
 
 interface ParsedFlags {
@@ -118,7 +128,7 @@ function parseDateish(value: string): string {
 function baseSchema(): FieldDef[] {
   return [
     field("id"),
-    truncated("summary", 60),
+    truncated("summary", 80),
     // start.dateTime for timed events, start.date for all-day — pluck either
     {
       name: "start",
@@ -138,11 +148,20 @@ function baseSchema(): FieldDef[] {
         return e?.dateTime ?? e?.date ?? "";
       },
     },
-    mapEnum(
-      "status",
-      { confirmed: "ok", tentative: "tentative", cancelled: "cancelled" },
-      "unknown",
-    ),
+    // my_response: responseStatus of the attendee flagged `self: true`.
+    // Blank when the user is the sole organizer or not in the attendee
+    // list. Most common use: agents filtering for "am I actually going?"
+    {
+      name: "my_response",
+      extract: (item) => {
+        const attendees = item.attendees as
+          | Array<{ self?: boolean; responseStatus?: string }>
+          | undefined;
+        if (!attendees?.length) return "";
+        const me = attendees.find((a) => a.self);
+        return me?.responseStatus ?? "";
+      },
+    },
   ];
 }
 
@@ -150,6 +169,15 @@ function schemaWithExtras(extras: string[]): FieldDef[] {
   const base = baseSchema();
   for (const extra of extras) {
     switch (extra) {
+      case "status":
+        base.push(
+          mapEnum(
+            "status",
+            { confirmed: "ok", tentative: "tentative", cancelled: "cancelled" },
+            "unknown",
+          ),
+        );
+        break;
       case "organizer":
         base.push(pluck("organizer", "email", "organizer"));
         break;
@@ -216,10 +244,23 @@ export async function calendarEventsCommand(
     const res = await api.events.list(requestParams);
     data = res.data;
   } catch (err) {
-    throw translateGoogleError(err, {
+    const translated = translateGoogleError(err, {
       account,
       operation: "calendar.events.list",
     });
+    // Enrich NOT_FOUND with calendar-specific recovery hints; the generic
+    // translator doesn't know the request was scoped to a calendarId.
+    if (translated.code === "NOT_FOUND") {
+      throw new AxiError(
+        `Calendar '${flags.calendar}' not found${flags.calendar === "primary" ? "" : ` (or ${account} doesn't have access)`}`,
+        "CALENDAR_NOT_FOUND",
+        [
+          `Run \`gws-axi calendar calendars --account ${account}\` to list accessible calendars`,
+          `Use --calendar primary to query ${account}'s default calendar`,
+        ],
+      );
+    }
+    throw translated;
   }
 
   const items = (data.items ?? []) as Array<Record<string, unknown>>;
@@ -244,18 +285,38 @@ export async function calendarEventsCommand(
   const suggestions: string[] = [];
   if (items.length > 0) {
     suggestions.push(
-      `Run \`gws-axi calendar get <id>\` for full event details (use the id from the first column)`,
+      `Run \`gws-axi calendar get <id>\` for full event details (id is the first column)`,
     );
-  }
-  if (data.nextPageToken) {
+    if (data.nextPageToken) {
+      suggestions.push(
+        `Increase --limit or narrow --from/--to to see more events (currently capped at ${flags.limit})`,
+      );
+    }
+    if (flags.extraFields.length === 0) {
+      suggestions.push(
+        `Add \`--fields attendees,location,status\` to show more columns`,
+      );
+    }
+    if (flags.calendar === "primary") {
+      suggestions.push(
+        `Query a different calendar with \`--calendar <id>\` (list them with \`gws-axi calendar calendars\`)`,
+      );
+    }
+  } else {
+    // Empty-result-specific hints — don't recycle the general ones above.
+    if (flags.query) {
+      suggestions.push(
+        `Remove --query to show all events in the range, or try a broader search term`,
+      );
+    }
     suggestions.push(
-      `Increase --limit or narrow --from/--to to see more events (currently capped at ${flags.limit})`,
+      `Broaden the time range with --from / --to (current: ${flags.from} → ${flags.to})`,
     );
-  }
-  if (!flags.extraFields.includes("attendees")) {
-    suggestions.push(
-      `Add \`--fields attendees,location\` to show attendee status and location`,
-    );
+    if (flags.calendar === "primary") {
+      suggestions.push(
+        `Try a different calendar with \`--calendar <id>\` (list them with \`gws-axi calendar calendars\`)`,
+      );
+    }
   }
 
   return renderListResponse({
