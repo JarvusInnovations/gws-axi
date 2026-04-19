@@ -16,9 +16,10 @@ flags[9]:
   --from <iso>           Earliest event start (default: 30 days ago)
   --to <iso>             Latest event start (default: 1 year from now)
   --calendars <ids>      Comma-separated calendar IDs (overrides scope default)
-  --include-shared       Include calendars you're subscribed to but don't own
-                         (team members', shared projects, etc.). Default is
-                         owned calendars only (primary + any you created).
+  --include-shared       Also search non-primary calendars: teammate
+                         calendars delegated to you, read-only subscriptions,
+                         anything in calendarList that isn't your primary.
+                         Default is primary-only.
   --limit <n>            Max events PER calendar (default: 50, max: 2500)
   --fields <list>        Extra columns: status, organizer, location, attendees, seen_on
   --no-dedupe            Keep per-calendar duplicates; one row per (calendar, event) pair
@@ -29,9 +30,12 @@ examples:
   gws-axi calendar search --query "chris" --include-shared
   gws-axi calendar search --query "chris" --calendars primary,team@jarv.us
 scope:
-  By default searches ONLY calendars you own (primary + self-created).
-  Team members' calendars you've added to see their availability are
-  skipped unless --include-shared is passed or they're in --calendars.
+  By default searches ONLY your primary calendar (\`primary: true\`).
+  Google Workspace delegation gives full-access teammate calendars the
+  \`accessRole: owner\` role, which makes "owned-by-you" an unreliable
+  heuristic — so we restrict to primary. Use --include-shared to fold
+  in teammate and read-only calendars, or --calendars <ids> for a
+  precise set.
 dedupe:
   Shared events (one event visible on multiple of your calendars) are
   collapsed to one row by default — \`calendar\` shows the first
@@ -228,11 +232,16 @@ export async function calendarSearchCommand(
 
   const api = await calendarClient(account);
 
-  // Resolve which calendars to query. If user specified --calendars, use those
-  // as-is. Otherwise list accessible calendars and by default filter to
-  // owned ones only (primary + calendars the user created). Calendars the
-  // user has merely subscribed to (team members', shared projects) are
-  // opted into via --include-shared.
+  // Resolve which calendars to query. If user specified --calendars, use
+  // those as-is. Otherwise discover via calendarList.list and filter.
+  //
+  // Default scope is PRIMARY ONLY (`primary: true`). In Google Workspace,
+  // calendars a user has been granted full-access delegation for show up
+  // with `accessRole: "owner"` — so filtering by owner would wrongly
+  // include the whole team. --include-shared folds in everything that
+  // isn't primary: teammate calendars (delegated) AND read-only
+  // subscriptions. We treat them the same in one bucket to keep the UX
+  // simple; users who want finer control can pass --calendars <ids>.
   let calendarIds: string[];
   let skippedSharedCount = 0;
   if (flags.calendarFilter) {
@@ -244,14 +253,10 @@ export async function calendarSearchCommand(
         showHidden: false,
       });
       const all = listRes.data.items ?? [];
-      const owned = all.filter(
-        (c) => c.accessRole === "owner" || c.primary === true,
-      );
-      const shared = all.filter(
-        (c) => c.accessRole !== "owner" && c.primary !== true,
-      );
-      const selected = flags.includeShared ? [...owned, ...shared] : owned;
-      if (!flags.includeShared) skippedSharedCount = shared.length;
+      const primaryOnly = all.filter((c) => c.primary === true);
+      const nonPrimary = all.filter((c) => c.primary !== true);
+      const selected = flags.includeShared ? [...primaryOnly, ...nonPrimary] : primaryOnly;
+      if (!flags.includeShared) skippedSharedCount = nonPrimary.length;
       calendarIds = selected
         .map((c) => c.id)
         .filter((id): id is string => typeof id === "string");
