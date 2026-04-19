@@ -400,6 +400,11 @@ export async function awaitPendingAuth(): Promise<StepOutcome> {
 
   const redirectUri = `http://127.0.0.1:${pending.port}/callback`;
 
+  // Snapshot account list BEFORE writing new tokens so we can detect
+  // whether this is the first-ever account (should be promoted to
+  // default) vs. an additional one (default stays put).
+  const accountsBefore = listAccounts();
+
   try {
     const { code, scope } = await waitForCallback(server, pending.state);
     const tokens = await exchangeCode({
@@ -449,7 +454,14 @@ export async function awaitPendingAuth(): Promise<StepOutcome> {
     };
     writeAccountFiles(authenticatedEmail, stored, profile);
 
-    if (!getDefaultAccount()) {
+    // Only promote to default if there were no accounts BEFORE this one.
+    // getDefaultAccount()'s implicit single-account fallback can return
+    // undefined for a newly-added second account (no explicit default
+    // in config.json because the first account was implicitly inferred
+    // via listAccounts().length === 1), which would wrongly overwrite
+    // the existing default. Always persist an explicit default_account
+    // on first auth so subsequent auths don't disturb it.
+    if (accountsBefore.length === 0) {
       setDefaultAccount(authenticatedEmail);
     }
 
@@ -482,6 +494,12 @@ export async function awaitPendingAuth(): Promise<StepOutcome> {
       ],
     };
   } finally {
+    // The browser holds a keep-alive connection to the callback server
+    // after the success/error page renders. server.close() alone only
+    // stops *new* connections — the lingering keep-alive keeps Node's
+    // event loop alive indefinitely. closeAllConnections() forcibly
+    // terminates them so the process exits immediately.
+    server.closeAllConnections();
     server.close();
     clearPendingAuth();
     try {
