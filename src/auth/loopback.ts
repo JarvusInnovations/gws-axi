@@ -20,11 +20,17 @@ import {
 } from "../config.js";
 import { markStepDone } from "./state.js";
 import { allScopes } from "./scopes.js";
+import {
+  clearPendingAuth,
+  isPendingAuthExpired,
+  readPendingAuth,
+  writePendingAuth,
+  type PendingAuth,
+} from "./pending.js";
 import { setupHtmlPath, writeSetupHtml } from "./setup-html.js";
 import type { StepOutcome } from "./steps.js";
 
 function collapseHome(path: string): string {
-  // minimal local helper; avoids circular-ish imports from commands/*
   const home = process.env.HOME ?? "";
   return home && path.startsWith(home) ? `~${path.slice(home.length)}` : path;
 }
@@ -234,32 +240,55 @@ function errorPage(message: string): string {
 </head><body><h1>Authentication failed</h1><pre>${escaped}</pre><p>Close this tab and check the terminal.</p></body></html>`;
 }
 
-export interface LoopbackOptions {
-  expectedAccount?: string;
-}
-
-export async function advanceTokensObtained(
-  options: LoopbackOptions = {},
-): Promise<StepOutcome> {
-  const step = "tokens_obtained" as const;
-  const creds = readCredentials();
-  if (!creds) {
-    return {
-      step,
-      advanced: false,
-      title: "OAuth credentials not yet saved",
-      error: "credentials.json missing — step 4 must complete first",
-      code: "PRECONDITION_FAILED",
-      instructions: ["Re-run: `gws-axi auth setup --credentials-json <path>`"],
-    };
-  }
-
+/**
+ * Reserve a port by binding and immediately closing. The returned port is
+ * likely still free when the caller uses it, but not guaranteed — there's
+ * a microscopic race window. In practice it's not an issue.
+ */
+async function reservePort(): Promise<number> {
   const server = createServer();
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", () => resolve());
   });
   const port = (server.address() as AddressInfo).port;
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  return port;
+}
+
+export interface PrepareOptions {
+  expectedAccount?: string;
+}
+
+export interface PrepareOutcome {
+  pending: PendingAuth;
+  htmlPath: string;
+  credentialsPresent: boolean;
+}
+
+/**
+ * Phase 1: generate the auth URL, reserve a port, persist pending state,
+ * write setup.html with the authenticate button. Returns immediately so the
+ * agent can relay instructions to the user BEFORE any process blocks on a
+ * callback. Call `awaitPendingAuth` after instructing the user.
+ */
+export async function preparePendingAuth(
+  options: PrepareOptions = {},
+): Promise<PrepareOutcome | { error: string; code: string }> {
+  const creds = readCredentials();
+  if (!creds) {
+    return {
+      error: "credentials.json missing — complete setup steps 1-4 first",
+      code: "PRECONDITION_FAILED",
+    };
+  }
+
+  // Clear any stale pending state from a previous abandoned run so the HTML
+  // helper doesn't show two conflicting banners and so a future --wait
+  // doesn't pick up the wrong pending.
+  clearPendingAuth();
+
+  const port = await reservePort();
   const redirectUri = `http://127.0.0.1:${port}/callback`;
 
   const { verifier, challenge } = pkcePair();
@@ -274,45 +303,127 @@ export async function advanceTokensObtained(
     loginHint: options.expectedAccount,
   });
 
-  // Surface the auth URL on setup.html (clickable button) instead of
-  // printing it to the terminal OR launching the browser ourselves. OS-
-  // level `open` picks whatever browser the system considers default,
-  // which is often NOT the browser session the user signed into Google
-  // with (wrong profile, agent's debug browser, etc.). setup.html is
-  // already in the user's chosen browser — clicks there stay in session.
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 10 * 60_000); // 10 min — plenty for user + agent coordination
+  const pending: PendingAuth = {
+    version: 1,
+    url: authUrl,
+    port,
+    verifier,
+    state,
+    expected_account: options.expectedAccount,
+    started_at: now.toISOString(),
+    expires_at: expiresAt.toISOString(),
+  };
+  writePendingAuth(pending);
+
   writeSetupHtml({
     pendingAuth: { url: authUrl, account: options.expectedAccount },
   });
 
-  const htmlPath = collapseHome(setupHtmlPath());
-  process.stderr.write(
-    `Waiting for authentication${options.expectedAccount ? ` as ${options.expectedAccount}` : ""}.\nSwitch to your gws-axi setup page (${htmlPath}) and click "Authenticate with Google".\nIf it's not open, open it manually in the browser where you're signed into the target Google account.\nTimeout: 5 minutes.\n`,
-  );
+  return {
+    pending,
+    htmlPath: setupHtmlPath(),
+    credentialsPresent: true,
+  };
+}
+
+/**
+ * Phase 2: read pending state, start the callback server, block until the
+ * user authenticates (or timeout). Runs the token exchange, fetches the
+ * userinfo to identify the account, writes tokens + profile, updates
+ * default account if first, regenerates setup.html without the banner.
+ */
+export async function awaitPendingAuth(): Promise<StepOutcome> {
+  const step = "tokens_obtained" as const;
+
+  const pending = readPendingAuth();
+  if (!pending) {
+    return {
+      step,
+      advanced: false,
+      title: "No pending authentication",
+      error: "No pending auth flow — run `gws-axi auth login --account <email>` first to prepare",
+      code: "NO_PENDING_AUTH",
+      instructions: [
+        "Run `gws-axi auth login --account <email>` to prepare",
+        "Then run `gws-axi auth login --wait` to block on the user's browser click",
+      ],
+    };
+  }
+
+  if (isPendingAuthExpired(pending)) {
+    clearPendingAuth();
+    return {
+      step,
+      advanced: false,
+      title: "Pending authentication expired",
+      error: "The prepared OAuth flow expired — prepare a new one",
+      code: "PENDING_EXPIRED",
+      instructions: [
+        "Re-run `gws-axi auth login --account <email>` to prepare a fresh flow",
+      ],
+    };
+  }
+
+  const creds = readCredentials();
+  if (!creds) {
+    return {
+      step,
+      advanced: false,
+      title: "Credentials disappeared",
+      error: "credentials.json is missing — was it deleted between prepare and wait?",
+      code: "PRECONDITION_FAILED",
+      instructions: ["Re-run `gws-axi auth setup --credentials-json <path>`"],
+    };
+  }
+
+  const server = createServer();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(pending.port, "127.0.0.1", () => resolve());
+    });
+  } catch (err) {
+    return {
+      step,
+      advanced: false,
+      title: "Could not bind callback server",
+      error: `Port ${pending.port} is not available: ${err instanceof Error ? err.message : String(err)}`,
+      code: "PORT_UNAVAILABLE",
+      instructions: [
+        "Another process is bound to that port. Retry with a fresh flow:",
+        "Run `gws-axi auth login --account <email>` again",
+      ],
+    };
+  }
+
+  const redirectUri = `http://127.0.0.1:${pending.port}/callback`;
 
   try {
-    const { code, scope } = await waitForCallback(server, state);
+    const { code, scope } = await waitForCallback(server, pending.state);
     const tokens = await exchangeCode({
       clientId: creds.client_id,
       clientSecret: creds.client_secret,
       code,
       redirectUri,
-      verifier,
+      verifier: pending.verifier,
     });
     const userinfo = await fetchUserinfo(tokens.access_token);
 
     const authenticatedEmail = normalizeEmail(userinfo.email);
     if (
-      options.expectedAccount &&
-      normalizeEmail(options.expectedAccount) !== authenticatedEmail
+      pending.expected_account &&
+      normalizeEmail(pending.expected_account) !== authenticatedEmail
     ) {
       return {
         step,
         advanced: false,
         title: "Authenticated account does not match expected",
-        error: `Expected ${options.expectedAccount}, got ${authenticatedEmail}`,
+        error: `Expected ${pending.expected_account}, got ${authenticatedEmail}`,
         code: "ACCOUNT_MISMATCH",
         instructions: [
-          `Re-run with: \`gws-axi auth login --account ${options.expectedAccount}\``,
+          `Re-run with: \`gws-axi auth login --account ${pending.expected_account}\``,
           "Make sure you sign in as the correct account in the browser",
         ],
       };
@@ -338,12 +449,10 @@ export async function advanceTokensObtained(
     };
     writeAccountFiles(authenticatedEmail, stored, profile);
 
-    // First account → auto-set as default
     if (!getDefaultAccount()) {
       setDefaultAccount(authenticatedEmail);
     }
 
-    // Mark step 7 done globally (applies to "at least one account authenticated")
     markStepDone(step, {
       accounts: listAccounts(),
       latest_account: authenticatedEmail,
@@ -356,7 +465,7 @@ export async function advanceTokensObtained(
       detail: {
         account: authenticatedEmail,
         scopes_granted: grantedScopes.length,
-        scopes_requested: scopes.length,
+        scopes_requested: allScopes().length,
         tokens_path: tokensPathForAccount(authenticatedEmail),
       },
     };
@@ -369,17 +478,53 @@ export async function advanceTokensObtained(
       code: "OAUTH_FAILED",
       instructions: [
         "Check that the consent screen (step 5) and test user (step 6) are configured",
-        "Re-run: `gws-axi auth login`",
+        "Re-run: `gws-axi auth login --account <email>` to start a fresh flow",
       ],
     };
   } finally {
     server.close();
-    // Clear the pending-auth banner whether we succeeded, failed, or timed
-    // out so the setup page doesn't keep offering a now-dead button.
+    clearPendingAuth();
     try {
       writeSetupHtml();
     } catch {
-      // non-fatal — setup.html regen is cosmetic
+      // non-fatal
     }
   }
+}
+
+/**
+ * Helper for callers (like `auth setup`) that want to expose the prepared
+ * instructions to the user/agent as a StepOutcome. Does NOT block — just
+ * wraps preparePendingAuth into the StepOutcome shape.
+ */
+export async function advanceTokensObtained(
+  options: PrepareOptions = {},
+): Promise<StepOutcome> {
+  const step = "tokens_obtained" as const;
+  const prepared = await preparePendingAuth(options);
+  if ("error" in prepared) {
+    return {
+      step,
+      advanced: false,
+      title: prepared.code === "PRECONDITION_FAILED"
+        ? "OAuth credentials not yet saved"
+        : "OAuth prepare failed",
+      error: prepared.error,
+      code: prepared.code,
+      instructions: ["Re-run: `gws-axi auth setup --credentials-json <path>`"],
+    };
+  }
+  return {
+    step,
+    advanced: false,
+    title: "Step 7 of 7: Authenticate in your browser",
+    instructions: [
+      `Switch to your gws-axi setup page (${collapseHome(prepared.htmlPath)}) — it will refresh within 10 seconds to show an "Authenticate with Google" button`,
+      "Click the button and sign in to Google (as the target account if one was specified). Approve the requested scopes.",
+      "After your browser shows the success page, run `gws-axi auth login --wait` to complete the flow (it will block until the callback is received or 5 min timeout).",
+      prepared.pending.expected_account
+        ? `Expected sign-in account: ${prepared.pending.expected_account}`
+        : "No specific account expected — you'll pick in Google's account chooser",
+    ],
+  };
 }
