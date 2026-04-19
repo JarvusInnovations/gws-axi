@@ -168,7 +168,7 @@ export function writeSetupHtml(options: SetupHtmlOptions = {}): string {
     ? `<div class="pending-auth">
   <div class="pending-auth-title">Waiting for authentication${options.pendingAuth.account ? ` as <code>${options.pendingAuth.account}</code>` : ""}</div>
   <p><strong>Wrong browser profile?</strong> If you're not currently signed into ${options.pendingAuth.account ? `<code>${options.pendingAuth.account}</code>` : "the target account"} in this browser, open <code>~/.config/gws-axi/setup.html</code> in the correct profile before clicking below — Google will pick up whichever account is active here.</p>
-  <a class="auth-button" href="${options.pendingAuth.url}" target="_self">Authenticate with Google &rarr;</a>
+  <a class="auth-button" href="${options.pendingAuth.url}" target="_blank" rel="noopener">Authenticate with Google &rarr;</a>
   <p class="pending-auth-note">The CLI is listening for the callback on 127.0.0.1 — this button only works while <code>gws-axi auth login --wait</code> is blocking in your terminal. Sign in${options.pendingAuth.account ? ` as <code>${options.pendingAuth.account}</code>` : ""} at Google's prompt and approve the scopes.</p>
 </div>`
     : "";
