@@ -95,10 +95,7 @@ export async function advanceGcpProject(
         code: "GCLOUD_REQUIRED",
         instructions: [
           "Install the gcloud CLI: https://cloud.google.com/sdk/docs/install",
-          "Or create a project manually in the Cloud Console and re-run with --project <id>",
-        ],
-        deep_links: [
-          { label: "Create project in Console", url: "https://console.cloud.google.com/projectcreate" },
+          "Or in your gws-axi setup page tab, click 'Create project in Console', then re-run with --project <id>",
         ],
       };
     }
@@ -136,12 +133,9 @@ export async function advanceGcpProject(
       advanced: false,
       title: "Step 1 of 7: Choose a Google Cloud project",
       instructions: [
-        "Create a new project in the Google Cloud Console",
-        "Copy the project ID once created",
+        "In your gws-axi setup page tab, click 'Create project in Console'",
+        "Copy the project ID once the project is created",
         "Re-run: `gws-axi auth setup --project <your-project-id>`",
-      ],
-      deep_links: [
-        { label: "Create project in Console", url: "https://console.cloud.google.com/projectcreate" },
       ],
     };
   }
@@ -201,14 +195,10 @@ export async function advanceApisEnabled(
       advanced: false,
       title: "Step 2 of 7: Enable required APIs",
       instructions: [
-        "Enable these APIs in the Cloud Console API Library:",
+        "In your gws-axi setup page tab, click each 'Enable <service>' button to enable these APIs:",
         ...SERVICES.map((s) => `  - ${s} (${REQUIRED_APIS[s]})`),
-        "Then re-run: `gws-axi auth setup --skip-api-check` (if all enabled)",
+        "Then re-run: `gws-axi auth setup`",
       ],
-      deep_links: SERVICES.map((s) => ({
-        label: `Enable ${s}`,
-        url: consoleUrl(`/apis/library/${REQUIRED_APIS[s]}`, projectId),
-      })),
     };
   }
 
@@ -245,10 +235,9 @@ export async function advanceApisEnabled(
 // STEP 3 — oauth_client (manual only) ──────────────────────────────
 export async function advanceOauthClient(
   _flags: SetupFlags,
-  state: SetupState,
+  _state: SetupState,
 ): Promise<StepOutcome> {
   const step: SetupStepKey = "oauth_client";
-  const projectId = state.steps.gcp_project.project_id as string | undefined;
 
   return {
     step,
@@ -256,18 +245,12 @@ export async function advanceOauthClient(
     title: "Step 3 of 7: Create a Desktop OAuth client (manual)",
     instructions: [
       "Google does not allow Desktop OAuth clients to be created via CLI/API — this step must be done in the Console",
-      "Open the Credentials page linked below",
-      'Click "+ CREATE CREDENTIALS" → OAuth client ID',
+      "In your gws-axi setup page tab, click the 'OAuth clients → Create client' link",
+      "On the OAuth clients page, click '+ CREATE CLIENT'",
       "If prompted to configure the consent screen first, complete Step 5 now and return",
       'Application type: "Desktop app", Name: "gws-axi" (or any name)',
       "Click Create, then DOWNLOAD the credentials JSON",
       "Re-run: `gws-axi auth setup --credentials-json <path-to-downloaded-json>`",
-    ],
-    deep_links: [
-      {
-        label: "Credentials page",
-        url: consoleUrl("/apis/credentials", projectId),
-      },
     ],
   };
 }
@@ -349,29 +332,26 @@ export async function advanceCredentialsSaved(
 // STEP 5 — consent_screen (manual only) ────────────────────────────
 export async function advanceConsentScreen(
   _flags: SetupFlags,
-  state: SetupState,
+  _state: SetupState,
 ): Promise<StepOutcome> {
   const step: SetupStepKey = "consent_screen";
-  const projectId = state.steps.gcp_project.project_id as string | undefined;
 
   return {
     step,
     advanced: false,
     title: "Step 5 of 7: Configure the OAuth consent screen (manual)",
     instructions: [
-      "Open the OAuth consent screen page linked below",
-      'User type: "External" (unless you have a Google Workspace)',
-      'App name: "gws-axi" (or anything)',
-      "User support email + Developer contact email: your email",
-      "Leave other fields blank — we're staying in Testing mode",
-      'Publishing status stays "Testing" (tokens will expire every 7 days — this is expected)',
+      "Google split the OAuth consent screen into two pages — you'll need both",
+      "In your gws-axi setup page tab, click the 'Branding (app name, emails)' link",
+      "  → App name: 'gws-axi' (or anything)",
+      "  → User support email + Developer contact email: your email",
+      "  → Leave logo / homepage / privacy policy blank (optional for Testing mode)",
+      "  → Save",
+      "Then back on the setup page, click the 'Audience (user type)' link",
+      "  → User type: 'External' (unless you have a Google Workspace domain)",
+      "  → Publishing status stays 'Testing' (tokens expire every 7 days — this is expected)",
+      "  → Save",
       "When done, mark this step complete: `gws-axi auth setup --confirm-step consent_screen`",
-    ],
-    deep_links: [
-      {
-        label: "OAuth consent screen",
-        url: consoleUrl("/apis/credentials/consent", projectId),
-      },
     ],
   };
 }
@@ -379,10 +359,9 @@ export async function advanceConsentScreen(
 // STEP 6 — test_user_added (manual only) ───────────────────────────
 export async function advanceTestUserAdded(
   flags: SetupFlags,
-  state: SetupState,
+  _state: SetupState,
 ): Promise<StepOutcome> {
   const step: SetupStepKey = "test_user_added";
-  const projectId = state.steps.gcp_project.project_id as string | undefined;
 
   if (flags.testUserEmail) {
     updateStepMetadata(step, { email: flags.testUserEmail });
@@ -393,18 +372,13 @@ export async function advanceTestUserAdded(
     advanced: false,
     title: "Step 6 of 7: Add yourself as a test user (manual)",
     instructions: [
-      "On the OAuth consent screen page, scroll to \"Test users\"",
-      'Click "+ ADD USERS", enter each Google account you want to use (personal, work, etc.), click Save',
-      "Add every account you plan to authenticate — gws-axi supports multiple accounts (personal + work) with the same OAuth client",
+      "In your gws-axi setup page tab, click the 'Audience → Test users' link",
+      'On that page, scroll to "Test users" and click "+ ADD USERS"',
+      "Enter each Google account you plan to authenticate (personal, work, etc.) and click Save",
+      "gws-axi supports multiple accounts with the same OAuth client — add them all now",
       "Without this, the OAuth flow will reject those users with access_denied",
       "When done, mark complete: `gws-axi auth setup --confirm-step test_user_added --test-user <primary-email>`",
       "After setup completes, use `gws-axi auth login --account <email>` to authenticate each additional account",
-    ],
-    deep_links: [
-      {
-        label: "Test users (consent screen)",
-        url: consoleUrl("/apis/credentials/consent", projectId),
-      },
     ],
   };
 }

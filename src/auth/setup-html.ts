@@ -30,18 +30,42 @@ function linksForStep(
 ): StepLink[] {
   switch (key) {
     case "gcp_project":
-      return [{ label: "Create project in Console", url: "https://console.cloud.google.com/projectcreate" }];
+      return [
+        {
+          label: "Create project in Console",
+          url: "https://console.cloud.google.com/projectcreate",
+        },
+      ];
     case "apis_enabled":
       return SERVICES.map((s) => ({
         label: `Enable ${s}`,
         url: consoleUrl(`/apis/library/${REQUIRED_APIS[s]}`, projectId),
       }));
     case "oauth_client":
-      return [{ label: "Credentials → Create OAuth client ID", url: consoleUrl("/apis/credentials", projectId) }];
+      return [
+        {
+          label: "OAuth clients → Create client",
+          url: consoleUrl("/auth/clients", projectId),
+        },
+      ];
     case "consent_screen":
-      return [{ label: "OAuth consent screen", url: consoleUrl("/apis/credentials/consent", projectId) }];
+      return [
+        {
+          label: "Branding (app name, emails)",
+          url: consoleUrl("/auth/branding", projectId),
+        },
+        {
+          label: "Audience (user type)",
+          url: consoleUrl("/auth/audience", projectId),
+        },
+      ];
     case "test_user_added":
-      return [{ label: "Test users (consent screen)", url: consoleUrl("/apis/credentials/consent", projectId) }];
+      return [
+        {
+          label: "Audience → Test users",
+          url: consoleUrl("/auth/audience", projectId),
+        },
+      ];
     default:
       return [];
   }
@@ -55,10 +79,12 @@ export function writeSetupHtml(): string {
   const state = readSetupState();
   const projectId = state.steps.gcp_project.project_id as string | undefined;
 
+  const nextKey = SETUP_STEP_ORDER.find((k) => !state.steps[k].done);
   const rows = SETUP_STEP_ORDER.map((key, idx) => {
     const step = state.steps[key];
-    const status = step.done ? "✓ done" : "… pending";
-    const statusClass = step.done ? "done" : "pending";
+    const isNext = key === nextKey;
+    const status = step.done ? "✓ done" : isNext ? "→ next" : "… pending";
+    const statusClass = step.done ? "done" : isNext ? "next" : "pending";
     const links = linksForStep(key, projectId)
       .map((l) => `<a href="${l.url}" target="_blank" rel="noopener">${l.label}</a>`)
       .join(" · ");
@@ -70,25 +96,35 @@ export function writeSetupHtml(): string {
     </tr>`;
   }).join("\n");
 
+  const progress = SETUP_STEP_ORDER.filter((k) => state.steps[k].done).length;
+  const now = new Date();
+  const nowLabel = now.toLocaleTimeString();
+
   const html = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="refresh" content="10">
 <title>gws-axi — setup</title>
 <style>
   body { font-family: -apple-system, system-ui, "Segoe UI", sans-serif; max-width: 900px; margin: 40px auto; padding: 24px; color: #222; }
   h1 { margin-top: 0; }
   .summary { background: #f4f8fb; border-left: 4px solid #3b82f6; padding: 12px 16px; border-radius: 4px; margin-bottom: 24px; }
+  .refresh { font-size: 12px; color: #6b7280; margin-top: 6px; }
   table { width: 100%; border-collapse: collapse; }
   th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #e4e4e7; vertical-align: top; }
   th { background: #fafafa; font-size: 13px; color: #555; text-transform: uppercase; letter-spacing: 0.5px; }
+  tr.done { opacity: 0.55; }
   tr.done .status { color: #1a7f37; font-weight: 500; }
+  tr.next { background: #fffbeb; }
+  tr.next .status { color: #b45309; font-weight: 600; }
   tr.pending .status { color: #8a5a00; }
   td.num { font-family: ui-monospace, Menlo, monospace; color: #999; width: 32px; }
   td.name { font-weight: 500; width: 260px; }
   td.links { font-size: 14px; }
   td.links a { display: inline-block; margin-right: 8px; padding: 4px 10px; border-radius: 4px; background: #eff6ff; color: #1d4ed8; text-decoration: none; font-size: 13px; }
   td.links a:hover { background: #dbeafe; }
+  tr.done td.links a { background: #f4f4f5; color: #6b7280; }
   footer { margin-top: 32px; font-size: 13px; color: #666; }
   code { background: #f4f4f5; padding: 2px 6px; border-radius: 3px; font-size: 13px; }
 </style>
@@ -97,8 +133,9 @@ export function writeSetupHtml(): string {
 <h1>gws-axi · setup</h1>
 <div class="summary">
   <strong>Project:</strong> ${projectId ? `<code>${projectId}</code>` : "(not set yet)"}<br>
-  <strong>Progress:</strong> ${SETUP_STEP_ORDER.filter((k) => state.steps[k].done).length} of ${SETUP_STEP_ORDER.length} steps complete<br>
-  <strong>Next:</strong> run <code>gws-axi auth setup</code> in your terminal
+  <strong>Progress:</strong> ${progress} of ${SETUP_STEP_ORDER.length} steps complete
+  ${nextKey ? `<br><strong>Next step:</strong> <code>${STEP_LABELS[nextKey]}</code> — click the buttons below, then run <code>gws-axi auth setup</code> to continue` : `<br><strong>All steps complete</strong> — run <code>gws-axi doctor</code> to verify runtime health`}
+  <div class="refresh">Auto-refreshes every 10 seconds · last rendered at ${nowLabel}</div>
 </div>
 <table>
 <thead><tr><th>#</th><th>Status</th><th>Step</th><th>Console links</th></tr></thead>
@@ -107,7 +144,7 @@ ${rows}
 </tbody>
 </table>
 <footer>
-  This page is regenerated every time you run <code>gws-axi auth setup</code>. Links open the specific Cloud Console page relevant to each step; scoped to your project when known.
+  Click the links above to complete each step in <em>this</em> browser (so you stay in the Google account you're signed into). Regenerated every time you run <code>gws-axi auth setup</code>.
 </footer>
 </body>
 </html>

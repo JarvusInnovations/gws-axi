@@ -190,15 +190,26 @@ async function runSetup(args: string[]): Promise<Record<string, unknown>> {
     return output;
   }
 
+  // Intentionally do NOT include deep_links in CLI output — Console URLs
+  // live only on setup.html. This prevents agents from opening them with
+  // `open <url>`, which lands in whatever browser the OS picks (often the
+  // wrong session / profile / an agent's debug browser). Instructions
+  // reference setup-page buttons by label; the user clicks them in the
+  // browser they chose when they opened setup.html.
   output.next_step = {
     step: nextOutcome.step,
     title: nextOutcome.title,
     ...(nextOutcome.detail ? { detail: nextOutcome.detail } : {}),
     ...(nextOutcome.instructions ? { instructions: nextOutcome.instructions } : {}),
-    ...(nextOutcome.deep_links ? { deep_links: nextOutcome.deep_links } : {}),
   };
 
-  output.setup_html = `file://${setupHtmlPath()}`;
+  const htmlPath = collapseHome(setupHtmlPath());
+  const isFreshSetup = advanced.length === 0 && done === 0;
+
+  output.setup_html = {
+    path: htmlPath,
+    note: "Open this page ONCE in the user's primary browser (the one they use for Google). Keep the tab open — it auto-refreshes as setup progresses. All Console actions happen via buttons on this page.",
+  };
 
   if (nextOutcome.error) {
     throw new AxiError(
@@ -209,13 +220,30 @@ async function runSetup(args: string[]): Promise<Record<string, unknown>> {
   }
 
   const help: string[] = [];
-  if (nextOutcome.deep_links && nextOutcome.deep_links.length > 0) {
-    help.push(`Run \`open ${collapseHome(setupHtmlPath())}\` to open clickable Console links`);
+  if (isFreshSetup) {
+    help.push(
+      `FIRST-TIME: ask the user to open \`${htmlPath}\` in their primary browser (where they're signed into Google) and keep it open. Don't invoke \`open\` yourself — browser session may differ.`,
+    );
+  } else if (stepHasConsoleButtons(nextOutcome.step)) {
+    help.push(
+      `Have the user click the button(s) for step '${nextOutcome.step}' on their gws-axi setup page (should already be open in their primary browser)`,
+    );
   }
   help.push(`Complete step ${nextOutcome.step} and re-run \`gws-axi auth setup\``);
   output.help = help;
 
   return output;
+}
+
+function stepHasConsoleButtons(step: SetupStepKey): boolean {
+  // Steps where the user needs to click something on setup.html. Anything
+  // automatable (gcp_project/apis_enabled with gcloud, tokens_obtained via
+  // loopback) or pure-CLI (credentials_saved) doesn't need the setup page.
+  return (
+    step === "oauth_client" ||
+    step === "consent_screen" ||
+    step === "test_user_added"
+  );
 }
 
 function handlerFor(
