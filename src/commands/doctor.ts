@@ -9,21 +9,31 @@ import {
   setupProgress,
   SETUP_STEP_ORDER,
 } from "../config.js";
+import { probeAccount } from "../google/probe.js";
+import { SERVICES } from "../auth/scopes.js";
 
 function collapseHomeDirectory(path: string): string {
   const home = homedir();
   return path.startsWith(home) ? `~${path.slice(home.length)}` : path;
 }
 
-export const DOCTOR_HELP = `usage: gws-axi doctor [--check <tier|tier.name>] [--summary]
+export const DOCTOR_HELP = `usage: gws-axi doctor [--check <tier|tier.service>] [--summary]
 flags[3]:
-  --check <tier>         Run only one tier (prerequisites|setup|runtime)
-  --check <tier>.<name>  Run one specific check (e.g., runtime.gmail)
-  --summary              One-line summary output (used by SessionStart hook)
+  --check <tier>           Run only one tier (prerequisites|setup|runtime)
+  --check runtime.<service> Run probes for one service (${SERVICES.join(" | ")})
+  --summary                One-line summary output (used by SessionStart hook)
+tiers:
+  prerequisites  gcloud presence, node version, config dir perms
+  setup          progress of the 7-step BYO onboarding
+  runtime        live per-account × per-service API probes (token, scope, reachability)
+exit codes:
+  0  all checks passed (or warnings only)
+  1  at least one failing check
 examples:
   gws-axi doctor
   gws-axi doctor --summary
   gws-axi doctor --check prerequisites
+  gws-axi doctor --check runtime
   gws-axi doctor --check runtime.gmail
 `;
 
@@ -107,28 +117,48 @@ function checkSetup(): CheckRow[] {
   });
 }
 
-function checkRuntime(): CheckRow[] {
+interface RuntimeRow {
+  account: string;
+  service: string;
+  status: "ok" | "warn" | "fail";
+  detail: string;
+}
+
+async function checkRuntime(serviceFilter?: string): Promise<RuntimeRow[]> {
   const accounts = listAccounts();
   if (accounts.length === 0) {
     return [
       {
-        check: "accounts",
+        account: "(none)",
+        service: "—",
         status: "fail",
         detail: "no accounts authenticated — run `gws-axi auth login`",
       },
     ];
   }
-  // Per-service live probes are not yet implemented; this stub will be
-  // replaced by real calls to users.getProfile (Gmail), calendarList.list,
-  // etc. once service clients are wired. For now, just report that tokens
-  // exist for each account.
-  return accounts.flatMap((email) => [
-    {
-      check: `${email} · tokens`,
-      status: "warn" as const,
-      detail: "stored (live API probes not yet implemented)",
-    },
-  ]);
+
+  // Probe all accounts in parallel. Per-account, services that can run in
+  // parallel (gmail/calendar/drive) already do inside probeAccount.
+  const perAccount = await Promise.all(
+    accounts.map(async (email) => {
+      const results = await probeAccount(email);
+      return { email, results };
+    }),
+  );
+
+  const rows: RuntimeRow[] = [];
+  for (const { email, results } of perAccount) {
+    for (const result of results) {
+      if (serviceFilter && result.service !== serviceFilter) continue;
+      rows.push({
+        account: email,
+        service: result.service,
+        status: result.status,
+        detail: result.detail,
+      });
+    }
+  }
+  return rows;
 }
 
 export async function doctorCommand(
@@ -140,22 +170,29 @@ export async function doctorCommand(
 
   const [tier, name] = checkTarget ? checkTarget.split(".") : [undefined, undefined];
 
+  if (tier && !["prerequisites", "setup", "runtime"].includes(tier)) {
+    return {
+      error: `Unknown tier: ${tier}`,
+      code: "VALIDATION_ERROR",
+      help: ["Valid tiers: prerequisites, setup, runtime"],
+    };
+  }
+
   const prereqs = !tier || tier === "prerequisites" ? checkPrerequisites() : [];
   const setupRows = !tier || tier === "setup" ? checkSetup() : [];
-  const runtimeRows = !tier || tier === "runtime" ? checkRuntime() : [];
-
-  const filteredRuntime = name
-    ? runtimeRows.filter((r) => r.check === name)
-    : runtimeRows;
+  const runtimeRows =
+    !tier || tier === "runtime"
+      ? await checkRuntime(tier === "runtime" ? name : undefined)
+      : [];
 
   const failing =
     prereqs.filter((r) => r.status === "fail").length +
     setupRows.filter((r) => r.status === "fail").length +
-    filteredRuntime.filter((r) => r.status === "fail").length;
+    runtimeRows.filter((r) => r.status === "fail").length;
   const warning =
     prereqs.filter((r) => r.status === "warn").length +
     setupRows.filter((r) => r.status === "warn").length +
-    filteredRuntime.filter((r) => r.status === "warn").length;
+    runtimeRows.filter((r) => r.status === "warn").length;
 
   if (summaryMode) {
     const state = readSetupState();
@@ -186,12 +223,35 @@ export async function doctorCommand(
   }
   if (prereqs.length > 0) output.prerequisites = prereqs;
   if (setupRows.length > 0) output.setup = setupRows;
-  if (filteredRuntime.length > 0) output.runtime = filteredRuntime;
+  if (runtimeRows.length > 0) output.runtime = runtimeRows;
   output.summary = `${failing} failing, ${warning} warning`;
 
   const help: string[] = [];
-  if (failing > 0 || warning > 0) {
-    help.push("Run `gws-axi auth setup` if any setup steps failed");
+  const setupFailing = setupRows.some((r) => r.status === "fail");
+  const runtimeFailing = runtimeRows.some((r) => r.status === "fail");
+  const tokenFailures = runtimeRows.filter(
+    (r) => r.status === "fail" && /401|revoked|refresh/i.test(r.detail),
+  );
+  const scopeFailures = runtimeRows.filter(
+    (r) => r.status === "fail" && /scope/i.test(r.detail),
+  );
+  if (setupFailing) {
+    help.push("Run `gws-axi auth setup` to advance incomplete setup steps");
+  }
+  if (tokenFailures.length > 0) {
+    const accts = [...new Set(tokenFailures.map((r) => r.account))];
+    help.push(
+      `Token issues detected on ${accts.join(", ")} — run \`gws-axi auth login --account <email>\` + \`auth login --wait\` to re-auth`,
+    );
+  }
+  if (scopeFailures.length > 0) {
+    const accts = [...new Set(scopeFailures.map((r) => r.account))];
+    help.push(
+      `Scope gaps on ${accts.join(", ")} — re-auth to re-consent to the full scope set`,
+    );
+  }
+  if (failing === 0 && warning === 0) {
+    help.push("All checks passed — you can start using service commands");
   }
   help.push("Run `gws-axi doctor --help` for check targeting");
   output.help = help;
