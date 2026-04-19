@@ -388,10 +388,10 @@ async function runLogin(args: string[]): Promise<Record<string, unknown>> {
     instructions: [
       `The gws-axi setup page (${htmlPath}) must be open in the browser PROFILE/SESSION where the user is signed into ${normalizedAccount ? `\`${normalizedAccount}\`` : "the target Google account"}. This may be a DIFFERENT browser profile than the one used for initial setup (e.g., personal Chrome profile vs work). If the setup page is open in the wrong profile, tell the user to open ${htmlPath} in the correct profile.`,
       `In that setup page tab, the user waits for the yellow "Authenticate with Google" button to appear (up to 10s auto-refresh), clicks it, signs in${normalizedAccount ? ` as \`${normalizedAccount}\`` : ""}, approves the requested scopes, and sees the success page.`,
-      "AFTER confirming the user is ready, run `gws-axi auth login --wait` in a NEW bash turn to block on the callback (up to 5 minutes).",
+      "After RELAYING these instructions to the user, IMMEDIATELY run `gws-axi auth login --wait` in a new bash turn — do NOT wait for the user to confirm they're ready. The wait command binds the callback server; it must be listening BEFORE the user clicks. If you delay, the user's click hits an unreachable localhost URL. The wait is harmless: it just listens for up to 5 minutes while the user takes their time.",
     ],
     help: [
-      "This command DID NOT start waiting yet. Relay instructions to the user, confirm they have setup.html open in the correct browser profile, then run `gws-axi auth login --wait`.",
+      "Relay instructions, then IMMEDIATELY run `gws-axi auth login --wait` in the next bash turn — no user-confirmation step between them.",
       "The pending flow expires in 10 minutes — if you don't --wait by then, re-run this prepare step",
     ],
   };

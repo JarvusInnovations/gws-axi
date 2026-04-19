@@ -522,7 +522,7 @@ export async function advanceTokensObtained(
     instructions: [
       `The gws-axi setup page (${collapseHome(prepared.htmlPath)}) must be open in the browser PROFILE/SESSION where the user is signed into ${expected ? `\`${expected}\`` : "the target Google account"}. If initial setup ran in a different browser profile, tell the user to open ${collapseHome(prepared.htmlPath)} in the correct profile first.`,
       `In that setup page, the user waits for the yellow "Authenticate with Google" button (up to 10s auto-refresh), clicks it${expected ? `, signs in as \`${expected}\`` : ""}, approves scopes, and sees a success page.`,
-      "After confirming the user is ready, run `gws-axi auth login --wait` in a NEW bash turn to block on the callback (up to 5 min timeout).",
+      "After RELAYING these instructions to the user, IMMEDIATELY run `gws-axi auth login --wait` in a new bash turn — do NOT wait for the user to confirm they're ready. The callback server must be listening BEFORE the user clicks. If you delay, the click hits an unreachable localhost URL. The wait is harmless: it just listens for up to 5 min while the user takes their time.",
     ],
   };
 }
