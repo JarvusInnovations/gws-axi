@@ -1,11 +1,24 @@
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import {
+  createServer,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
 import { AddressInfo } from "node:net";
 import { dirname } from "node:path";
 import { URL } from "node:url";
 import open from "open";
-import { credentialsPath, tokensPath } from "../config.js";
+import {
+  credentialsPath,
+  listAccounts,
+  normalizeEmail,
+  profilePathForAccount,
+  setDefaultAccount,
+  tokensPathForAccount,
+  getDefaultAccount,
+} from "../config.js";
 import { markStepDone } from "./state.js";
 import { allScopes } from "./scopes.js";
 import type { StepOutcome } from "./steps.js";
@@ -38,6 +51,15 @@ export interface StoredTokens {
   obtained_at: string;
 }
 
+export interface StoredProfile {
+  email: string;
+  verified_email: boolean;
+  name?: string;
+  picture?: string;
+  sub: string;
+  updated_at: string;
+}
+
 function readCredentials(): InstalledCreds | null {
   if (!existsSync(credentialsPath())) return null;
   try {
@@ -62,10 +84,16 @@ function pkcePair(): { verifier: string; challenge: string } {
   return { verifier, challenge };
 }
 
-function writeTokens(tokens: StoredTokens): void {
-  const path = tokensPath();
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(tokens, null, 2)}\n`, { mode: 0o600 });
+function writeAccountFiles(
+  email: string,
+  tokens: StoredTokens,
+  profile: StoredProfile,
+): void {
+  const tokensP = tokensPathForAccount(email);
+  const profileP = profilePathForAccount(email);
+  mkdirSync(dirname(tokensP), { recursive: true });
+  writeFileSync(tokensP, `${JSON.stringify(tokens, null, 2)}\n`, { mode: 0o600 });
+  writeFileSync(profileP, `${JSON.stringify(profile, null, 2)}\n`);
 }
 
 function buildAuthUrl(params: {
@@ -74,6 +102,7 @@ function buildAuthUrl(params: {
   scopes: string[];
   challenge: string;
   state: string;
+  loginHint?: string;
 }): string {
   const u = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   u.searchParams.set("client_id", params.clientId);
@@ -86,6 +115,9 @@ function buildAuthUrl(params: {
   u.searchParams.set("access_type", "offline");
   u.searchParams.set("prompt", "consent");
   u.searchParams.set("include_granted_scopes", "true");
+  if (params.loginHint) {
+    u.searchParams.set("login_hint", params.loginHint);
+  }
   return u.toString();
 }
 
@@ -116,7 +148,28 @@ async function exchangeCode(params: {
   return (await res.json()) as TokenResponse;
 }
 
-async function waitForCallback(server: Server, expectedState: string): Promise<{ code: string; scope?: string }> {
+interface UserInfo {
+  sub: string;
+  email: string;
+  email_verified: boolean;
+  name?: string;
+  picture?: string;
+}
+
+async function fetchUserinfo(accessToken: string): Promise<UserInfo> {
+  const res = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
+    headers: { authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) {
+    throw new Error(`userinfo failed (${res.status})`);
+  }
+  return (await res.json()) as UserInfo;
+}
+
+async function waitForCallback(
+  server: Server,
+  expectedState: string,
+): Promise<{ code: string; scope?: string }> {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       reject(new Error("Timed out waiting for OAuth callback after 5 minutes"));
@@ -166,13 +219,22 @@ function successPage(): string {
 }
 
 function errorPage(message: string): string {
+  const escaped = message.replace(/[<>&]/g, (c) =>
+    ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c] ?? c,
+  );
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>gws-axi — error</title>
 <style>body{font-family:-apple-system,system-ui,sans-serif;max-width:480px;margin:60px auto;padding:24px;color:#222}h1{color:#c62828}pre{background:#f4f4f4;padding:12px;border-radius:4px}</style>
-</head><body><h1>Authentication failed</h1><pre>${message.replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c] ?? c)}</pre><p>Close this tab and check the terminal.</p></body></html>`;
+</head><body><h1>Authentication failed</h1><pre>${escaped}</pre><p>Close this tab and check the terminal.</p></body></html>`;
 }
 
-export async function advanceTokensObtained(): Promise<StepOutcome> {
+export interface LoopbackOptions {
+  expectedAccount?: string;
+}
+
+export async function advanceTokensObtained(
+  options: LoopbackOptions = {},
+): Promise<StepOutcome> {
   const step = "tokens_obtained" as const;
   const creds = readCredentials();
   if (!creds) {
@@ -203,9 +265,12 @@ export async function advanceTokensObtained(): Promise<StepOutcome> {
     scopes,
     challenge,
     state,
+    loginHint: options.expectedAccount,
   });
 
-  process.stderr.write(`Opening browser to authenticate...\nIf it doesn't open, paste this URL manually:\n\n${authUrl}\n\n`);
+  process.stderr.write(
+    `Opening browser to authenticate${options.expectedAccount ? ` as ${options.expectedAccount}` : ""}...\nIf it doesn't open, paste this URL manually:\n\n${authUrl}\n\n`,
+  );
 
   try {
     await open(authUrl);
@@ -222,6 +287,26 @@ export async function advanceTokensObtained(): Promise<StepOutcome> {
       redirectUri,
       verifier,
     });
+    const userinfo = await fetchUserinfo(tokens.access_token);
+
+    const authenticatedEmail = normalizeEmail(userinfo.email);
+    if (
+      options.expectedAccount &&
+      normalizeEmail(options.expectedAccount) !== authenticatedEmail
+    ) {
+      return {
+        step,
+        advanced: false,
+        title: "Authenticated account does not match expected",
+        error: `Expected ${options.expectedAccount}, got ${authenticatedEmail}`,
+        code: "ACCOUNT_MISMATCH",
+        instructions: [
+          `Re-run with: \`gws-axi auth login --account ${options.expectedAccount}\``,
+          "Make sure you sign in as the correct account in the browser",
+        ],
+      };
+    }
+
     const grantedScopes = (scope ?? tokens.scope).split(" ").filter(Boolean);
     const stored: StoredTokens = {
       client_id: creds.client_id,
@@ -232,19 +317,36 @@ export async function advanceTokensObtained(): Promise<StepOutcome> {
       token_type: tokens.token_type,
       obtained_at: new Date().toISOString(),
     };
-    writeTokens(stored);
+    const profile: StoredProfile = {
+      email: authenticatedEmail,
+      verified_email: userinfo.email_verified,
+      name: userinfo.name,
+      picture: userinfo.picture,
+      sub: userinfo.sub,
+      updated_at: new Date().toISOString(),
+    };
+    writeAccountFiles(authenticatedEmail, stored, profile);
+
+    // First account → auto-set as default
+    if (!getDefaultAccount()) {
+      setDefaultAccount(authenticatedEmail);
+    }
+
+    // Mark step 7 done globally (applies to "at least one account authenticated")
     markStepDone(step, {
-      scopes_granted: grantedScopes,
-      account: "pending", // filled in by doctor runtime check via userinfo
+      accounts: listAccounts(),
+      latest_account: authenticatedEmail,
     });
+
     return {
       step,
       advanced: true,
       title: "Tokens obtained",
       detail: {
+        account: authenticatedEmail,
         scopes_granted: grantedScopes.length,
         scopes_requested: scopes.length,
-        tokens_path: tokensPath(),
+        tokens_path: tokensPathForAccount(authenticatedEmail),
       },
     };
   } catch (err) {
