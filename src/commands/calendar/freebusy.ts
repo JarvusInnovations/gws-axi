@@ -1,7 +1,7 @@
-import { AxiError } from "axi-sdk-js";
 import type { calendar_v3 } from "googleapis";
 import { calendarClient, translateGoogleError } from "../../google/client.js";
 import { renderList, renderObject, joinBlocks, renderHelp } from "../../output/index.js";
+import { parseDateishFlag, toLocalOffsetISO } from "./dateish.js";
 
 export const FREEBUSY_HELP = `usage: gws-axi calendar freebusy [flags]
 flags[4]:
@@ -29,19 +29,6 @@ interface ParsedFlags {
   to: string;
 }
 
-function parseDateish(value: string | undefined, fallback: Date): string {
-  if (!value) return fallback.toISOString();
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    throw new AxiError(
-      `Cannot parse date/time: ${value}`,
-      "VALIDATION_ERROR",
-      ["Use ISO 8601 (e.g. 2026-04-22T09:00 or 2026-04-22)"],
-    );
-  }
-  return parsed.toISOString();
-}
-
 function parseFlags(args: string[]): ParsedFlags {
   const now = new Date();
   const startOfDay = new Date(now);
@@ -67,11 +54,11 @@ function parseFlags(args: string[]): ParsedFlags {
         i++;
         break;
       case "--from":
-        flags.from = parseDateish(next, startOfDay);
+        flags.from = parseDateishFlag(next);
         i++;
         break;
       case "--to":
-        flags.to = parseDateish(next, endOfDay);
+        flags.to = parseDateishFlag(next);
         i++;
         break;
     }
@@ -109,22 +96,49 @@ export async function calendarFreebusyCommand(
     });
   }
 
-  const perCalendarErrors: Array<{ calendar: string; error: string }> = [];
+  interface CoverageRow {
+    calendar: string;
+    status: "ok" | "error";
+    busy_blocks: number;
+    detail: string;
+  }
+  const coverage: CoverageRow[] = [];
   const rows: BusyRow[] = [];
-  const calendars = data.calendars ?? {};
-  for (const [calId, info] of Object.entries(calendars)) {
-    if (info.errors?.length) {
-      perCalendarErrors.push({
+  const responseCalendars = data.calendars ?? {};
+  for (const calId of flags.calendars) {
+    const info = responseCalendars[calId];
+    if (!info) {
+      coverage.push({
         calendar: calId,
-        error: info.errors.map((e) => e.reason ?? "unknown").join(", "),
+        status: "error",
+        busy_blocks: 0,
+        detail: "missing from response",
       });
       continue;
     }
-    for (const block of info.busy ?? []) {
+    if (info.errors?.length) {
+      coverage.push({
+        calendar: calId,
+        status: "error",
+        busy_blocks: 0,
+        detail: info.errors.map((e) => e.reason ?? "unknown").join(", "),
+      });
+      continue;
+    }
+    const busy = info.busy ?? [];
+    coverage.push({
+      calendar: calId,
+      status: "ok",
+      busy_blocks: busy.length,
+      detail: busy.length === 0 ? "free for entire range" : "",
+    });
+    for (const block of busy) {
       rows.push({
         calendar: calId,
-        start: block.start ?? "",
-        end: block.end ?? "",
+        // Google returns freebusy timestamps in UTC (trailing Z). Convert to
+        // local-with-offset so format matches `calendar events` output.
+        start: toLocalOffsetISO(block.start ?? ""),
+        end: toLocalOffsetISO(block.end ?? ""),
       });
     }
   }
@@ -132,33 +146,39 @@ export async function calendarFreebusyCommand(
   rows.sort((a, b) => a.start.localeCompare(b.start));
 
   const blocks: string[] = [];
+  const erroredCount = coverage.filter((c) => c.status === "error").length;
   blocks.push(
     renderObject({
       account,
-      range: `${flags.from} → ${flags.to}`,
-      calendars: flags.calendars,
+      range: `${toLocalOffsetISO(flags.from)} → ${toLocalOffsetISO(flags.to)}`,
       busy_block_count: rows.length,
     }),
   );
 
-  if (perCalendarErrors.length > 0) {
-    blocks.push(
-      renderList(
-        "calendar_errors",
-        perCalendarErrors as unknown as Array<Record<string, unknown>>,
-        [
-          { name: "calendar", extract: (r) => r.calendar },
-          { name: "error", extract: (r) => r.error },
-        ],
-      ),
-    );
-  }
+  // Always render per-calendar coverage so agents can confirm each requested
+  // calendar was actually reached. Distinguishes "free" from "errored".
+  blocks.push(
+    renderList(
+      "coverage",
+      coverage as unknown as Array<Record<string, unknown>>,
+      [
+        { name: "calendar", extract: (r) => r.calendar },
+        { name: "status", extract: (r) => r.status },
+        { name: "busy_blocks", extract: (r) => r.busy_blocks },
+        { name: "detail", extract: (r) => r.detail },
+      ],
+    ),
+  );
 
   if (rows.length === 0) {
     blocks.push(renderObject({ busy: [] }));
+    const okCalendars = coverage.filter((c) => c.status === "ok").map((c) => c.calendar);
     blocks.push(
       renderObject({
-        message: `no busy time — ${flags.calendars.join(", ")} free for the entire range`,
+        message:
+          okCalendars.length > 0
+            ? `no busy time — ${okCalendars.join(", ")} free for the entire range`
+            : "no successfully-queried calendars had busy blocks",
       }),
     );
   } else {
@@ -177,9 +197,14 @@ export async function calendarFreebusyCommand(
       `Add more calendars with --calendars primary,team@... to see cross-calendar availability`,
     );
   }
-  if (rows.length === 0) {
+  if (rows.length === 0 && erroredCount === 0) {
     suggestions.push(
       `Widen the time range with --from/--to to verify availability at other times`,
+    );
+  }
+  if (erroredCount > 0) {
+    suggestions.push(
+      `${erroredCount} calendar(s) returned errors — check ids or your access rights`,
     );
   }
   if (suggestions.length > 0) {

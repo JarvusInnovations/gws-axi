@@ -9,6 +9,7 @@ import {
   truncated,
   type FieldDef,
 } from "../../output/index.js";
+import { parseDateishFlag } from "./dateish.js";
 
 export const EVENTS_HELP = `usage: gws-axi calendar events [flags]
 flags[8]:
@@ -71,11 +72,11 @@ function parseEventsFlags(args: string[]): ParsedFlags {
         i++;
         break;
       case "--from":
-        flags.from = parseDateish(next);
+        flags.from = parseDateishFlag(next);
         i++;
         break;
       case "--to":
-        flags.to = parseDateish(next);
+        flags.to = parseDateishFlag(next);
         i++;
         break;
       case "--limit":
@@ -97,32 +98,6 @@ function parseEventsFlags(args: string[]): ParsedFlags {
     }
   }
   return flags;
-}
-
-function parseDateish(value: string): string {
-  if (!value) {
-    throw new AxiError(
-      "Missing date/time value",
-      "VALIDATION_ERROR",
-      ["Use ISO format: 2026-04-20T14:00 or just 2026-04-20"],
-    );
-  }
-  // Accept ISO 8601 directly. If it parses, use the parsed form (normalizes
-  // time zone). If not, raise a clear error — we're deliberately not doing
-  // natural-language parsing in v1.
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    throw new AxiError(
-      `Cannot parse date/time: ${value}`,
-      "VALIDATION_ERROR",
-      [
-        "Use ISO 8601 format: 2026-04-20T14:00:00-04:00",
-        "Or date-only: 2026-04-20",
-        "Natural-language dates (e.g. 'tomorrow 2pm') are not supported in v1",
-      ],
-    );
-  }
-  return parsed.toISOString();
 }
 
 function baseSchema(): FieldDef[] {
