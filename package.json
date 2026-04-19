@@ -1,0 +1,45 @@
+{
+  "name": "gws-axi",
+  "version": "0.0.1",
+  "description": "AXI-compliant Google Workspace CLI — token-efficient TOON output, agent-guided auth setup, unified interface for Gmail, Calendar, Docs, Drive, Slides",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JarvusInnovations/gws-axi.git"
+  },
+  "keywords": [
+    "google",
+    "google-workspace",
+    "gmail",
+    "calendar",
+    "docs",
+    "drive",
+    "slides",
+    "cli",
+    "agent",
+    "axi",
+    "toon"
+  ],
+  "bin": {
+    "gws-axi": "dist/bin/gws-axi.js"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc && chmod +x dist/bin/gws-axi.js",
+    "dev": "bun bin/gws-axi.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "bun run build"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  }
+}
