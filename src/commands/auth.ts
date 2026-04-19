@@ -3,12 +3,20 @@ import { homedir } from "node:os";
 import { AxiError } from "axi-sdk-js";
 import {
   credentialsPath,
+  getDefaultAccount,
+  hasAccount,
+  listAccounts,
+  normalizeEmail,
+  profilePathForAccount,
   readSetupState,
+  removeAccount,
+  setDefaultAccount,
   setupProgress,
-  tokensPath,
+  tokensPathForAccount,
   SETUP_STEP_ORDER,
   type SetupStepKey,
 } from "../config.js";
+import { readFileSync } from "node:fs";
 import { markStepDone, resetFrom } from "../auth/state.js";
 import {
   advanceApisEnabled,
@@ -24,11 +32,14 @@ import { advanceTokensObtained } from "../auth/loopback.js";
 import { setupHtmlPath, writeSetupHtml } from "../auth/setup-html.js";
 
 export const AUTH_HELP = `usage: gws-axi auth <subcommand> [flags]
-subcommands[4]:
-  setup   Progressive agent-guided OAuth setup (run repeatedly until complete)
-  login   Re-run the OAuth loopback flow (step 7 only)
-  status  Terse one-line status
-  reset   Clear setup state, optionally from a specific step
+subcommands[7]:
+  setup     Progressive agent-guided OAuth setup (run repeatedly until complete)
+  login     Run OAuth loopback flow; --account to add/re-auth a specific account
+  accounts  List authenticated accounts
+  use       Set the default account: gws-axi auth use <email>
+  revoke    Delete an account's tokens: gws-axi auth revoke <email>
+  status    Terse one-line status
+  reset     Clear setup state, optionally from a specific step
 setup flags[6]:
   --project <id>              Use existing GCP project (step 1)
   --create-project <id>       Create new GCP project (step 1, needs gcloud)
@@ -36,25 +47,34 @@ setup flags[6]:
   --credentials-json <path>   Path to downloaded OAuth client JSON (step 4)
   --test-user <email>         Record test user email (step 6 metadata)
   --confirm-step <step>       Mark a manual step done (consent_screen, test_user_added)
+login flags[1]:
+  --account <email>           Authenticate or re-auth a specific account
 reset flags[1]:
   --from <step>               Clear from this step forward
 examples:
   gws-axi auth setup
   gws-axi auth setup --create-project gws-axi-chris-9f3a
   gws-axi auth setup --credentials-json ~/Downloads/client_secret_xxx.json
-  gws-axi auth setup --confirm-step consent_screen
-  gws-axi auth login
-  gws-axi auth reset --from oauth_client
+  gws-axi auth login --account chris@personal.com
+  gws-axi auth accounts
+  gws-axi auth use chris@jarv.us
+  gws-axi auth revoke chris@personal.com
 `;
 
-function parseFlags(args: string[]): {
+interface ParsedArgs {
   flags: SetupFlags;
   confirmStep?: SetupStepKey;
   resetFromKey?: SetupStepKey;
-} {
+  account?: string;
+  positional: string[];
+}
+
+function parseArgs(args: string[]): ParsedArgs {
   const flags: SetupFlags = {};
+  const positional: string[] = [];
   let confirmStep: SetupStepKey | undefined;
   let resetFromKey: SetupStepKey | undefined;
+  let account: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -88,9 +108,17 @@ function parseFlags(args: string[]): {
         resetFromKey = next as SetupStepKey;
         i++;
         break;
+      case "--account":
+        account = next;
+        i++;
+        break;
+      default:
+        if (!arg.startsWith("--")) {
+          positional.push(arg);
+        }
     }
   }
-  return { flags, confirmStep, resetFromKey };
+  return { flags, confirmStep, resetFromKey, account, positional };
 }
 
 function expandHome(path: string | undefined): string | undefined {
@@ -99,7 +127,7 @@ function expandHome(path: string | undefined): string | undefined {
 }
 
 async function runSetup(args: string[]): Promise<Record<string, unknown>> {
-  const { flags, confirmStep } = parseFlags(args);
+  const { flags, confirmStep } = parseArgs(args);
 
   if (confirmStep) {
     if (!SETUP_STEP_ORDER.includes(confirmStep)) {
@@ -119,7 +147,6 @@ async function runSetup(args: string[]): Promise<Record<string, unknown>> {
   const advanced: Array<{ step: SetupStepKey; detail: string }> = [];
   let nextOutcome: StepOutcome | null = null;
 
-  // Loop until we hit a non-advancing step or completion
   for (let i = 0; i < SETUP_STEP_ORDER.length; i++) {
     const state = readSetupState();
     const { nextStep } = setupProgress(state);
@@ -152,11 +179,13 @@ async function runSetup(args: string[]): Promise<Record<string, unknown>> {
   }
 
   if (!nextOutcome) {
+    const accounts = listAccounts();
     output.status = "complete";
+    output.accounts = accounts;
     output.help = [
       "All setup steps complete",
       "Run `gws-axi doctor` to verify runtime health",
-      "Tokens are in " + collapseHome(tokensPath()),
+      "Run `gws-axi auth login --account <email>` to add another account",
     ];
     return output;
   }
@@ -213,6 +242,7 @@ function summarizeDetail(detail: Record<string, unknown> | undefined): string {
   if (typeof detail.project_id === "string") return detail.project_id;
   if (typeof detail.path === "string") return collapseHome(detail.path);
   if (Array.isArray(detail.apis)) return `${detail.apis.length} APIs enabled`;
+  if (typeof detail.account === "string") return detail.account;
   if (typeof detail.scopes_granted === "number") {
     return `${detail.scopes_granted} scopes granted`;
   }
@@ -224,7 +254,8 @@ function collapseHome(path: string): string {
   return path.startsWith(home) ? `~${path.slice(home.length)}` : path;
 }
 
-async function runLogin(): Promise<Record<string, unknown>> {
+async function runLogin(args: string[]): Promise<Record<string, unknown>> {
+  const { account } = parseArgs(args);
   if (!existsSync(credentialsPath())) {
     throw new AxiError(
       "OAuth credentials not saved — complete setup steps 1-4 first",
@@ -232,11 +263,15 @@ async function runLogin(): Promise<Record<string, unknown>> {
       ["Run `gws-axi auth setup` to continue progressive setup"],
     );
   }
-  const outcome = await advanceTokensObtained();
+  const outcome = await advanceTokensObtained({
+    expectedAccount: account ? normalizeEmail(account) : undefined,
+  });
   if (outcome.advanced) {
     return {
       status: "ok",
       ...(outcome.detail ?? {}),
+      accounts: listAccounts(),
+      default_account: getDefaultAccount(),
       help: ["Run `gws-axi doctor` to verify runtime health"],
     };
   }
@@ -247,27 +282,141 @@ async function runLogin(): Promise<Record<string, unknown>> {
   );
 }
 
+interface AccountSummary {
+  email: string;
+  default: boolean;
+  name?: string;
+  obtained_at?: string;
+  scopes?: number;
+}
+
+function runAccounts(): Record<string, unknown> {
+  const emails = listAccounts();
+  if (emails.length === 0) {
+    return {
+      accounts: [],
+      help: ["Run `gws-axi auth setup` (or `gws-axi auth login`) to add an account"],
+    };
+  }
+  const defaultAccount = getDefaultAccount();
+  const summaries: AccountSummary[] = emails.map((email) => {
+    const summary: AccountSummary = { email, default: email === defaultAccount };
+    try {
+      const profile = JSON.parse(readFileSync(profilePathForAccount(email), "utf-8")) as {
+        name?: string;
+      };
+      summary.name = profile.name;
+    } catch {
+      // no profile yet
+    }
+    try {
+      const tokens = JSON.parse(readFileSync(tokensPathForAccount(email), "utf-8")) as {
+        obtained_at?: string;
+        scope?: string;
+      };
+      summary.obtained_at = tokens.obtained_at;
+      summary.scopes = tokens.scope ? tokens.scope.split(" ").filter(Boolean).length : 0;
+    } catch {
+      // no tokens file (shouldn't happen given listAccounts filters on this)
+    }
+    return summary;
+  });
+  return {
+    count: emails.length,
+    accounts: summaries,
+    default: defaultAccount,
+    help: [
+      "Run `gws-axi auth use <email>` to change default",
+      "Run `gws-axi auth login --account <email>` to add another",
+      "Run `gws-axi auth revoke <email>` to remove one",
+    ],
+  };
+}
+
+function runUse(args: string[]): Record<string, unknown> {
+  const { positional } = parseArgs(args);
+  const email = positional[0];
+  if (!email) {
+    throw new AxiError(
+      "Usage: gws-axi auth use <email>",
+      "VALIDATION_ERROR",
+      ["Run `gws-axi auth accounts` to see authenticated accounts"],
+    );
+  }
+  if (!hasAccount(email)) {
+    throw new AxiError(
+      `Account ${email} is not authenticated`,
+      "ACCOUNT_NOT_FOUND",
+      [
+        `Authenticated accounts: ${listAccounts().join(", ") || "(none)"}`,
+        `Run \`gws-axi auth login --account ${email}\` to add it`,
+      ],
+    );
+  }
+  setDefaultAccount(email);
+  return {
+    status: "ok",
+    default: normalizeEmail(email),
+    help: [`Commands without --account will now use ${normalizeEmail(email)}`],
+  };
+}
+
+function runRevoke(args: string[]): Record<string, unknown> {
+  const { positional } = parseArgs(args);
+  const email = positional[0];
+  if (!email) {
+    throw new AxiError(
+      "Usage: gws-axi auth revoke <email>",
+      "VALIDATION_ERROR",
+      ["Run `gws-axi auth accounts` to see authenticated accounts"],
+    );
+  }
+  if (!hasAccount(email)) {
+    return {
+      status: "no-op",
+      message: `${normalizeEmail(email)} was not authenticated`,
+    };
+  }
+  removeAccount(email);
+  const remaining = listAccounts();
+  return {
+    status: "revoked",
+    removed: normalizeEmail(email),
+    remaining_count: remaining.length,
+    new_default: getDefaultAccount(),
+    help:
+      remaining.length === 0
+        ? ["Run `gws-axi auth login` to add an account"]
+        : [`${remaining.length} account(s) remain authenticated`],
+  };
+}
+
 function runStatus(): Record<string, unknown> {
   const state = readSetupState();
   const { done, total, nextStep } = setupProgress(state);
-  const hasTokens = existsSync(tokensPath());
+  const accounts = listAccounts();
 
   if (done < total) {
     return {
       status: `incomplete (${done}/${total})`,
       next_step: nextStep,
+      accounts_count: accounts.length,
     };
   }
 
-  if (!hasTokens) {
-    return { status: "broken: setup complete but tokens missing" };
+  if (accounts.length === 0) {
+    return { status: "broken: setup complete but no accounts authenticated" };
   }
 
-  return { status: "ok", account: state.steps.tokens_obtained.account ?? "pending" };
+  return {
+    status: "ok",
+    accounts_count: accounts.length,
+    default: getDefaultAccount(),
+  };
 }
 
 function runReset(args: string[]): Record<string, unknown> {
-  const { resetFromKey } = parseFlags(args);
+  const { resetFromKey } = parseArgs(args);
   if (resetFromKey && !SETUP_STEP_ORDER.includes(resetFromKey)) {
     throw new AxiError(
       `Unknown step: ${resetFromKey}`,
@@ -295,7 +444,13 @@ export async function authCommand(
     case "setup":
       return runSetup(rest);
     case "login":
-      return runLogin();
+      return runLogin(rest);
+    case "accounts":
+      return runAccounts();
+    case "use":
+      return runUse(rest);
+    case "revoke":
+      return runRevoke(rest);
     case "status":
       return runStatus();
     case "reset":
