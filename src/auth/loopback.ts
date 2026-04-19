@@ -126,7 +126,15 @@ function buildAuthUrl(params: {
   u.searchParams.set("state", params.state);
   u.searchParams.set("access_type", "offline");
   u.searchParams.set("prompt", "consent");
-  u.searchParams.set("include_granted_scopes", "true");
+  // Deliberately NOT setting include_granted_scopes=true. That flag
+  // returns access tokens covering every scope the user has ever
+  // granted this OAuth client, not just the scopes we asked for now,
+  // which makes scope counts balloon unpredictably when the user has
+  // historical grants from testing / revocations / different scope
+  // configs. Since we always request the full scope set and force
+  // prompt=consent (so users re-approve every time), incremental
+  // authorization isn't buying us anything — each auth should be a
+  // clean grant matching exactly what we asked for.
   if (params.loginHint) {
     u.searchParams.set("login_hint", params.loginHint);
   }
