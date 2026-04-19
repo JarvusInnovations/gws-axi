@@ -75,7 +75,19 @@ export function setupHtmlPath(): string {
   return join(configDir(), "setup.html");
 }
 
-export function writeSetupHtml(): string {
+export interface SetupHtmlOptions {
+  /**
+   * When set, render a prominent "Authenticate now" button at the top of
+   * setup.html pointing at this URL. Used by the OAuth loopback flow to
+   * avoid printing the jumbo URL to the terminal (where it gets mangled).
+   */
+  pendingAuth?: {
+    url: string;
+    account?: string;
+  };
+}
+
+export function writeSetupHtml(options: SetupHtmlOptions = {}): string {
   const state = readSetupState();
   const projectId = state.steps.gcp_project.project_id as string | undefined;
 
@@ -100,6 +112,15 @@ export function writeSetupHtml(): string {
   const now = new Date();
   const nowLabel = now.toLocaleTimeString();
 
+  const pendingAuthBlock = options.pendingAuth
+    ? `<div class="pending-auth">
+  <div class="pending-auth-title">Waiting for authentication${options.pendingAuth.account ? ` as <code>${options.pendingAuth.account}</code>` : ""}</div>
+  <p>Click the button below to sign in to Google. After consent, your browser will redirect to a local success page and the CLI will save your tokens.</p>
+  <a class="auth-button" href="${options.pendingAuth.url}" target="_self">Authenticate with Google &rarr;</a>
+  <p class="pending-auth-note">The CLI is listening for the callback on 127.0.0.1 — this button only works while setup is running.</p>
+</div>`
+    : "";
+
   const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -111,6 +132,12 @@ export function writeSetupHtml(): string {
   h1 { margin-top: 0; }
   .summary { background: #f4f8fb; border-left: 4px solid #3b82f6; padding: 12px 16px; border-radius: 4px; margin-bottom: 24px; }
   .refresh { font-size: 12px; color: #6b7280; margin-top: 6px; }
+  .pending-auth { background: #fef3c7; border: 2px solid #f59e0b; padding: 20px 24px; border-radius: 6px; margin-bottom: 24px; }
+  .pending-auth-title { font-size: 18px; font-weight: 600; color: #92400e; margin-bottom: 8px; }
+  .pending-auth p { margin: 8px 0; }
+  .pending-auth-note { font-size: 13px; color: #78350f; }
+  .auth-button { display: inline-block; padding: 10px 20px; background: #4285f4; color: white; text-decoration: none; border-radius: 6px; font-weight: 500; margin: 8px 0; }
+  .auth-button:hover { background: #3367d6; }
   table { width: 100%; border-collapse: collapse; }
   th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #e4e4e7; vertical-align: top; }
   th { background: #fafafa; font-size: 13px; color: #555; text-transform: uppercase; letter-spacing: 0.5px; }
@@ -131,6 +158,7 @@ export function writeSetupHtml(): string {
 </head>
 <body>
 <h1>gws-axi · setup</h1>
+${pendingAuthBlock}
 <div class="summary">
   <strong>Project:</strong> ${projectId ? `<code>${projectId}</code>` : "(not set yet)"}<br>
   <strong>Progress:</strong> ${progress} of ${SETUP_STEP_ORDER.length} steps complete

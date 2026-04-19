@@ -21,7 +21,14 @@ import {
 } from "../config.js";
 import { markStepDone } from "./state.js";
 import { allScopes } from "./scopes.js";
+import { setupHtmlPath, writeSetupHtml } from "./setup-html.js";
 import type { StepOutcome } from "./steps.js";
+
+function collapseHome(path: string): string {
+  // minimal local helper; avoids circular-ish imports from commands/*
+  const home = process.env.HOME ?? "";
+  return home && path.startsWith(home) ? `~${path.slice(home.length)}` : path;
+}
 
 interface InstalledCreds {
   client_id: string;
@@ -268,14 +275,23 @@ export async function advanceTokensObtained(
     loginHint: options.expectedAccount,
   });
 
+  // Surface the auth URL on setup.html (clickable button) instead of
+  // printing it to the terminal — jumbo OAuth URLs get line-wrapped and
+  // mangled in agent-hosted terminals. The user's setup.html tab auto-
+  // refreshes within 10s and will show the "Authenticate" button.
+  writeSetupHtml({
+    pendingAuth: { url: authUrl, account: options.expectedAccount },
+  });
+
+  const htmlPath = collapseHome(setupHtmlPath());
   process.stderr.write(
-    `Opening browser to authenticate${options.expectedAccount ? ` as ${options.expectedAccount}` : ""}...\nIf it doesn't open, paste this URL manually:\n\n${authUrl}\n\n`,
+    `Waiting for authentication${options.expectedAccount ? ` as ${options.expectedAccount}` : ""}.\nYour browser should open automatically. If not, click "Authenticate with Google" on your gws-axi setup page (${htmlPath}) — it will refresh within 10 seconds to show the button.\nTimeout: 5 minutes.\n`,
   );
 
   try {
     await open(authUrl);
   } catch {
-    // browser failed to launch; user can still paste URL
+    // browser failed to launch; user can still click the button on setup.html
   }
 
   try {
@@ -363,5 +379,12 @@ export async function advanceTokensObtained(
     };
   } finally {
     server.close();
+    // Clear the pending-auth banner whether we succeeded, failed, or timed
+    // out so the setup page doesn't keep offering a now-dead button.
+    try {
+      writeSetupHtml();
+    } catch {
+      // non-fatal — setup.html regen is cosmetic
+    }
   }
 }
