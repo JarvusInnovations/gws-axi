@@ -144,6 +144,31 @@ async function runSetup(args: string[]): Promise<Record<string, unknown>> {
     markStepDone(confirmStep, extra);
   }
 
+  // Auto-confirm step 3 (oauth_client) when the user provides a valid Desktop
+  // OAuth JSON — the file couldn't exist unless they completed the manual
+  // Console step. Prevents the common footgun of running
+  //   `gws-axi auth setup --credentials-json <path>`
+  // and having it stall on step 3 because the agent forgot to also pass
+  //   `--confirm-step oauth_client`.
+  if (flags.credentialsJson && !readSetupState().steps.oauth_client.done) {
+    if (existsSync(flags.credentialsJson)) {
+      try {
+        const parsed = JSON.parse(
+          readFileSync(flags.credentialsJson, "utf-8"),
+        ) as { installed?: { client_id?: string; client_secret?: string } };
+        if (parsed.installed?.client_id && parsed.installed?.client_secret) {
+          markStepDone("oauth_client", {
+            auto_confirmed: true,
+            via: "credentials-json",
+            client_id: parsed.installed.client_id,
+          });
+        }
+      } catch {
+        // fall through; advanceCredentialsSaved will surface the JSON error
+      }
+    }
+  }
+
   const advanced: Array<{ step: SetupStepKey; detail: string }> = [];
   let nextOutcome: StepOutcome | null = null;
 
