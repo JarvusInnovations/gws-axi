@@ -1,17 +1,17 @@
 import { buildServiceStub } from "./service-stub.js";
 
 const stub = buildServiceStub("drive", [
-  "search",
-  "get",
-  "create",
-  "copy",
-  "move",
-  "rename",
-  "delete",
-  "mkdir",
-  "ls",
-  "permissions",
-  "download",
+  { name: "search", mutation: false },
+  { name: "get", mutation: false },
+  { name: "ls", mutation: false },
+  { name: "permissions", mutation: false },
+  { name: "download", mutation: false },
+  { name: "create", mutation: true },
+  { name: "copy", mutation: true },
+  { name: "move", mutation: true },
+  { name: "rename", mutation: true },
+  { name: "delete", mutation: true },
+  { name: "mkdir", mutation: true },
 ]);
 
 export const DRIVE_HELP = stub.help;
