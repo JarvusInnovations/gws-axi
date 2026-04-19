@@ -209,8 +209,10 @@ async function runSetup(args: string[]): Promise<Record<string, unknown>> {
   }
 
   const help: string[] = [];
+  if (nextOutcome.deep_links && nextOutcome.deep_links.length > 0) {
+    help.push(`Run \`open ${collapseHome(setupHtmlPath())}\` to open clickable Console links`);
+  }
   help.push(`Complete step ${nextOutcome.step} and re-run \`gws-axi auth setup\``);
-  help.push(`Open ${collapseHome(setupHtmlPath())} in a browser for clickable Console links`);
   output.help = help;
 
   return output;
