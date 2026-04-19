@@ -394,9 +394,11 @@ export async function advanceTestUserAdded(
     title: "Step 6 of 7: Add yourself as a test user (manual)",
     instructions: [
       "On the OAuth consent screen page, scroll to \"Test users\"",
-      'Click "+ ADD USERS", enter your Google account email, click Save',
-      "Without this, the OAuth flow will reject you with access_denied",
-      "When done, mark complete: `gws-axi auth setup --confirm-step test_user_added --test-user <your-email>`",
+      'Click "+ ADD USERS", enter each Google account you want to use (personal, work, etc.), click Save',
+      "Add every account you plan to authenticate — gws-axi supports multiple accounts (personal + work) with the same OAuth client",
+      "Without this, the OAuth flow will reject those users with access_denied",
+      "When done, mark complete: `gws-axi auth setup --confirm-step test_user_added --test-user <primary-email>`",
+      "After setup completes, use `gws-axi auth login --account <email>` to authenticate each additional account",
     ],
     deep_links: [
       {

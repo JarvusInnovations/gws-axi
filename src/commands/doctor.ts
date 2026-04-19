@@ -3,6 +3,8 @@ import { existsSync, accessSync, constants } from "node:fs";
 import { homedir } from "node:os";
 import {
   configDir,
+  getDefaultAccount,
+  listAccounts,
   readSetupState,
   setupProgress,
   SETUP_STEP_ORDER,
@@ -106,13 +108,27 @@ function checkSetup(): CheckRow[] {
 }
 
 function checkRuntime(): CheckRow[] {
-  return [
-    { check: "gmail", status: "fail", detail: "not yet implemented" },
-    { check: "calendar", status: "fail", detail: "not yet implemented" },
-    { check: "docs", status: "fail", detail: "not yet implemented" },
-    { check: "drive", status: "fail", detail: "not yet implemented" },
-    { check: "slides", status: "fail", detail: "not yet implemented" },
-  ];
+  const accounts = listAccounts();
+  if (accounts.length === 0) {
+    return [
+      {
+        check: "accounts",
+        status: "fail",
+        detail: "no accounts authenticated — run `gws-axi auth login`",
+      },
+    ];
+  }
+  // Per-service live probes are not yet implemented; this stub will be
+  // replaced by real calls to users.getProfile (Gmail), calendarList.list,
+  // etc. once service clients are wired. For now, just report that tokens
+  // exist for each account.
+  return accounts.flatMap((email) => [
+    {
+      check: `${email} · tokens`,
+      status: "warn" as const,
+      detail: "stored (live API probes not yet implemented)",
+    },
+  ]);
 }
 
 export async function doctorCommand(
@@ -157,7 +173,17 @@ export async function doctorCommand(
     return { status: "ok" };
   }
 
+  const accounts = listAccounts();
+  const defaultAccount = getDefaultAccount();
+
   const output: Record<string, unknown> = {};
+  if (accounts.length > 0) {
+    output.accounts = accounts;
+    if (defaultAccount) output.default_account = defaultAccount;
+    if (accounts.length > 1) {
+      output.write_protection = "enabled — writes require --account";
+    }
+  }
   if (prereqs.length > 0) output.prerequisites = prereqs;
   if (setupRows.length > 0) output.setup = setupRows;
   if (filteredRuntime.length > 0) output.runtime = filteredRuntime;
