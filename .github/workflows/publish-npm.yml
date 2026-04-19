@@ -17,13 +17,12 @@ jobs:
 
     - uses: actions/setup-node@v4
       with:
-        node-version: '22.x'
+        # Node 24 ships with npm 11.x which supports trusted publishing
+        # out of the box. Using it directly sidesteps the broken
+        # `npm install -g npm@...` self-upgrade path on node 22 runners
+        # (MODULE_NOT_FOUND: promise-retry inside @npmcli/arborist).
+        node-version: '24.x'
         registry-url: 'https://registry.npmjs.org'
-
-    - name: Upgrade npm for trusted publishing
-      # Pin to npm 11.x — `@latest` intermittently ships with a broken
-      # dependency tree (promise-retry MODULE_NOT_FOUND) on GitHub runners.
-      run: npm install -g npm@11
 
     - uses: oven-sh/setup-bun@v2
       with:
