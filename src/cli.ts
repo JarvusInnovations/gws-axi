@@ -5,7 +5,7 @@ import { runAxiCli } from "axi-sdk-js";
 import { homeCommand } from "./commands/home.js";
 import { authCommand, AUTH_HELP } from "./commands/auth.js";
 import { doctorCommand, DOCTOR_HELP } from "./commands/doctor.js";
-import { calendarCommand, CALENDAR_HELP } from "./commands/calendar.js";
+import { calendarCommand } from "./commands/calendar.js";
 import { gmailCommand, GMAIL_HELP } from "./commands/gmail.js";
 import { docsCommand, DOCS_HELP } from "./commands/docs.js";
 import { driveCommand, DRIVE_HELP } from "./commands/drive.js";
@@ -28,10 +28,12 @@ examples:
   gws-axi calendar events
 `;
 
+// Services that have real subcommand dispatchers handle --help themselves
+// (so `<service> <sub> --help` shows subcommand-specific help). For stubs
+// that just print help, we keep them in the SDK's auto-help map.
 const COMMAND_HELP: Record<string, string> = {
   auth: AUTH_HELP,
   doctor: DOCTOR_HELP,
-  calendar: CALENDAR_HELP,
   gmail: GMAIL_HELP,
   docs: DOCS_HELP,
   drive: DRIVE_HELP,
