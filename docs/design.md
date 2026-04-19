@@ -23,16 +23,24 @@ All user state lives under `$XDG_CONFIG_HOME/gws-axi/` (default `~/.config/gws-a
 ```
 ~/.config/gws-axi/
 ├── setup.json              # progressive setup state (see below)
+├── config.json             # user preferences (default_account, etc.)
 ├── credentials.json        # user's downloaded OAuth client JSON (desktop type)
-├── tokens.json             # refresh + access tokens (per-account)
-└── setup.html              # locally generated HTML page with Console deep-links
+├── setup.html              # locally generated HTML page with Console deep-links
+└── accounts/
+    ├── chris@jarv.us/
+    │   ├── tokens.json     # refresh + access tokens (mode 0600)
+    │   └── profile.json    # email, name, picture, sub, verified_email
+    └── chris@personal.com/
+        └── ...
 ```
 
-Rationale: XDG-compliant, easy to reset (`rm -rf ~/.config/gws-axi && gws-axi auth setup`), single location for all auth state. Matches the `google-calendar-mcp` convention which we've found to be the least painful of the four existing MCPs.
+Rationale: XDG-compliant, easy to reset (`rm -rf ~/.config/gws-axi && gws-axi auth setup`), single location for all auth state. Per-account subdirectories support multi-account use from a single OAuth client.
 
 ## Authentication model (v1 — BYO)
 
 Each user creates their own Google Cloud project and OAuth client. `gws-axi` walks them through the parts that can be automated (project creation, API enablement via `gcloud` if installed) and deep-links for the parts that cannot (Desktop OAuth client creation, consent screen configuration).
+
+A single BYO OAuth client can authenticate **multiple Google accounts** (e.g., personal + work). Each account needs to be added as a test user while the app is in Testing publishing status, and each authenticates independently via its own OAuth loopback run. Tokens are stored per-account at `~/.config/gws-axi/accounts/<email>/tokens.json`.
 
 ### Why BYO
 
@@ -67,6 +75,60 @@ Later we may support incremental authorization (`include_granted_scopes=true`) f
 ### Testing mode token expiry (known pain point)
 
 OAuth clients in "Testing" publishing status issue refresh tokens that expire after 7 days. Users hit this every week until they push their app to "Production." `gws-axi doctor` surfaces this as a warning; a future `gws-axi auth publish` helper can walk through the self-verification flow (for self-use, single-developer verification is lightweight compared to public distribution).
+
+## Multi-account model
+
+### Account lifecycle
+
+- **Add an account**: `gws-axi auth login --account <email>` — runs the OAuth loopback with `login_hint`, verifies post-auth identity via `userinfo.email`, rejects if the returned email doesn't match the expected one (prevents accidentally authenticating as the wrong Google account)
+- **List accounts**: `gws-axi auth accounts`
+- **Switch default**: `gws-axi auth use <email>`
+- **Remove**: `gws-axi auth revoke <email>` — deletes the local tokens. Auto-promotes another account to default if the revoked one was default.
+
+First account authenticated auto-promotes to default. Single-account users don't interact with the account machinery at all.
+
+### Write-protection rule
+
+When 2+ accounts are authenticated:
+
+- **Reads** use the default account if `--account` is not provided
+- **Writes** REQUIRE `--account <email>` — `ACCOUNT_REQUIRED` error otherwise
+
+When 1 account is authenticated: no requirement, sole account is always used.
+
+This prevents the "Agent A reads personal calendar, Agent B switches default to work, Agent A writes to work by accident" failure mode when parallel agent sessions share the same config.
+
+Mutations marked per subcommand in each service's dispatcher map:
+
+```ts
+// src/commands/calendar.ts
+buildServiceStub("calendar", [
+  { name: "events", mutation: false },    // read
+  { name: "create", mutation: true },     // write — needs --account if 2+
+  { name: "respond", mutation: true },    // RSVP is a write
+  ...
+]);
+```
+
+Resolution flows through `resolveAccount(flags.account, { mutation, commandName })` in `src/google/account.ts` — single source of truth.
+
+### Output header
+
+Every command's TOON output includes `account: <email>` so the agent always sees which account was used:
+
+```
+account: chris@jarv.us
+events[3]{id,summary,start}:
+  ...
+```
+
+Keeps responses self-describing regardless of which default is currently set.
+
+### ID-token verification
+
+When OAuth completes, Google returns an ID token whose `email` claim identifies the authenticated user. We always use that email (normalized to lowercase) as the storage directory name — never a user-provided string. If `--account` was passed as an expected identity and the returned email doesn't match, we refuse to write tokens and return `ACCOUNT_MISMATCH`.
+
+Prevents spoofing via flag, and catches the common error of clicking the wrong account in Google's account-chooser.
 
 ## Progressive setup state file
 
@@ -197,18 +259,23 @@ help[2]:
 Flat top-level service subcommands:
 
 ```
-gws-axi                          # home view (state + top suggestions)
-gws-axi auth setup               # progressive setup wizard
-gws-axi auth login               # (re-)run OAuth loopback step
-gws-axi auth status              # terse: "ok" or "broken: <reason>"
-gws-axi auth reset [--from N]    # clear state, optionally from step N
-gws-axi doctor                   # comprehensive diagnostic
-gws-axi calendar ...             # Calendar subcommands
-gws-axi gmail ...                # Gmail subcommands
-gws-axi docs ...                 # Docs subcommands
-gws-axi drive ...                # Drive subcommands
-gws-axi slides ...               # Slides subcommands
+gws-axi                                      # home view (state + top suggestions)
+gws-axi auth setup                           # progressive setup wizard
+gws-axi auth login [--account <email>]       # run OAuth loopback; add/re-auth an account
+gws-axi auth accounts                        # list authenticated accounts
+gws-axi auth use <email>                     # set default account
+gws-axi auth revoke <email>                  # delete an account's tokens
+gws-axi auth status                          # terse: "ok" or "broken: <reason>"
+gws-axi auth reset [--from N]                # clear state, optionally from step N
+gws-axi doctor                               # comprehensive diagnostic
+gws-axi calendar ... [--account <email>]     # Calendar subcommands
+gws-axi gmail ... [--account <email>]        # Gmail subcommands
+gws-axi docs ... [--account <email>]         # Docs subcommands
+gws-axi drive ... [--account <email>]        # Drive subcommands
+gws-axi slides ... [--account <email>]       # Slides subcommands
 ```
+
+`--account` is required for write operations when 2+ accounts are authenticated; see the Multi-account model section.
 
 ### Per-service surface
 
@@ -259,7 +326,7 @@ Token-budget-aware — single-line output in the healthy case.
 
 - `gws-axi auth publish` — walks single-developer verification for pushing own OAuth app to production (eliminates 7-day token expiry)
 - `gws-axi auth mode` — switch between BYO / shared / hybrid (when shared-client shipped)
-- Multi-account support — `~/.config/gws-axi/accounts/<email>/` with `--account <email>` flag
+- `--all-accounts` merged views (e.g., combined calendar, cross-account search)
 - Admin / directory APIs
 - Google Forms, Google Sites, Google Keep (lower-priority Workspace apps)
 
