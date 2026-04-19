@@ -348,9 +348,10 @@ export async function advanceConsentScreen(
       "  → Leave logo / homepage / privacy policy blank (optional for Testing mode)",
       "  → Save",
       "Then back on the setup page, click the 'Audience (user type)' link",
-      "  → User type: 'External' (unless you have a Google Workspace domain)",
-      "  → Publishing status stays 'Testing' (tokens expire every 7 days — this is expected)",
-      "  → Save",
+      "  → Verify 'Publishing status' shows 'Testing' — if it says 'In production', click 'Back to testing' (do NOT publish)",
+      "  → Verify 'User type' shows 'External' — if it says 'Internal', click 'Make external' (required unless you have a Google Workspace domain and only want to use Workspace accounts)",
+      "  → This page has no Save button — state changes take effect when you click those toggle buttons",
+      "  → Staying in Testing mode means tokens expire every 7 days (expected, we'll handle this later)",
       "When done, mark this step complete: `gws-axi auth setup --confirm-step consent_screen`",
     ],
   };
