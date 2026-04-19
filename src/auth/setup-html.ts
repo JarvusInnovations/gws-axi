@@ -1,8 +1,12 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   configDir,
+  getDefaultAccount,
+  listAccounts,
+  profilePathForAccount,
   readSetupState,
+  tokensPathForAccount,
   SETUP_STEP_ORDER,
   type SetupStepKey,
 } from "../config.js";
@@ -20,7 +24,7 @@ const STEP_LABELS: Record<SetupStepKey, string> = {
   oauth_client: "Create Desktop OAuth client",
   credentials_saved: "Save credentials JSON to config dir",
   consent_screen: "Configure OAuth consent screen",
-  test_user_added: "Add yourself as test user",
+  test_user_added: "Add test users (each Google account you'll authenticate)",
   tokens_obtained: "Run OAuth loopback flow to obtain tokens",
 };
 
@@ -87,18 +91,67 @@ export interface SetupHtmlOptions {
   };
 }
 
+interface AccountRow {
+  email: string;
+  name?: string;
+  obtainedAt?: string;
+  scopeCount: number;
+  isDefault: boolean;
+}
+
+function readAccountRows(): AccountRow[] {
+  const emails = listAccounts();
+  const defaultAccount = getDefaultAccount();
+  return emails.map((email) => {
+    const row: AccountRow = {
+      email,
+      scopeCount: 0,
+      isDefault: email === defaultAccount,
+    };
+    try {
+      const profile = JSON.parse(
+        readFileSync(profilePathForAccount(email), "utf-8"),
+      ) as { name?: string };
+      row.name = profile.name;
+    } catch {
+      // no profile yet
+    }
+    try {
+      const tokens = JSON.parse(
+        readFileSync(tokensPathForAccount(email), "utf-8"),
+      ) as { obtained_at?: string; scope?: string };
+      row.obtainedAt = tokens.obtained_at;
+      row.scopeCount = tokens.scope
+        ? tokens.scope.split(" ").filter(Boolean).length
+        : 0;
+    } catch {
+      // no tokens file
+    }
+    return row;
+  });
+}
+
 export function writeSetupHtml(options: SetupHtmlOptions = {}): string {
   const state = readSetupState();
   const projectId = state.steps.gcp_project.project_id as string | undefined;
 
   const nextKey = SETUP_STEP_ORDER.find((k) => !state.steps[k].done);
+  const progress = SETUP_STEP_ORDER.filter(
+    (k) => state.steps[k].done,
+  ).length;
+  const initialSetupDone = nextKey === undefined;
+  const accounts = readAccountRows();
+
   const rows = SETUP_STEP_ORDER.map((key, idx) => {
     const step = state.steps[key];
     const isNext = key === nextKey;
     const status = step.done ? "✓ done" : isNext ? "→ next" : "… pending";
     const statusClass = step.done ? "done" : isNext ? "next" : "pending";
     const links = linksForStep(key, projectId)
-      .map((l) => `<a href="${l.url}" target="_blank" rel="noopener">${l.label}</a>`)
+      .map(
+        (l) =>
+          `<a href="${l.url}" target="_blank" rel="noopener">${l.label}</a>`,
+      )
       .join(" · ");
     return `<tr class="${statusClass}">
       <td class="num">${idx + 1}</td>
@@ -108,7 +161,6 @@ export function writeSetupHtml(options: SetupHtmlOptions = {}): string {
     </tr>`;
   }).join("\n");
 
-  const progress = SETUP_STEP_ORDER.filter((k) => state.steps[k].done).length;
   const now = new Date();
   const nowLabel = now.toLocaleTimeString();
 
@@ -117,9 +169,55 @@ export function writeSetupHtml(options: SetupHtmlOptions = {}): string {
   <div class="pending-auth-title">Waiting for authentication${options.pendingAuth.account ? ` as <code>${options.pendingAuth.account}</code>` : ""}</div>
   <p>Click the button below to sign in to Google. After consent, your browser will redirect to a local success page and the CLI will save your tokens.</p>
   <a class="auth-button" href="${options.pendingAuth.url}" target="_self">Authenticate with Google &rarr;</a>
-  <p class="pending-auth-note">The CLI is listening for the callback on 127.0.0.1 — this button only works while setup is running.</p>
+  <p class="pending-auth-note">The CLI is listening for the callback on 127.0.0.1 — this button only works while setup is running. Sign in as ${options.pendingAuth.account ? `<code>${options.pendingAuth.account}</code>` : "the target account"} at Google's prompt.</p>
 </div>`
     : "";
+
+  const accountsBlock = accounts.length
+    ? `<div class="accounts-section">
+  <h2>Accounts (${accounts.length})</h2>
+  <table class="accounts">
+    <thead><tr><th>Email</th><th>Name</th><th>Scopes</th><th>Added</th><th>Default</th></tr></thead>
+    <tbody>
+${accounts
+  .map(
+    (a) => `      <tr>
+        <td><code>${a.email}</code></td>
+        <td>${a.name ?? "<em>—</em>"}</td>
+        <td>${a.scopeCount}</td>
+        <td>${a.obtainedAt ? new Date(a.obtainedAt).toLocaleString() : "<em>pending</em>"}</td>
+        <td>${a.isDefault ? "<span class=\"default-badge\">default</span>" : ""}</td>
+      </tr>`,
+  )
+  .join("\n")}
+    </tbody>
+  </table>
+</div>`
+    : "";
+
+  const addAnotherBlock = initialSetupDone
+    ? `<div class="add-another">
+  <h3>Add another Google account</h3>
+  <p>The same OAuth client handles multiple Google accounts (e.g. personal + work). To add one:</p>
+  <ol>
+    <li>Make sure the account is added as a test user on the <a href="${consoleUrl("/auth/audience", projectId)}" target="_blank" rel="noopener">Audience page</a> (otherwise Google rejects with access_denied)</li>
+    <li>In your terminal, run <code>gws-axi auth login --account &lt;email&gt;</code></li>
+    <li>This page will show an "Authenticate with Google" button within 10 seconds — click it to consent as that account</li>
+  </ol>
+</div>`
+    : "";
+
+  const footerText = initialSetupDone
+    ? `Setup is complete. Keep this tab open — it will show an "Authenticate" button when you run <code>gws-axi auth login --account &lt;email&gt;</code> to add a new account. Regenerated every time a gws-axi auth command runs.`
+    : `Click the links above to complete each step in <em>this</em> browser (so you stay in the Google account you're signed into). Regenerated every time you run <code>gws-axi auth setup</code>.`;
+
+  const summaryContent = initialSetupDone
+    ? `<strong>Status:</strong> Setup complete · OAuth client ready<br>
+  <strong>Project:</strong> ${projectId ? `<code>${projectId}</code>` : "(not set)"}<br>
+  <strong>Accounts:</strong> ${accounts.length} authenticated${accounts.length > 1 ? ` · write protection active (writes require <code>--account</code>)` : ""}`
+    : `<strong>Project:</strong> ${projectId ? `<code>${projectId}</code>` : "(not set yet)"}<br>
+  <strong>Progress:</strong> ${progress} of ${SETUP_STEP_ORDER.length} steps complete
+  ${nextKey ? `<br><strong>Next step:</strong> <code>${STEP_LABELS[nextKey]}</code> — click the buttons below, then run <code>gws-axi auth setup</code> to continue` : ""}`;
 
   const html = `<!doctype html>
 <html lang="en">
@@ -130,6 +228,8 @@ export function writeSetupHtml(options: SetupHtmlOptions = {}): string {
 <style>
   body { font-family: -apple-system, system-ui, "Segoe UI", sans-serif; max-width: 900px; margin: 40px auto; padding: 24px; color: #222; }
   h1 { margin-top: 0; }
+  h2 { margin-top: 28px; margin-bottom: 12px; font-size: 18px; }
+  h3 { margin-top: 24px; margin-bottom: 8px; font-size: 16px; }
   .summary { background: #f4f8fb; border-left: 4px solid #3b82f6; padding: 12px 16px; border-radius: 4px; margin-bottom: 24px; }
   .refresh { font-size: 12px; color: #6b7280; margin-top: 6px; }
   .pending-auth { background: #fef3c7; border: 2px solid #f59e0b; padding: 20px 24px; border-radius: 6px; margin-bottom: 24px; }
@@ -152,6 +252,17 @@ export function writeSetupHtml(options: SetupHtmlOptions = {}): string {
   td.links a { display: inline-block; margin-right: 8px; padding: 4px 10px; border-radius: 4px; background: #eff6ff; color: #1d4ed8; text-decoration: none; font-size: 13px; }
   td.links a:hover { background: #dbeafe; }
   tr.done td.links a { background: #f4f4f5; color: #6b7280; }
+  .accounts-section { margin-top: 24px; }
+  .accounts { margin-bottom: 8px; }
+  .accounts td, .accounts th { font-size: 14px; }
+  .accounts td { vertical-align: middle; }
+  .default-badge { background: #dbeafe; color: #1d4ed8; font-size: 12px; padding: 2px 8px; border-radius: 10px; font-weight: 500; }
+  .add-another { margin-top: 24px; padding: 16px 20px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; }
+  .add-another ol { margin: 8px 0 0 20px; padding: 0; }
+  .add-another li { margin: 6px 0; }
+  details.steps { margin-top: 24px; }
+  details.steps summary { cursor: pointer; color: #4b5563; font-size: 14px; padding: 6px 0; }
+  details.steps summary:hover { color: #111827; }
   footer { margin-top: 32px; font-size: 13px; color: #666; }
   code { background: #f4f4f5; padding: 2px 6px; border-radius: 3px; font-size: 13px; }
 </style>
@@ -160,19 +271,28 @@ export function writeSetupHtml(options: SetupHtmlOptions = {}): string {
 <h1>gws-axi · setup</h1>
 ${pendingAuthBlock}
 <div class="summary">
-  <strong>Project:</strong> ${projectId ? `<code>${projectId}</code>` : "(not set yet)"}<br>
-  <strong>Progress:</strong> ${progress} of ${SETUP_STEP_ORDER.length} steps complete
-  ${nextKey ? `<br><strong>Next step:</strong> <code>${STEP_LABELS[nextKey]}</code> — click the buttons below, then run <code>gws-axi auth setup</code> to continue` : `<br><strong>All steps complete</strong> — run <code>gws-axi doctor</code> to verify runtime health`}
+  ${summaryContent}
   <div class="refresh">Auto-refreshes every 10 seconds · last rendered at ${nowLabel}</div>
 </div>
+${accountsBlock}
+${addAnotherBlock}
+${initialSetupDone
+  ? `<details class="steps"><summary>Show initial setup steps (all complete)</summary>
 <table>
 <thead><tr><th>#</th><th>Status</th><th>Step</th><th>Console links</th></tr></thead>
 <tbody>
 ${rows}
 </tbody>
 </table>
+</details>`
+  : `<table>
+<thead><tr><th>#</th><th>Status</th><th>Step</th><th>Console links</th></tr></thead>
+<tbody>
+${rows}
+</tbody>
+</table>`}
 <footer>
-  Click the links above to complete each step in <em>this</em> browser (so you stay in the Google account you're signed into). Regenerated every time you run <code>gws-axi auth setup</code>.
+  ${footerText}
 </footer>
 </body>
 </html>

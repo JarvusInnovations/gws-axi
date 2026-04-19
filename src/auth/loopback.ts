@@ -9,7 +9,6 @@ import {
 import { AddressInfo } from "node:net";
 import { dirname } from "node:path";
 import { URL } from "node:url";
-import open from "open";
 import {
   credentialsPath,
   listAccounts,
@@ -276,23 +275,19 @@ export async function advanceTokensObtained(
   });
 
   // Surface the auth URL on setup.html (clickable button) instead of
-  // printing it to the terminal — jumbo OAuth URLs get line-wrapped and
-  // mangled in agent-hosted terminals. The user's setup.html tab auto-
-  // refreshes within 10s and will show the "Authenticate" button.
+  // printing it to the terminal OR launching the browser ourselves. OS-
+  // level `open` picks whatever browser the system considers default,
+  // which is often NOT the browser session the user signed into Google
+  // with (wrong profile, agent's debug browser, etc.). setup.html is
+  // already in the user's chosen browser — clicks there stay in session.
   writeSetupHtml({
     pendingAuth: { url: authUrl, account: options.expectedAccount },
   });
 
   const htmlPath = collapseHome(setupHtmlPath());
   process.stderr.write(
-    `Waiting for authentication${options.expectedAccount ? ` as ${options.expectedAccount}` : ""}.\nYour browser should open automatically. If not, click "Authenticate with Google" on your gws-axi setup page (${htmlPath}) — it will refresh within 10 seconds to show the button.\nTimeout: 5 minutes.\n`,
+    `Waiting for authentication${options.expectedAccount ? ` as ${options.expectedAccount}` : ""}.\nSwitch to your gws-axi setup page (${htmlPath}) and click "Authenticate with Google".\nIf it's not open, open it manually in the browser where you're signed into the target Google account.\nTimeout: 5 minutes.\n`,
   );
-
-  try {
-    await open(authUrl);
-  } catch {
-    // browser failed to launch; user can still click the button on setup.html
-  }
 
   try {
     const { code, scope } = await waitForCallback(server, state);
