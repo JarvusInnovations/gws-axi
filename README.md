@@ -12,26 +12,44 @@ Designed for use by AI agents. Every response is structured, every error names a
 - A Google account (personal or Workspace)
 - `gcloud` CLI (optional — speeds up initial setup, not required)
 
-## Install
+## Getting started
+
+### 1. Install
 
 ```bash
 npm install -g gws-axi
 ```
 
-## First-run setup
+### 2. Let an agent walk you through setup
 
-`gws-axi` uses a **bring-your-own OAuth client** model: you create your own Google Cloud project with OAuth credentials, and tokens live locally at `~/.config/gws-axi/`. This avoids verification/CASA overhead for public apps and keeps the blast radius of any token revocation scoped to you.
+`gws-axi` is designed to be driven by an AI coding agent (Claude Code, Cursor, anything that can run shell commands). The setup flow is progressive — the CLI emits structured TOON output telling the agent what to do next, and the agent coordinates with you through the handful of Google Cloud Console steps that can't be automated.
 
-The setup is progressive — run `gws-axi auth setup` repeatedly and each invocation walks you through the next step:
+Start a fresh agent session and paste a prompt like:
 
-```bash
-gws-axi auth setup   # start or continue — 7 steps, mostly automated
-gws-axi doctor       # check setup + live API health at any time
+```
+I just installed `gws-axi`. Walk me through setting it up.
+
+I want to authenticate the following Google accounts:
+  - you@example.com
+  - personal@gmail.com
 ```
 
-The CLI generates a styled, auto-refreshing HTML helper page at `~/.config/gws-axi/setup.html` with clickable Console deep-links — so you never copy long URLs from terminal to browser and you stay in the right browser profile throughout.
+The agent will run `gws-axi auth setup`, tell you what the CLI is asking for, and drive the back-and-forth. Expect ~10 minutes end-to-end for a fresh Google Cloud project; ~3 minutes if you already have one you want to reuse.
 
-Typical flow: set project → enable APIs → create OAuth client → download JSON → configure consent screen → add test users → authenticate. See the in-CLI guidance as you go; every step tells you exactly what to do next.
+**What happens during setup:** you create your own Google Cloud project with OAuth credentials, enable the Workspace APIs, configure the consent screen, and add your Google accounts as test users. This is the [**bring-your-own OAuth client**](docs/shared-client-future.md) model — avoids public-app verification overhead and keeps the blast radius of any token revocation scoped to you. Tokens live locally at `~/.config/gws-axi/`.
+
+The CLI generates an auto-refreshing HTML helper page (`~/.config/gws-axi/setup.html`) with clickable Console deep-links — so you never copy long URLs from terminal to browser and you stay in the right browser profile throughout.
+
+### 3. Check it works
+
+```bash
+gws-axi doctor                           # setup + live API health
+gws-axi calendar events                  # upcoming 7 days on your primary calendar
+```
+
+### Prefer to drive it manually?
+
+The CLI works fine without an agent — each `gws-axi auth setup` invocation prints its own instructions and updates `setup.html`. Run it repeatedly as you complete each step; no state is lost between invocations.
 
 ## Usage
 
