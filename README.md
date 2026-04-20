@@ -4,7 +4,7 @@ Agent-ergonomic CLI for Google Workspace — Gmail, Calendar, Docs, Drive, and S
 
 Designed for use by AI agents. Every response is structured, every error names a specific fix, and write operations lock to the explicit account when multiple are authenticated — so two agents in parallel sessions can't silently touch the wrong mailbox.
 
-> **Status:** early release. **Calendar reads** (`calendar events`) are implemented with real TOON output. Other subcommands (`calendar get|create|update|…`, `gmail`, `docs`, `drive`, `slides`) are scaffolded but return `NOT_IMPLEMENTED`. Auth, doctor, and multi-account management are complete.
+> **Status (v0.3):** **Calendar is complete** — all 9 subcommands (5 reads + 4 writes) are implemented. Gmail, Docs, Drive, and Slides are scaffolded stubs that exercise auth + account resolution but return `NOT_IMPLEMENTED` on their concrete operations. Auth, doctor (with live per-account API probes), and multi-account management are stable.
 
 ## Requirements
 
@@ -37,15 +37,45 @@ Typical flow: set project → enable APIs → create OAuth client → download J
 
 Every subcommand supports `--help`. The bare `gws-axi` command prints current state, authenticated accounts, and top suggestions.
 
+### Home / auth / health
+
 ```bash
-gws-axi                                  # home view
-gws-axi calendar events                  # list upcoming events
-gws-axi calendar events --query standup  # full-text search
-gws-axi calendar events --fields attendees,location
+gws-axi                                  # home view — current state + suggestions
 gws-axi auth accounts                    # list authenticated Google accounts
-gws-axi auth login --account <email>     # add another account
-gws-axi doctor                           # full health check
+gws-axi auth login --account <email>     # add another account (prepare + --wait)
+gws-axi auth use <email>                 # set the default account
+gws-axi doctor                           # prerequisites + setup + live API probes
 ```
+
+### Calendar reads
+
+```bash
+gws-axi calendar events                  # upcoming 7 days on primary
+gws-axi calendar events --from 2026-04-20T00:00 --to 2026-04-27T00:00
+gws-axi calendar events --fields attendees,location,status
+gws-axi calendar get <event-id>          # full detail + attendees
+gws-axi calendar get <event-id> --full   # don't truncate description
+gws-axi calendar calendars               # list calendars accessible to this account
+gws-axi calendar search --query "standup"  # primary calendar by default
+gws-axi calendar search --query "chris" --include-shared  # include delegated + subscribed
+gws-axi calendar freebusy --calendars primary,team@jarv.us  # cross-calendar availability
+```
+
+### Calendar writes
+
+```bash
+gws-axi calendar create \
+  --summary "Team sync" --start 2026-04-22T14:00 --duration 30m
+
+gws-axi calendar update <event-id> \
+  --summary "Team sync (rescheduled)" --start 2026-04-22T15:00
+
+gws-axi calendar delete <event-id>       # idempotent (404/410 → noop)
+
+gws-axi calendar respond <event-id> --response accepted
+```
+
+Writes default `--send-updates` to `none` so agent-created events don't spam attendees. Pass `--send-updates all` for production-style invite behavior.
 
 ### Multi-account with write protection
 
@@ -77,10 +107,11 @@ help[2]:
 - [`docs/design.md`](https://github.com/JarvusInnovations/gws-axi/blob/main/docs/design.md) — architecture, auth model, doctor tiers, command surface
 - [`docs/shared-client-future.md`](https://github.com/JarvusInnovations/gws-axi/blob/main/docs/shared-client-future.md) — why BYO-only for v1, what a shared-client public distribution would involve
 
-## Known issues
+## Known issues & roadmap
 
-- **Testing-mode tokens expire every 7 days.** Google's OAuth policy. Re-run `gws-axi auth login --wait` when it happens. A future `gws-axi auth publish` helper will walk single-developer verification to eliminate this.
-- **Most service subcommands are not yet implemented.** Only `calendar events` does real work as of v0.1. The rest will follow — see the design doc for the order.
+- **Testing-mode tokens expire every 7 days.** Google's OAuth policy for unpublished apps. Re-run `gws-axi auth login --account <email>` + `auth login --wait` when it happens. A future `gws-axi auth publish` helper will walk single-developer verification to eliminate this.
+- **Gmail, Docs, Drive, Slides**: not yet implemented. Stubs exercise auth + account resolution so write-protection errors still surface correctly; actual operations return `NOT_IMPLEMENTED`. Gmail is next.
+- **Tests**: not yet — coming alongside Gmail.
 
 ## Contributing
 
