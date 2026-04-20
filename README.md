@@ -47,6 +47,25 @@ gws-axi doctor                           # setup + live API health
 gws-axi calendar events                  # upcoming 7 days on your primary calendar
 ```
 
+### 4. Make gws-axi your agent's default for Google Workspace
+
+On first invocation, `gws-axi` auto-installs a **SessionStart hook** into your agent's config (Claude Code's `~/.claude/settings.json`, Codex's `~/.codex/hooks.json`), so every new agent session sees a compact `gws-axi` status line in ambient context — authenticated accounts, write-protection status, setup health — with no extra wiring. Nothing for you to configure.
+
+To make sure agents reach for `gws-axi` instead of stale alternatives, also consider:
+
+- **Remove existing Google Workspace MCP servers and skills.** If you already have Gmail / Calendar / Drive / Docs / Slides integrations installed (community MCP servers, bespoke skills, etc.), disable them. Keeping both creates ambiguity — agents may pick whichever they noticed first, and the tools have different auth models, flag names, and output shapes. Typical candidates to disable: `google-calendar-mcp`, `gmail-mcp`, `google-docs-mcp`, any `@modelcontextprotocol/server-google-*`, and skills with similar names.
+
+- **Add a directive to your `CLAUDE.md`.** A short note in your project-level (`.claude/CLAUDE.md`) or user-level (`~/.claude/CLAUDE.md`) file nudges agents to consistently use `gws-axi`. Example:
+
+  ```markdown
+  ## Google Workspace
+
+  Use `gws-axi` for ALL Google Calendar, Gmail, Docs, Drive, and Slides
+  interactions. Check the SessionStart `gws-axi` line for current auth
+  state; run `gws-axi --help` for the command surface. Prefer this over
+  any other Google integrations.
+  ```
+
 ### Prefer to drive it manually?
 
 The CLI works fine without an agent — each `gws-axi auth setup` invocation prints its own instructions and updates `setup.html`. Run it repeatedly as you complete each step; no state is lost between invocations.
