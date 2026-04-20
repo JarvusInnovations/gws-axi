@@ -57,6 +57,29 @@ export function parseDateishFlag(value: string): string {
 }
 
 /**
+ * Format a Google Calendar dateTime/date field for detail-view output.
+ * Timed events: datetime + "(IANA tz)" suffix when timeZone is set.
+ * All-day events: "YYYY-MM-DD (all-day)".
+ * Missing/empty: empty string.
+ *
+ * Use for single-event detail views (get, create, update, respond).
+ * List views should stick to offset-only for compact columns.
+ */
+export function formatEventTime(
+  value:
+    | { dateTime?: string | null; date?: string | null; timeZone?: string | null }
+    | null
+    | undefined,
+): string {
+  if (!value) return "";
+  if (value.dateTime) {
+    return value.timeZone ? `${value.dateTime} (${value.timeZone})` : value.dateTime;
+  }
+  if (value.date) return `${value.date} (all-day)`;
+  return "";
+}
+
+/**
  * Convert a UTC timestamp string (e.g. "2026-04-22T13:00:00Z") to an ISO
  * string with the system's local timezone offset (e.g.
  * "2026-04-22T09:00:00-04:00"). Useful for making freebusy output

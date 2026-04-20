@@ -2,7 +2,7 @@ import { AxiError } from "axi-sdk-js";
 import type { calendar_v3 } from "googleapis";
 import { calendarClient, translateGoogleError } from "../../google/client.js";
 import { joinBlocks, renderObject } from "../../output/index.js";
-import { parseDateishFlag } from "./dateish.js";
+import { formatEventTime, parseDateishFlag } from "./dateish.js";
 
 export const UPDATE_HELP = `usage: gws-axi calendar update <event-id> [flags]
 args[1]:
@@ -307,16 +307,14 @@ export async function calendarUpdateCommand(
     }),
   );
 
-  const start = (updated.start ?? {}) as { dateTime?: string; date?: string };
-  const end = (updated.end ?? {}) as { dateTime?: string; date?: string };
   const attendees = updated.attendees ?? [];
   blocks.push(
     renderObject({
       event: {
         id: updated.id ?? "",
         summary: updated.summary ?? "",
-        start: start.dateTime ?? start.date ?? "",
-        end: end.dateTime ?? end.date ?? "",
+        start: formatEventTime(updated.start),
+        end: formatEventTime(updated.end),
         status: updated.status ?? "",
         attendee_count: attendees.length,
         html_link: updated.htmlLink ?? "",

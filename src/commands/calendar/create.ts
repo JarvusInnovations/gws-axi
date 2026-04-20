@@ -2,7 +2,7 @@ import { AxiError } from "axi-sdk-js";
 import type { calendar_v3 } from "googleapis";
 import { calendarClient, translateGoogleError } from "../../google/client.js";
 import { joinBlocks, renderObject } from "../../output/index.js";
-import { parseDateishFlag } from "./dateish.js";
+import { formatEventTime, parseDateishFlag } from "./dateish.js";
 
 export const CREATE_HELP = `usage: gws-axi calendar create --summary <text> --start <iso> [flags]
 flags[13]:
@@ -260,14 +260,12 @@ export async function calendarCreateCommand(
     }),
   );
 
-  const start = (created.start ?? {}) as { dateTime?: string; date?: string; timeZone?: string };
-  const end = (created.end ?? {}) as { dateTime?: string; date?: string; timeZone?: string };
   const attendees = created.attendees ?? [];
   const event: Record<string, unknown> = {
     id: created.id ?? "",
     summary: created.summary ?? "",
-    start: start.dateTime ?? start.date ?? "",
-    end: end.dateTime ?? end.date ?? "",
+    start: formatEventTime(created.start),
+    end: formatEventTime(created.end),
     status: created.status ?? "",
     organizer: created.organizer?.email ?? "",
     attendee_count: attendees.length,

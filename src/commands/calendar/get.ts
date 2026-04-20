@@ -8,6 +8,7 @@ import {
   renderList,
   renderObject,
 } from "../../output/index.js";
+import { formatEventTime } from "./dateish.js";
 
 export const GET_HELP = `usage: gws-axi calendar get <event-id> [flags]
 args[1]:
@@ -64,20 +65,6 @@ function parseFlags(args: string[]): { eventId: string; flags: ParsedFlags } {
   return { eventId, flags };
 }
 
-function formatTime(
-  value:
-    | { dateTime?: string | null; date?: string | null; timeZone?: string | null }
-    | null
-    | undefined,
-): string {
-  if (!value) return "";
-  if (value.dateTime) {
-    return value.timeZone ? `${value.dateTime} (${value.timeZone})` : value.dateTime;
-  }
-  if (value.date) return `${value.date} (all-day)`;
-  return "";
-}
-
 function truncate(value: string | undefined, max: number): { value: string; truncated: boolean; total: number } {
   if (!value) return { value: "", truncated: false, total: 0 };
   if (value.length <= max) return { value, truncated: false, total: value.length };
@@ -124,9 +111,10 @@ export async function calendarGetCommand(
 
   const blocks: string[] = [];
 
-  const header: Record<string, unknown> = { account };
-  if (flags.calendar !== "primary") header.calendar = flags.calendar;
-  blocks.push(renderObject(header));
+  // Always include the calendar in the header so agents can correlate
+  // across calendars in batch work without needing to remember which
+  // --calendar flag they passed.
+  blocks.push(renderObject({ account, calendar: flags.calendar }));
 
   const descResult = truncate(event.description ?? "", flags.full ? 1_000_000 : 500);
 
@@ -134,8 +122,8 @@ export async function calendarGetCommand(
     id: event.id ?? "",
     summary: event.summary ?? "",
     status: event.status ?? "",
-    start: formatTime(event.start),
-    end: formatTime(event.end),
+    start: formatEventTime(event.start),
+    end: formatEventTime(event.end),
     creator: event.creator?.email ?? "",
     organizer: event.organizer?.email ?? "",
   };
@@ -193,6 +181,13 @@ export async function calendarGetCommand(
   }
 
   const suggestions: string[] = [];
+  if (event.status === "cancelled") {
+    // Google tombstones deleted events (they return 200 with status=cancelled
+    // rather than 404). Make sure agents don't misread this as "event exists".
+    suggestions.push(
+      `This event is CANCELLED (tombstoned by a prior delete). It won't appear in \`calendar events\` or in Google Calendar's UI. To restore, create a new event with \`gws-axi calendar create --account ${account} --calendar ${flags.calendar} ...\`.`,
+    );
+  }
   if (descResult.truncated || attendees.length > 20) {
     suggestions.push(
       `Run with --full to see complete description and all attendees`,
