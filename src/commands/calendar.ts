@@ -1,10 +1,14 @@
 import { AxiError } from "axi-sdk-js";
 import { resolveAccount } from "../google/account.js";
 import { calendarCalendarsCommand, CALENDARS_HELP } from "./calendar/calendars.js";
+import { calendarCreateCommand, CREATE_HELP } from "./calendar/create.js";
+import { calendarDeleteCommand, DELETE_HELP } from "./calendar/delete.js";
 import { calendarEventsCommand, EVENTS_HELP } from "./calendar/events.js";
 import { calendarFreebusyCommand, FREEBUSY_HELP } from "./calendar/freebusy.js";
 import { calendarGetCommand, GET_HELP } from "./calendar/get.js";
+import { calendarRespondCommand, RESPOND_HELP } from "./calendar/respond.js";
 import { calendarSearchCommand, SEARCH_HELP } from "./calendar/search.js";
+import { calendarUpdateCommand, UPDATE_HELP } from "./calendar/update.js";
 
 interface CalendarSubcommand {
   name: string;
@@ -19,10 +23,10 @@ const SUBCOMMANDS: CalendarSubcommand[] = [
   { name: "calendars", mutation: false, help: CALENDARS_HELP, handler: calendarCalendarsCommand },
   { name: "search", mutation: false, help: SEARCH_HELP, handler: calendarSearchCommand },
   { name: "freebusy", mutation: false, help: FREEBUSY_HELP, handler: calendarFreebusyCommand },
-  { name: "create", mutation: true, help: "not yet implemented" },
-  { name: "update", mutation: true, help: "not yet implemented" },
-  { name: "delete", mutation: true, help: "not yet implemented" },
-  { name: "respond", mutation: true, help: "not yet implemented" },
+  { name: "create", mutation: true, help: CREATE_HELP, handler: calendarCreateCommand },
+  { name: "update", mutation: true, help: UPDATE_HELP, handler: calendarUpdateCommand },
+  { name: "delete", mutation: true, help: DELETE_HELP, handler: calendarDeleteCommand },
+  { name: "respond", mutation: true, help: RESPOND_HELP, handler: calendarRespondCommand },
 ];
 
 const SUB_BY_NAME: Record<string, CalendarSubcommand> = Object.fromEntries(
