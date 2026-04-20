@@ -27,14 +27,19 @@ npm install -g gws-axi
 Start a fresh agent session and paste a prompt like:
 
 ```
-I just installed `gws-axi`. Walk me through setting it up.
+Run `gws-axi auth setup` and walk me through the progressive setup
+flow it describes. The CLI's output will tell you exactly what to do
+at each step — relay the instructions to me, and run follow-up
+commands as you go.
 
 I want to authenticate the following Google accounts:
   - you@example.com
   - personal@gmail.com
 ```
 
-The agent will run `gws-axi auth setup`, tell you what the CLI is asking for, and drive the back-and-forth. Expect ~10 minutes end-to-end for a fresh Google Cloud project; ~3 minutes if you already have one you want to reuse.
+The explicit `gws-axi auth setup` in the prompt matters: this is your very first session, so the agent doesn't yet have any ambient context about `gws-axi`. Naming the first command gets the agent into the structured flow, where the CLI's output takes over. Every subsequent session auto-loads a compact `gws-axi` status line via a session-start hook (installed on first invocation) — so after this one, you can skip the command and just say "use gws-axi to ..." and the agent knows.
+
+Expect ~10 minutes end-to-end for a fresh Google Cloud project; ~3 minutes if you already have one you want to reuse.
 
 **What happens during setup:** you create your own Google Cloud project with OAuth credentials, enable the Workspace APIs, configure the consent screen, and add your Google accounts as test users. This is the [**bring-your-own OAuth client**](docs/shared-client-future.md) model — avoids public-app verification overhead and keeps the blast radius of any token revocation scoped to you. Tokens live locally at `~/.config/gws-axi/`.
 
@@ -49,7 +54,7 @@ gws-axi calendar events                  # upcoming 7 days on your primary calen
 
 ### 4. Make gws-axi your agent's default for Google Workspace
 
-On first invocation, `gws-axi` auto-installs a **SessionStart hook** into your agent's config (Claude Code's `~/.claude/settings.json`, Codex's `~/.codex/hooks.json`), so every new agent session sees a compact `gws-axi` status line in ambient context — authenticated accounts, write-protection status, setup health — with no extra wiring. Nothing for you to configure.
+On first invocation (which already happened during step 2), `gws-axi` auto-installed a **SessionStart hook** into your agent's config (Claude Code's `~/.claude/settings.json`, Codex's `~/.codex/hooks.json`). From now on, every new agent session will see a compact `gws-axi` status line in ambient context — authenticated accounts, write-protection status, setup health — with no extra wiring. Nothing for you to configure.
 
 To make sure agents reach for `gws-axi` instead of stale alternatives, also consider:
 
