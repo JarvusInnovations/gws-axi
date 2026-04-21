@@ -57,6 +57,12 @@ Tool versions are pinned in `.tool-versions` (bun 1.3.11 / nodejs 22.22.0 via as
 - `docs/shared-client-future.md` — deferred shared-client decision with re-assessment triggers
 - `README.md` — npm page audience (end users)
 
+## References
+
+- `.scratch/references/axi` - sources for the AXI SDK and documentation of design principals
+- `.scratch/references/chrome-devtools-axi` - sources for the AXI reference implementation for Chrome Devtools
+- `.scratch/references/gh-axi` - sources for the AXI reference implementation for GitHub
+
 ## Current implementation status (check before adding features)
 
 - ✅ Auth setup (7 steps), multi-account, write protection, doctor with live probes
