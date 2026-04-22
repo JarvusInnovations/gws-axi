@@ -1,3 +1,5 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import { AxiError } from "axi-sdk-js";
 import type { docs_v1 } from "googleapis";
 import { docsClient, translateGoogleError } from "../../google/client.js";
@@ -10,23 +12,30 @@ import {
   type FieldDef,
 } from "../../output/index.js";
 import { renderBodyAsMarkdown } from "./markdown.js";
+import { resolveOutputPath } from "./paths.js";
 
 export const READ_HELP = `usage: gws-axi docs read <documentId> [flags]
 args[1]:
   <documentId>         The Google Doc ID (from the URL after /d/)
-flags[3]:
+flags[4]:
   --tab <id>           Tab ID to render (omit for single-tab docs; required for multi-tab)
   --full               Don't truncate the rendered markdown (default cap: 8000 chars)
+  --out <path>         Write the rendered markdown to a file (implies --full).
+                       Accepts a file path or directory; directories get
+                       \`<title>.md\` appended. When set, the TOON response
+                       carries a \`saved\` field instead of the content block.
   --account <email>    Account override when 2+ are configured
 examples:
   gws-axi docs read 1BxAbc...
   gws-axi docs read 1BxAbc... --tab t.0
   gws-axi docs read 1BxAbc... --tab t.1.0 --full
+  gws-axi docs read 1BxAbc... --out ./notes.md
 output:
   A \`document{id,title,tab,revision_id}\` header, a \`tabs[N]{id,title,index,parent,active}\`
   listing (always shown, with ✓ on the active tab if any), and — when a tab is
-  rendered — a \`content\` block of GitHub-flavored markdown. Multi-tab docs without
-  --tab return only the tabs listing so the agent can pick one.
+  rendered — either a \`content\` block of GitHub-flavored markdown (inline,
+  truncated unless --full) or a \`saved\` path (when --out is set). Multi-tab
+  docs without --tab return only the tabs listing so the agent can pick one.
 `;
 
 const DEFAULT_TRUNCATE_CHARS = 8000;
@@ -35,6 +44,7 @@ interface ParsedFlags {
   documentId: string;
   tab: string | undefined;
   full: boolean;
+  out: string | undefined;
 }
 
 interface FlatTab {
@@ -49,6 +59,7 @@ function parseFlags(args: string[]): ParsedFlags {
   let documentId: string | undefined;
   let tab: string | undefined;
   let full = false;
+  let out: string | undefined;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     const next = args[i + 1];
@@ -59,6 +70,10 @@ function parseFlags(args: string[]): ParsedFlags {
         break;
       case "--full":
         full = true;
+        break;
+      case "--out":
+        out = next;
+        i++;
         break;
       default:
         if (!arg.startsWith("--") && documentId === undefined) {
@@ -76,7 +91,11 @@ function parseFlags(args: string[]): ParsedFlags {
       ],
     );
   }
-  return { documentId, tab, full };
+  // --out implies --full: truncation only exists to protect the agent's
+  // context window on an inline response; when writing to disk there's no
+  // reason to truncate.
+  if (out) full = true;
+  return { documentId, tab, full, out };
 }
 
 function flattenTabs(
@@ -227,31 +246,54 @@ export async function docsReadCommand(
   if (contentBody) {
     const rendered = renderBodyAsMarkdown(contentBody, contentLists);
     const total = rendered.markdown.length;
-    const cap = flags.full ? Number.POSITIVE_INFINITY : DEFAULT_TRUNCATE_CHARS;
-    const truncated = total > cap;
-    const content = truncated
-      ? `${rendered.markdown.slice(0, cap)}…`
-      : rendered.markdown;
+    const tabSuffix = activeTab ? ` --tab ${activeTab.id}` : "";
 
-    blocks.push(renderObject({ content }));
-    if (truncated) {
+    if (flags.out) {
+      const defaultName = `${doc.title || flags.documentId}.md`;
+      const outPath = await resolveOutputPath(flags.out, defaultName);
+      await mkdir(dirname(outPath), { recursive: true });
+      await writeFile(outPath, rendered.markdown);
       blocks.push(
         renderObject({
-          content_truncated: true,
+          saved: outPath,
           content_total_chars: total,
         }),
       );
-      suggestions.push(
-        `Run \`gws-axi docs read ${flags.documentId}${activeTab ? ` --tab ${activeTab.id}` : ""} --full\` to see the complete document`,
-      );
+    } else {
+      const cap = flags.full ? Number.POSITIVE_INFINITY : DEFAULT_TRUNCATE_CHARS;
+      const truncated = total > cap;
+      const content = truncated
+        ? `${rendered.markdown.slice(0, cap)}…`
+        : rendered.markdown;
+
+      blocks.push(renderObject({ content }));
+      if (truncated) {
+        blocks.push(
+          renderObject({
+            content_truncated: true,
+            content_total_chars: total,
+          }),
+        );
+        suggestions.push(
+          `Run \`gws-axi docs read ${flags.documentId}${tabSuffix} --out <path>\` to save the complete markdown to a file, or --full to expand inline`,
+        );
+      }
     }
+
     if (rendered.image_count > 0) {
       suggestions.push(
         `${rendered.image_count} image${rendered.image_count === 1 ? "" : "s"} rendered as \`[image]\` placeholders — use Drive to view them inline`,
       );
     }
+    // The in-process converter handles most docs well but loses some
+    // fidelity on Google-specific structures (callouts, nested tables).
+    // For agents that need high-fidelity markdown, Drive's server-side
+    // export is better — surface it as an always-available alternative.
     suggestions.push(
-      `Run \`gws-axi docs find ${flags.documentId}${activeTab ? ` --tab ${activeTab.id}` : ""} --query <text>\` to locate text within`,
+      `For higher-fidelity markdown (Google's server-side conversion) use \`gws-axi docs download ${flags.documentId} --as text/markdown --out <path>\``,
+    );
+    suggestions.push(
+      `Run \`gws-axi docs find ${flags.documentId}${tabSuffix} --query <text>\` to locate text within`,
     );
     suggestions.push(
       `Run \`gws-axi docs comments ${flags.documentId}\` to see review comments`,
