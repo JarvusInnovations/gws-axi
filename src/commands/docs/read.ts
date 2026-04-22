@@ -1,0 +1,311 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
+import { AxiError } from "axi-sdk-js";
+import type { docs_v1 } from "googleapis";
+import { docsClient, translateGoogleError } from "../../google/client.js";
+import {
+  field,
+  joinBlocks,
+  renderHelp,
+  renderList,
+  renderObject,
+  type FieldDef,
+} from "../../output/index.js";
+import { renderBodyAsMarkdown } from "./markdown.js";
+import { resolveOutputPath } from "./paths.js";
+
+export const READ_HELP = `usage: gws-axi docs read <documentId> [flags]
+args[1]:
+  <documentId>         The Google Doc ID (from the URL after /d/)
+flags[4]:
+  --tab <id>           Tab ID to render (omit for single-tab docs; required for multi-tab)
+  --full               Don't truncate the rendered markdown (default cap: 8000 chars)
+  --out <path>         Write the rendered markdown to a file (implies --full).
+                       Accepts a file path or directory; directories get
+                       \`<title>.md\` appended. When set, the TOON response
+                       carries a \`saved\` field instead of the content block.
+  --account <email>    Account override when 2+ are configured
+examples:
+  gws-axi docs read 1BxAbc...
+  gws-axi docs read 1BxAbc... --tab t.0
+  gws-axi docs read 1BxAbc... --tab t.1.0 --full
+  gws-axi docs read 1BxAbc... --out ./notes.md
+output:
+  A \`document{id,title,tab,revision_id}\` header, a \`tabs[N]{id,title,index,parent,active}\`
+  listing (always shown, with ✓ on the active tab if any), and — when a tab is
+  rendered — either a \`content\` block of GitHub-flavored markdown (inline,
+  truncated unless --full) or a \`saved\` path (when --out is set). Multi-tab
+  docs without --tab return only the tabs listing so the agent can pick one.
+`;
+
+const DEFAULT_TRUNCATE_CHARS = 8000;
+
+interface ParsedFlags {
+  documentId: string;
+  tab: string | undefined;
+  full: boolean;
+  out: string | undefined;
+}
+
+interface FlatTab {
+  id: string;
+  title: string;
+  index: number;
+  parent: string;
+  tab: docs_v1.Schema$Tab;
+}
+
+function parseFlags(args: string[]): ParsedFlags {
+  let documentId: string | undefined;
+  let tab: string | undefined;
+  let full = false;
+  let out: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    const next = args[i + 1];
+    switch (arg) {
+      case "--tab":
+        tab = next;
+        i++;
+        break;
+      case "--full":
+        full = true;
+        break;
+      case "--out":
+        out = next;
+        i++;
+        break;
+      default:
+        if (!arg.startsWith("--") && documentId === undefined) {
+          documentId = arg;
+        }
+    }
+  }
+  if (!documentId) {
+    throw new AxiError(
+      "Missing documentId argument",
+      "VALIDATION_ERROR",
+      [
+        "Usage: gws-axi docs read <documentId>",
+        "The documentId is the portion of the URL after /d/ and before /edit",
+      ],
+    );
+  }
+  // --out implies --full: truncation only exists to protect the agent's
+  // context window on an inline response; when writing to disk there's no
+  // reason to truncate.
+  if (out) full = true;
+  return { documentId, tab, full, out };
+}
+
+function flattenTabs(
+  tabs: docs_v1.Schema$Tab[] | undefined,
+  parent = "",
+  out: FlatTab[] = [],
+): FlatTab[] {
+  if (!tabs) return out;
+  for (const tab of tabs) {
+    const props = tab.tabProperties ?? {};
+    out.push({
+      id: props.tabId ?? "",
+      title: props.title ?? "",
+      index: props.index ?? out.length,
+      parent,
+      tab,
+    });
+    if (tab.childTabs?.length) {
+      flattenTabs(tab.childTabs, props.tabId ?? "", out);
+    }
+  }
+  return out;
+}
+
+function tabSchema(activeId: string): FieldDef[] {
+  return [
+    field("id"),
+    field("title"),
+    field("index"),
+    field("parent"),
+    {
+      name: "active",
+      extract: (item) => (item.id === activeId ? "✓" : ""),
+    },
+  ];
+}
+
+export async function docsReadCommand(
+  account: string,
+  args: string[],
+): Promise<string> {
+  const flags = parseFlags(args);
+  const api = await docsClient(account);
+
+  let doc: docs_v1.Schema$Document;
+  try {
+    const res = await api.documents.get({
+      documentId: flags.documentId,
+      includeTabsContent: true,
+    });
+    doc = res.data;
+  } catch (err) {
+    const translated = translateGoogleError(err, {
+      account,
+      operation: "docs.documents.get",
+    });
+    if (translated.code === "NOT_FOUND") {
+      throw new AxiError(
+        `Document '${flags.documentId}' not found (or ${account} doesn't have access)`,
+        "DOCUMENT_NOT_FOUND",
+        [
+          `Verify the document ID is correct (the portion of the URL after /d/)`,
+          `Confirm ${account} has at least view access to the document`,
+        ],
+      );
+    }
+    if (translated.code === "OPERATION_NOT_SUPPORTED") {
+      // Almost always means the file is not a native Google Doc — typically
+      // an uploaded .docx or similar. The Docs API only operates on native
+      // files; surface the download escape hatch.
+      throw new AxiError(
+        `'${flags.documentId}' is not a native Google Doc — the Docs API can't read it directly`,
+        "NON_NATIVE_DOCUMENT",
+        [
+          `Run \`gws-axi docs download ${flags.documentId}\` to fetch the raw file (and inspect with pandoc/textutil/etc.)`,
+          `Or open in Drive, use File → Save as Google Docs to convert, then retry \`docs read\` on the new file`,
+          `\`gws-axi docs comments ${flags.documentId}\` still works — comments live in Drive and don't require a native doc`,
+        ],
+      );
+    }
+    throw translated;
+  }
+
+  const flat = flattenTabs(doc.tabs);
+
+  // Choose which tab (if any) to render content for.
+  //   - --tab specified: must resolve exactly; error otherwise
+  //   - not specified + single tab: render it
+  //   - not specified + multiple tabs: disambiguation mode (no content)
+  //   - no tabs at all: fall back to document.body (defensive — API with
+  //     includeTabsContent should always return at least one tab)
+  let activeTab: FlatTab | undefined;
+  let contentBody: docs_v1.Schema$Body | undefined;
+  let contentLists: Record<string, docs_v1.Schema$List> | undefined;
+
+  if (flags.tab) {
+    activeTab = flat.find((t) => t.id === flags.tab);
+    if (!activeTab) {
+      throw new AxiError(
+        `Tab '${flags.tab}' not found in document '${flags.documentId}'`,
+        "TAB_NOT_FOUND",
+        [
+          `Available tabs: ${flat.map((t) => t.id).join(", ") || "(none)"}`,
+          `Run \`gws-axi docs read ${flags.documentId}\` (no --tab) to see the full tabs list`,
+        ],
+      );
+    }
+    contentBody = activeTab.tab.documentTab?.body ?? undefined;
+    contentLists = activeTab.tab.documentTab?.lists ?? undefined;
+  } else if (flat.length === 1) {
+    activeTab = flat[0];
+    contentBody = activeTab.tab.documentTab?.body ?? undefined;
+    contentLists = activeTab.tab.documentTab?.lists ?? undefined;
+  } else if (flat.length === 0) {
+    contentBody = doc.body ?? undefined;
+    contentLists = doc.lists ?? undefined;
+  }
+  // (multi-tab, no --tab) → activeTab stays undefined, contentBody undefined
+
+  const blocks: string[] = [];
+
+  const header: Record<string, unknown> = {
+    id: doc.documentId ?? flags.documentId,
+    title: doc.title ?? "",
+  };
+  if (activeTab) header.tab = activeTab.id;
+  else if (flat.length > 1) header.tab_count = flat.length;
+  if (doc.revisionId) header.revision_id = doc.revisionId;
+  blocks.push(renderObject({ document: header }));
+
+  if (flat.length > 0) {
+    blocks.push(
+      renderList(
+        "tabs",
+        flat.map((t) => ({
+          id: t.id,
+          title: t.title,
+          index: t.index,
+          parent: t.parent,
+        })),
+        tabSchema(activeTab?.id ?? ""),
+      ),
+    );
+  }
+
+  const suggestions: string[] = [];
+
+  if (contentBody) {
+    const rendered = renderBodyAsMarkdown(contentBody, contentLists);
+    const total = rendered.markdown.length;
+    const tabSuffix = activeTab ? ` --tab ${activeTab.id}` : "";
+
+    if (flags.out) {
+      const defaultName = `${doc.title || flags.documentId}.md`;
+      const outPath = await resolveOutputPath(flags.out, defaultName);
+      await mkdir(dirname(outPath), { recursive: true });
+      await writeFile(outPath, rendered.markdown);
+      blocks.push(
+        renderObject({
+          saved: outPath,
+          content_total_chars: total,
+        }),
+      );
+    } else {
+      const cap = flags.full ? Number.POSITIVE_INFINITY : DEFAULT_TRUNCATE_CHARS;
+      const truncated = total > cap;
+      const content = truncated
+        ? `${rendered.markdown.slice(0, cap)}…`
+        : rendered.markdown;
+
+      blocks.push(renderObject({ content }));
+      if (truncated) {
+        blocks.push(
+          renderObject({
+            content_truncated: true,
+            content_total_chars: total,
+          }),
+        );
+        suggestions.push(
+          `Run \`gws-axi docs read ${flags.documentId}${tabSuffix} --out <path>\` to save the complete markdown to a file, or --full to expand inline`,
+        );
+      }
+    }
+
+    if (rendered.image_count > 0) {
+      suggestions.push(
+        `${rendered.image_count} image${rendered.image_count === 1 ? "" : "s"} rendered as \`[image]\` placeholders — use Drive to view them inline`,
+      );
+    }
+    // The in-process converter handles most docs well but loses some
+    // fidelity on Google-specific structures (callouts, nested tables).
+    // For agents that need high-fidelity markdown, Drive's server-side
+    // export is better — surface it as an always-available alternative.
+    suggestions.push(
+      `For higher-fidelity markdown (Google's server-side conversion) use \`gws-axi docs download ${flags.documentId} --as text/markdown --out <path>\``,
+    );
+    suggestions.push(
+      `Run \`gws-axi docs find ${flags.documentId}${tabSuffix} --query <text>\` to locate text within`,
+    );
+    suggestions.push(
+      `Run \`gws-axi docs comments ${flags.documentId}\` to see review comments`,
+    );
+  } else if (flat.length > 1) {
+    // Multi-tab, no --tab — steer the agent to pick one.
+    suggestions.push(
+      `This document has ${flat.length} tabs. Run \`gws-axi docs read ${flags.documentId} --tab <id>\` to read one (the id column above).`,
+    );
+  }
+
+  if (suggestions.length > 0) blocks.push(renderHelp(suggestions));
+
+  return joinBlocks(renderObject({ account }), ...blocks);
+}

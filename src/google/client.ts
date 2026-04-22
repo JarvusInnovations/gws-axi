@@ -141,6 +141,14 @@ export function translateGoogleError(
     return new AxiError(message || "not found", "NOT_FOUND", []);
   }
 
+  if (code === 400 && (reason === "failedPrecondition" || status === "FAILED_PRECONDITION")) {
+    return new AxiError(
+      message || "Operation not supported for this resource",
+      "OPERATION_NOT_SUPPORTED",
+      reason ? [`Reason: ${reason}`] : [],
+    );
+  }
+
   if (code === 429 || status === "RESOURCE_EXHAUSTED") {
     return new AxiError(
       `Rate limit exceeded for ${operation}`,

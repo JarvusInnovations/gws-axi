@@ -34,7 +34,7 @@
   "scripts": {
     "build": "tsc && chmod +x dist/bin/gws-axi.js",
     "dev": "bun bin/gws-axi.ts",
-    "test": "vitest run",
+    "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "prepublishOnly": "bun run build"
   },
