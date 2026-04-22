@@ -206,6 +206,16 @@ export async function docsFindCommand(
         ],
       );
     }
+    if (translated.code === "OPERATION_NOT_SUPPORTED") {
+      throw new AxiError(
+        `'${flags.documentId}' is not a native Google Doc — the Docs API can't search it directly`,
+        "NON_NATIVE_DOCUMENT",
+        [
+          `Run \`gws-axi docs download ${flags.documentId}\` to fetch the raw file and grep it locally`,
+          `Or open in Drive, use File → Save as Google Docs to convert, then retry`,
+        ],
+      );
+    }
     throw translated;
   }
 

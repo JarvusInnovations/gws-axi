@@ -143,6 +143,20 @@ export async function docsReadCommand(
         ],
       );
     }
+    if (translated.code === "OPERATION_NOT_SUPPORTED") {
+      // Almost always means the file is not a native Google Doc — typically
+      // an uploaded .docx or similar. The Docs API only operates on native
+      // files; surface the download escape hatch.
+      throw new AxiError(
+        `'${flags.documentId}' is not a native Google Doc — the Docs API can't read it directly`,
+        "NON_NATIVE_DOCUMENT",
+        [
+          `Run \`gws-axi docs download ${flags.documentId}\` to fetch the raw file (and inspect with pandoc/textutil/etc.)`,
+          `Or open in Drive, use File → Save as Google Docs to convert, then retry \`docs read\` on the new file`,
+          `\`gws-axi docs comments ${flags.documentId}\` still works — comments live in Drive and don't require a native doc`,
+        ],
+      );
+    }
     throw translated;
   }
 
