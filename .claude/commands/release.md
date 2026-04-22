@@ -1,136 +1,82 @@
 ---
-description: Cut a new gws-axi release — bumps version, drafts notes, tags, creates GitHub release (CI publishes to npm).
-argument-hint: [version]  e.g. 0.2.0 or patch|minor|major
+description: Draft and publish release notes for the open release PR — merging fires release-publish + publish-npm.yml.
 ---
 
-You're cutting a new release of `gws-axi`. The GitHub Actions workflow at `.github/workflows/publish-npm.yml` auto-publishes to npm on `release.published`, so your job is to end up with a properly-tagged GitHub release — the rest is automated.
+# Release
 
-**Argument**: `$ARGUMENTS` is either a semver string (`0.2.0`) or a bump keyword (`patch`, `minor`, `major`). If empty, ask the user which bump they want.
+Draft and publish release notes for the latest open release PR.
+
+Pushes to `develop` auto-open/update a release PR against `main` via `release-prepare.yml`. Your job here: find that PR, draft clean notes, recommend a version, update the PR, and merge. The `release-publish` workflow then creates the GitHub release, which fires `publish-npm.yml` and ships to npm.
 
 ## Steps
 
-### 1. Verify clean state
+1. **Find the release PR**: Run `gh pr list --state open --json number,title --repo JarvusInnovations/gws-axi` and find the PR whose title matches "Release: v*". If none found, stop and tell the user — they may need to push a commit to `develop` to trigger `release-prepare`.
 
-Run in parallel and confirm before proceeding:
+2. **Get PR details**: Run `gh pr view <number> --json title,body,number,url --repo JarvusInnovations/gws-axi` to get the current PR state.
 
-- `git status` — must be clean, on `main`, up to date with origin
-- `npm view gws-axi version` — current published version
-- `git describe --tags --abbrev=0` — last tagged version locally
-- `bun run build` — must succeed
+3. **Get the changelog comment**: Run `gh api repos/JarvusInnovations/gws-axi/issues/<number>/comments --jq '.[] | select(.body | contains("## Changelog")) | .body'` to extract the bot-generated changelog. Parse the commit lines from inside the markdown code block.
 
-If anything's off (dirty tree, not on main, build fails), STOP and surface to the user.
+4. **Sort commits into two sections** based on whether agents/developers using gws-axi would care about the change, or only contributors to the tool would:
+   - **What's New**: New commands, new subcommands, new flags, new output schema fields, auth/setup improvements, behavior fixes that affect what agents see when they run the CLI. These matter to people running gws-axi.
+   - **Technical**: CI/CD, refactoring, internal tooling, dependency bumps, chores. Note: `feat(ci)` and similar contributor-scoped `feat` commits are Technical. `docs` commits are Technical unless they clearly change user-facing guidance (e.g. a README install-flow rewrite).
 
-### 2. Determine next version
+   Keep the commit lines exactly as formatted in the changelog (including `@username` suffixes).
 
-Based on `$ARGUMENTS`:
+5. **Draft release notes** in this format:
 
-- If a semver string like `0.2.0`, use it directly
-- If `patch`/`minor`/`major`, bump from the current published version
-- If empty, ask the user what kind of bump is appropriate — summarize the commits since the last tag to help them decide
+   ```markdown
+   <Narrative intro — 2-4 sentences in prose, written for npm/GitHub readers who don't follow the repo day-to-day. Lead with the headline capability, then call out anything else users should know. Include this for any release shipping meaningful new capability (new service, new commands, significant UX shift). Skip entirely for releases that are only minor patches/fixes/internals — let the bullets speak for themselves.>
 
-Confirm the chosen version with the user before continuing (unless they passed an explicit semver string).
+   ## What's New
 
-### 3. Review commits and draft notes
+   - commit line
+   - commit line
 
-Get the list of commits since the last tag:
+   ## Technical
 
-```bash
-git log <last-tag>..HEAD --oneline
-```
+   - commit line
+   - commit line
+   ```
 
-Group them by conventional-commit type (feat, fix, docs, chore, refactor, test, ci). Discard noise like lockfile updates if they don't affect users.
+   The narrative intro is the marketing-copy layer — it's what a reader sees first on the GitHub release page and the npm versions listing. Write it in plain English, not as a commit-log echo. Reference concrete capabilities ("Calendar writes — create, update, delete, respond events") rather than commit counts. Omit section headers that have no commits (no empty `## Technical`).
 
-Write release notes to `/tmp/gws-axi-release-<version>.md` using the template below. Keep it concise — bullets, not prose. Link commit SHAs only if they're referenced for context.
+   When in doubt about whether this release warrants a narrative intro: if the version recommendation in step 6 is a minor or major bump, write one. If it's a patch, skip it.
 
-#### Release notes template
+6. **Recommend version**: Look at the current version in the PR title.
+   - Significant new capabilities (new commands/flags, meaningful behavior changes) → next minor (e.g. v0.3.1 → v0.4.0)
+   - Only fixes and internals → keep the current patch
+   - Breaking changes → major bump (and add a `## Breaking changes` section to the notes with the migration path)
 
-```markdown
-npm: https://www.npmjs.com/package/gws-axi/v/<VERSION>
+   Explain your reasoning briefly.
 
-## Added
-- <feat commits — user-visible behavior, not internals>
+7. **Present the draft** to the user showing:
+   - The formatted release notes
+   - Your version recommendation
+   - Ask if they want to: approve as-is, request edits, or switch to a different version bump
 
-## Fixed
-- <fix commits — what was broken and is now working>
+8. **On approval**:
+   - Update the PR description: `gh pr edit <number> --body "<approved body>" --repo JarvusInnovations/gws-axi`
+   - If the user requested a different version, also update the PR title: `gh pr edit <number> --title "Release: v<new_version>" --repo JarvusInnovations/gws-axi`
+   - Merge the PR: `gh pr merge <number> --merge --repo JarvusInnovations/gws-axi`
+   - Show the user the PR URL for confirmation
 
-## Changed
-- <refactor commits with user-visible impact; breaking changes GET THEIR OWN SECTION BELOW instead>
+9. **Watch the npm publish**: Merging fires `release-publish` (which creates the GitHub release) which fires `publish-npm.yml`. Surface the run to the user:
 
-## Internal
-- <chore/ci/refactor that doesn't affect users but is worth noting for contributors>
+   ```bash
+   gh-axi run list --workflow publish-npm.yml --limit 1
+   ```
 
-## Breaking changes
+   Once it completes (~90 seconds), verify:
 
-<Only include this section if there are breaking changes. Otherwise delete.>
-- <describe the break>
-- <describe the migration path>
+   ```bash
+   npm view gws-axi version         # should show the new version
+   npm view gws-axi@<VERSION>       # confirms tarball + provenance
+   ```
 
-## Install / upgrade
-
-\`\`\`bash
-npm install -g gws-axi@<VERSION>
-# or, if already installed:
-npm update -g gws-axi
-```
-
-See the [README](https://github.com/JarvusInnovations/gws-axi#readme) for setup.
-
-```
-
-If the release is a pre-release (version like `0.2.0-rc.1`), pass `--prerelease` to `gh release create` in step 5.
-
-### 4. Create annotated git tag
-
-```bash
-cd /Users/chris/Repositories/gws-axi
-git tag -a v<VERSION> -m "gws-axi v<VERSION>"
-git push origin v<VERSION>
-```
-
-Note: package.json version is NOT bumped locally. The CI workflow reads the tag and runs `npm version --no-git-tag-version "${RELEASE_TAG#v}"` on the build server before publishing — keeps the repo clean without "chore: bump version" commits.
-
-### 5. Create GitHub release
-
-Use the raw `gh` CLI (not `gh-axi`, which has trouble with em-dashes and some character combos in titles):
-
-```bash
-gh release create v<VERSION> \
-  --title "gws-axi v<VERSION>" \
-  --notes-file /tmp/gws-axi-release-<version>.md \
-  --repo JarvusInnovations/gws-axi
-```
-
-Add `--prerelease` for RC/beta/alpha tags. Add `--draft` if the user wants to review before publishing (they'd then manually publish in the GitHub UI, which fires the same `release.published` event).
-
-The output is the release URL. Paste it back to the user.
-
-### 6. Watch the CI workflow
-
-The release publishing immediately kicks off the `Publish npm package` workflow run. Show the user the workflow run:
-
-```bash
-gh-axi run list --workflow publish-npm.yml --limit 1
-```
-
-If they want to watch it live:
-
-```bash
-gh run watch --repo JarvusInnovations/gws-axi
-```
-
-### 7. Verify npm
-
-Once the workflow completes (usually ~90 seconds):
-
-```bash
-npm view gws-axi version               # should show the new version
-npm view gws-axi@<VERSION>             # confirms the tarball + provenance
-```
-
-Flag anything unexpected to the user.
+   Flag anything unexpected.
 
 ## Troubleshooting
 
+- **No release PR exists**: no commits have been pushed to `develop` since the last release, or `release-prepare` failed. Check the Actions tab and push a commit if needed.
 - **Workflow fails on publish**: check that trusted publishing is configured at <https://www.npmjs.com/package/gws-axi/access> linking this repo + `publish-npm.yml`. Without it, the OIDC-based publish can't authenticate.
-- **Tag already exists**: means someone pushed a tag but didn't create a release. Delete the tag (`git tag -d` + `git push origin :refs/tags/vX.Y.Z`) and retry, OR just create the release on the existing tag: `gh release create vX.Y.Z --title ... --notes-file ...`.
-- **`gh release create` errors with "no matches found"**: zsh glob-expanding a special character in the title or notes. Use `--notes-file` (as the template does) rather than `--notes "<long inline string>"`, and keep titles plain ASCII.
+- **`gh` errors with "no matches found"**: zsh glob-expanding a special character in the title or body. Pass bodies via `--body-file` rather than `--body "<long inline string>"` for anything with em-dashes, backticks, or brackets.
