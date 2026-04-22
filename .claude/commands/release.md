@@ -17,7 +17,7 @@ Pushes to `develop` auto-open/update a release PR against `main` via `release-pr
 3. **Get the changelog comment**: Run `gh api repos/JarvusInnovations/gws-axi/issues/<number>/comments --jq '.[] | select(.body | contains("## Changelog")) | .body'` to extract the bot-generated changelog. Parse the commit lines from inside the markdown code block.
 
 4. **Sort commits into two sections** based on whether agents/developers using gws-axi would care about the change, or only contributors to the tool would:
-   - **What's New**: New commands, new subcommands, new flags, new output schema fields, auth/setup improvements, behavior fixes that affect what agents see when they run the CLI. These matter to people running gws-axi.
+   - **Improvements**: New commands, new subcommands, new flags, new output schema fields, auth/setup improvements, behavior fixes that affect what agents see when they run the CLI. These matter to people running gws-axi.
    - **Technical**: CI/CD, refactoring, internal tooling, dependency bumps, chores. Note: `feat(ci)` and similar contributor-scoped `feat` commits are Technical. `docs` commits are Technical unless they clearly change user-facing guidance (e.g. a README install-flow rewrite).
 
    Keep the commit lines exactly as formatted in the changelog (including `@username` suffixes).
@@ -27,7 +27,7 @@ Pushes to `develop` auto-open/update a release PR against `main` via `release-pr
    ```markdown
    <Narrative intro — 2-4 sentences in prose, written for npm/GitHub readers who don't follow the repo day-to-day. Lead with the headline capability, then call out anything else users should know. Include this for any release shipping meaningful new capability (new service, new commands, significant UX shift). Skip entirely for releases that are only minor patches/fixes/internals — let the bullets speak for themselves.>
 
-   ## What's New
+   ## Improvements
 
    - commit line
    - commit line
