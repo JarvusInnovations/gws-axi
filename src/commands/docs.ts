@@ -1,6 +1,7 @@
 import { AxiError } from "axi-sdk-js";
 import { resolveAccount } from "../google/account.js";
 import { docsCommentsCommand, COMMENTS_HELP } from "./docs/comments.js";
+import { docsDownloadCommand, DOWNLOAD_HELP } from "./docs/download.js";
 import { docsFindCommand, FIND_HELP } from "./docs/find.js";
 import { docsReadCommand, READ_HELP } from "./docs/read.js";
 
@@ -54,6 +55,7 @@ const SUBCOMMANDS: DocsSubcommand[] = [
   { name: "read", mutation: false, help: READ_HELP, handler: docsReadCommand },
   { name: "find", mutation: false, help: FIND_HELP, handler: docsFindCommand },
   { name: "comments", mutation: false, help: COMMENTS_HELP, handler: docsCommentsCommand },
+  { name: "download", mutation: false, help: DOWNLOAD_HELP, handler: docsDownloadCommand },
   { name: "append", mutation: true, help: APPEND_HELP },
   { name: "insert-text", mutation: true, help: INSERT_TEXT_HELP },
   { name: "delete-range", mutation: true, help: DELETE_RANGE_HELP },
@@ -105,11 +107,13 @@ subcommand help:
   gws-axi docs read --help        for documentId + tab handling
   gws-axi docs find --help        for text-match search
   gws-axi docs comments --help    for review comments + replies
+  gws-axi docs download --help    for native-file export / raw download
 examples:
   gws-axi docs read 1BxAbc...
   gws-axi docs read 1BxAbc... --tab t.0 --full
   gws-axi docs find 1BxAbc... --query "sprint goal"
   gws-axi docs comments 1BxAbc...
+  gws-axi docs download 1BxAbc... --out ./spec.docx
 `;
 
 export async function docsCommand(args: string[]): Promise<string> {
