@@ -1,8 +1,9 @@
-import { writeFile, mkdir, stat } from "node:fs/promises";
-import { basename, dirname, resolve, extname, join } from "node:path";
+import { writeFile, mkdir } from "node:fs/promises";
+import { basename, dirname, extname } from "node:path";
 import { AxiError } from "axi-sdk-js";
 import { driveClient, translateGoogleError } from "../../google/client.js";
 import { joinBlocks, renderHelp, renderObject } from "../../output/index.js";
+import { resolveOutputPath } from "./paths.js";
 
 export const DOWNLOAD_HELP = `usage: gws-axi docs download <documentId> [flags]
 args[1]:
@@ -100,37 +101,6 @@ function parseFlags(args: string[]): ParsedFlags {
     );
   }
   return { documentId, out, as };
-}
-
-// Strip path separators from a Drive file name so it can be used as a
-// basename without risk of `../` escape or cross-directory writes.
-function sanitizeFileName(name: string): string {
-  return name.replace(/[/\\]/g, "_").trim() || "download";
-}
-
-async function isDirectory(path: string): Promise<boolean> {
-  try {
-    const s = await stat(path);
-    return s.isDirectory();
-  } catch {
-    return false;
-  }
-}
-
-async function resolveOutputPath(
-  provided: string | undefined,
-  baseName: string,
-): Promise<string> {
-  const sanitized = sanitizeFileName(baseName);
-  if (!provided) return resolve(process.cwd(), sanitized);
-  const absolute = resolve(process.cwd(), provided);
-  // Trailing slash → always a directory; and an existing directory → append
-  // the base name so agents can pass a folder without pre-constructing the
-  // full path.
-  if (provided.endsWith("/") || provided.endsWith("\\") || (await isDirectory(absolute))) {
-    return join(absolute, sanitized);
-  }
-  return absolute;
 }
 
 export async function docsDownloadCommand(
