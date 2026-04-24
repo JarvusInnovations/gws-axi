@@ -3,7 +3,7 @@ import { basename, dirname, extname } from "node:path";
 import { AxiError } from "axi-sdk-js";
 import { driveClient, translateGoogleError } from "../../google/client.js";
 import { joinBlocks, renderHelp, renderObject } from "../../output/index.js";
-import { resolveOutputPath } from "./paths.js";
+import { resolveOutputPath } from "../../util/paths.js";
 
 export const DOWNLOAD_HELP = `usage: gws-axi docs download <documentId> [flags]
 args[1]:

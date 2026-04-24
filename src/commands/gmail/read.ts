@@ -8,7 +8,7 @@ import {
   renderHelp,
   renderObject,
 } from "../../output/index.js";
-import { resolveOutputPath } from "../docs/paths.js";
+import { resolveOutputPath } from "../../util/paths.js";
 import { parseMessage, type ParsedMessage } from "./mime.js";
 
 export const READ_HELP = `usage: gws-axi gmail read <id> [flags]

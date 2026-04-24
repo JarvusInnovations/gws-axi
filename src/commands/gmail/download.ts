@@ -4,7 +4,7 @@ import { AxiError } from "axi-sdk-js";
 import type { gmail_v1 } from "googleapis";
 import { gmailClient, translateGoogleError } from "../../google/client.js";
 import { joinBlocks, renderHelp, renderObject } from "../../output/index.js";
-import { resolveOutputPath } from "../docs/paths.js";
+import { resolveOutputPath } from "../../util/paths.js";
 
 export const DOWNLOAD_HELP = `usage: gws-axi gmail download <message-id> <attachment-id> [flags]
 args[2]:
