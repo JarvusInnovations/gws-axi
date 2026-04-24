@@ -103,27 +103,30 @@ export async function gmailDownloadCommand(
     throw translated;
   }
 
-  // Best-effort filename/mime lookup. Walk the message and look for an
-  // attachment whose size matches — that's reliable across ID-minting
-  // quirks. When multiple attachments share a size, or the lookup fails,
-  // fall back to a generic name (agents who want a nicer filename can
-  // always pass --out).
+  // Best-effort filename/mime lookup. Walk the message and narrow matches
+  // to parts that could plausibly be this attachment (by size, and by
+  // mime-type when we happen to know the expected size alone is ambiguous).
+  // Gmail re-mints attachment IDs on every API call, so we can't match on
+  // ID. When multiple parts share a size, we try narrowing by mime type.
+  // If still ambiguous, we fall back to a generic name and warn — the
+  // bytes are still correct; the only loss is filename inference.
   let filename = `attachment-${flags.attachmentId.slice(0, 12)}.bin`;
   let mimeType = "application/octet-stream";
+  let ambiguous = false;
   try {
     const msgRes = await api.users.messages.get({
       userId: "me",
       id: flags.messageId,
       format: "full",
     });
-    const matches: Array<{ filename: string; mimeType: string }> = [];
+    const bySize: Array<{ filename: string; mimeType: string }> = [];
     const walk = (part: gmail_v1.Schema$MessagePart): void => {
       if (
         part.filename &&
         part.body?.attachmentId &&
         part.body?.size === sizeBytes
       ) {
-        matches.push({
+        bySize.push({
           filename: part.filename,
           mimeType: part.mimeType ?? "application/octet-stream",
         });
@@ -131,12 +134,26 @@ export async function gmailDownloadCommand(
       for (const p of part.parts ?? []) walk(p);
     };
     if (msgRes.data.payload) walk(msgRes.data.payload);
-    if (matches.length === 1) {
-      filename = matches[0].filename;
-      mimeType = matches[0].mimeType;
+
+    if (bySize.length === 1) {
+      filename = bySize[0].filename;
+      mimeType = bySize[0].mimeType;
+    } else if (bySize.length > 1) {
+      // Size alone is ambiguous. We don't know the expected mime type
+      // directly (attachments.get doesn't return it), but if every
+      // candidate happens to share one, we can still confidently match.
+      const mimeTypes = new Set(bySize.map((m) => m.mimeType));
+      if (mimeTypes.size === 1) {
+        // All candidates are the same mime type; any of them is a
+        // reasonable choice for display. Pick the first but flag it as
+        // ambiguous so users get a warning to pass --out.
+        filename = bySize[0].filename;
+        mimeType = bySize[0].mimeType;
+        ambiguous = true;
+      } else {
+        ambiguous = true;
+      }
     }
-    // If zero or multiple matches, keep the generic fallback — the bytes
-    // are still written correctly; users get a useful filename via --out.
   } catch {
     // Metadata lookup is best-effort; swallow and use fallback filename.
   }
@@ -184,6 +201,10 @@ export async function gmailDownloadCommand(
   if (filename.startsWith("attachment-")) {
     suggestions.push(
       `Could not match this attachment to a filename in the message — pass \`--out <path>\` to name the saved file`,
+    );
+  } else if (ambiguous) {
+    suggestions.push(
+      `Multiple attachments in this message share the same size — filename above is a best-guess; pass \`--out <path>\` to name it explicitly if wrong`,
     );
   }
 
