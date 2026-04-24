@@ -46,10 +46,12 @@
     "@toon-format/toon": "^2.1.0",
     "axi-sdk-js": "^0.1.4",
     "google-auth-library": "^10.6.2",
-    "googleapis": "^171.4.0"
+    "googleapis": "^171.4.0",
+    "turndown": "^7.2.4"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
+    "@types/turndown": "^5.0.6",
     "typescript": "^6.0.3",
     "vitest": "^4.1.4"
   },
