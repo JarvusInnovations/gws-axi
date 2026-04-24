@@ -16,7 +16,11 @@ args[1]:
   <id>                Thread ID or Message ID. Both are 16-char hex strings
                       and indistinguishable by shape — we try thread-get
                       first, then fall back to message-get → parent thread.
-flags[3]:
+flags[4]:
+  --message-only      Render ONLY the message with the given ID, not its
+                      parent thread. The ID must be a message-id in this
+                      mode. For alerts / notifications / one-offs where
+                      thread context isn't useful.
   --full              Bypass the 30,000-char thread-size threshold; render
                       every message in full inline (can be large).
   --out <path>        Write the full thread to a markdown file instead of
@@ -27,6 +31,7 @@ examples:
   gws-axi gmail read 1a2b3c4d5e6f7890
   gws-axi gmail read 1a2b3c4d5e6f7890 --full
   gws-axi gmail read 1a2b3c4d5e6f7890 --out ./thread.md
+  gws-axi gmail read 1a2b3c4d5e6f7890 --message-only
 output:
   A \`thread{id,subject,message_count,unread,resolved_via_message?}\` header,
   followed by a \`messages[N]\` array. Each message object carries from/to/date
@@ -47,12 +52,14 @@ interface ParsedFlags {
   id: string;
   full: boolean;
   out: string | undefined;
+  messageOnly: boolean;
 }
 
 function parseFlags(args: string[]): ParsedFlags {
   let id: string | undefined;
   let full = false;
   let out: string | undefined;
+  let messageOnly = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     const next = args[i + 1];
@@ -63,6 +70,9 @@ function parseFlags(args: string[]): ParsedFlags {
       case "--out":
         out = next;
         i++;
+        break;
+      case "--message-only":
+        messageOnly = true;
         break;
       default:
         if (!arg.startsWith("--") && id === undefined) {
@@ -81,7 +91,7 @@ function parseFlags(args: string[]): ParsedFlags {
     );
   }
   if (out) full = true;
-  return { id, full, out };
+  return { id, full, out, messageOnly };
 }
 
 interface ResolvedThread {
@@ -235,6 +245,112 @@ function applyTruncation(rows: MessageRow[]): {
   return { truncated: true, total_chars, shown_chars: shown };
 }
 
+async function renderSingleMessage(
+  api: gmail_v1.Gmail,
+  account: string,
+  flags: ParsedFlags,
+): Promise<string> {
+  let msg: gmail_v1.Schema$Message;
+  try {
+    const res = await api.users.messages.get({
+      userId: "me",
+      id: flags.id,
+      format: "full",
+    });
+    msg = res.data;
+  } catch (err) {
+    const translated = translateGoogleError(err, {
+      account,
+      operation: "gmail.messages.get",
+    });
+    if (translated.code === "NOT_FOUND") {
+      throw new AxiError(
+        `Message '${flags.id}' not found`,
+        "MESSAGE_NOT_FOUND",
+        [
+          `--message-only requires a message ID (not a thread ID)`,
+          `Drop --message-only to read the parent thread if the ID is a thread-id`,
+          `Get valid message IDs from \`gws-axi gmail read <thread-id>\` output`,
+        ],
+      );
+    }
+    throw translated;
+  }
+
+  const row = buildMessageRow(msg, 0);
+  const cap = flags.full ? Number.POSITIVE_INFINITY : SIZE_THRESHOLD;
+  let truncated = false;
+  if (row.body_total_chars > cap) {
+    row.body = `${row.body.slice(0, Math.max(0, cap - 1))}…`;
+    row.body_truncated = true;
+    truncated = true;
+  }
+
+  const blocks: string[] = [];
+  blocks.push(renderObject({ account }));
+
+  if (flags.out) {
+    const defaultName = `${row.subject || msg.id || "message"}.md`;
+    const outPath = await resolveOutputPath(flags.out, defaultName);
+    await mkdir(dirname(outPath), { recursive: true });
+    await writeFile(
+      outPath,
+      renderAsMarkdownConversation(
+        { id: msg.threadId ?? "" } as gmail_v1.Schema$Thread,
+        [row],
+      ),
+    );
+    blocks.push(
+      renderObject({
+        saved: outPath,
+        message_chars: row.body_total_chars,
+      }),
+    );
+    return joinBlocks(...blocks);
+  }
+
+  blocks.push(
+    renderObject({
+      message: {
+        id: row.id,
+        thread_id: msg.threadId ?? "",
+        from: row.from,
+        to: row.to,
+        cc: row.cc,
+        date: row.date,
+        subject: row.subject,
+        unread: row.unread,
+        body_source: row.body_source,
+        body: row.body,
+        ...(row.body_truncated
+          ? { body_truncated: true, body_total_chars: row.body_total_chars }
+          : {}),
+        attachments: row.attachments,
+        ...(row.inline_image_count > 0
+          ? { inline_image_count: row.inline_image_count }
+          : {}),
+      },
+    }),
+  );
+
+  const suggestions: string[] = [];
+  if (truncated) {
+    suggestions.push(
+      `Run \`gws-axi gmail read ${flags.id} --message-only --out <path>\` to save the complete body, or --full to expand inline`,
+    );
+  }
+  if (row.attachments.length > 0) {
+    suggestions.push(
+      `${row.attachments.length} attachment${row.attachments.length === 1 ? "" : "s"} — use \`gws-axi gmail download ${flags.id} <attachment-id>\` to fetch bytes`,
+    );
+  }
+  suggestions.push(
+    `Run \`gws-axi gmail read ${msg.threadId ?? flags.id}\` (without --message-only) to see the full parent thread`,
+  );
+  blocks.push(renderHelp(suggestions));
+  return joinBlocks(...blocks);
+}
+
 function renderAsMarkdownConversation(
   thread: gmail_v1.Schema$Thread,
   rows: MessageRow[],
@@ -274,6 +390,11 @@ export async function gmailReadCommand(
 ): Promise<string> {
   const flags = parseFlags(args);
   const api = await gmailClient(account);
+
+  if (flags.messageOnly) {
+    return renderSingleMessage(api, account, flags);
+  }
+
   const { thread, resolved_via_message } = await resolveThread(
     api,
     account,
