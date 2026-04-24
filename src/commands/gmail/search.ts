@@ -1,6 +1,10 @@
 import { AxiError } from "axi-sdk-js";
 import type { gmail_v1 } from "googleapis";
-import { gmailClient, translateGoogleError } from "../../google/client.js";
+import {
+  gmailClient,
+  translateGoogleError,
+  withRateLimitRetry,
+} from "../../google/client.js";
 import {
   field,
   renderListResponse,
@@ -117,15 +121,20 @@ interface ThreadRow {
 
 async function fetchThreadSummary(
   api: gmail_v1.Gmail,
+  account: string,
   id: string,
 ): Promise<ThreadRow | null> {
   try {
-    const res = await api.users.threads.get({
-      userId: "me",
-      id,
-      format: "metadata",
-      metadataHeaders: ["Subject", "From", "Date"],
-    });
+    const res = await withRateLimitRetry(
+      { account, operation: "gmail.threads.get" },
+      () =>
+        api.users.threads.get({
+          userId: "me",
+          id,
+          format: "metadata",
+          metadataHeaders: ["Subject", "From", "Date"],
+        }),
+    );
     const thread = res.data;
     const messages = thread.messages ?? [];
     if (messages.length === 0) return null;
@@ -180,6 +189,7 @@ function isSystemLabel(id: string): boolean {
 
 async function fetchAllThreadSummaries(
   api: gmail_v1.Gmail,
+  account: string,
   ids: string[],
 ): Promise<ThreadRow[]> {
   const results: Array<ThreadRow | null> = new Array(ids.length).fill(null);
@@ -188,7 +198,7 @@ async function fetchAllThreadSummaries(
     while (true) {
       const idx = nextIdx++;
       if (idx >= ids.length) return;
-      results[idx] = await fetchThreadSummary(api, ids[idx]);
+      results[idx] = await fetchThreadSummary(api, account, ids[idx]);
     }
   }
   const workers = Array.from(
@@ -241,7 +251,7 @@ export async function gmailSearchCommand(
 
   const stubs = threadsListed.threads ?? [];
   const ids = stubs.map((t) => t.id ?? "").filter(Boolean);
-  const rows = await fetchAllThreadSummaries(api, ids);
+  const rows = await fetchAllThreadSummaries(api, account, ids);
 
   const header: Record<string, unknown> = {
     account,

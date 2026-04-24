@@ -189,3 +189,33 @@ export async function runGoogleApi<T>(
     throw translateGoogleError(err, { account: email, operation });
   }
 }
+
+/**
+ * Retry a function that may hit Gmail/Drive rate limits. Naive fixed
+ * backoff: wait 1s, 2s, then 4s before giving up. Only retries on
+ * RATE_LIMITED (HTTP 429) — 5xx and other transient errors aren't
+ * retried here because the right behavior varies per operation.
+ *
+ * Errors from `fn` are expected to be raw Google API errors (not yet
+ * translated). Final errors are always returned translated so callers
+ * can handle them uniformly.
+ */
+export async function withRateLimitRetry<T>(
+  context: { account: string; operation: string },
+  fn: () => Promise<T>,
+): Promise<T> {
+  const delays = [1000, 2000, 4000];
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const translated = translateGoogleError(err, context);
+      if (translated.code !== "RATE_LIMITED" || attempt === delays.length) {
+        throw translated;
+      }
+      await new Promise((resolve) => setTimeout(resolve, delays[attempt]));
+    }
+  }
+  // Unreachable: loop either returns or throws.
+  throw new Error("withRateLimitRetry: exhausted retries without throw");
+}
