@@ -1,5 +1,11 @@
+import addressparser from "addressparser";
 import type { gmail_v1 } from "googleapis";
 import TurndownService from "turndown";
+
+export interface ParsedAddress {
+  name: string;
+  address: string;
+}
 
 export interface Attachment {
   filename: string;
@@ -175,14 +181,20 @@ function parseCharset(contentType: string | undefined): BufferEncoding {
   }
 }
 
-export function headerList(
+/**
+ * Parse an RFC 5322 address header (From / To / Cc / Bcc) into a list of
+ * `{ name, address }` records. Uses addressparser so display names with
+ * commas (e.g., "Doe, John" <j@example.com>) are handled correctly — a
+ * naive split on `,` would produce four bogus addresses.
+ */
+export function parseAddresses(
   headers: Map<string, string>,
   name: string,
-): string[] {
-  // Some headers (To, Cc, Bcc) can legitimately contain multiple
-  // comma-separated addresses. We return a split list; callers that want
-  // the raw value can call `headers.get(name.toLowerCase())`.
+): ParsedAddress[] {
   const raw = headers.get(name.toLowerCase());
   if (!raw) return [];
-  return raw.split(",").map((s) => s.trim()).filter(Boolean);
+  return addressparser(raw).map((a) => ({
+    name: a.name ?? "",
+    address: a.address ?? "",
+  }));
 }
