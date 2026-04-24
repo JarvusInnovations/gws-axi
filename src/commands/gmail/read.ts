@@ -91,6 +91,7 @@ interface ResolvedThread {
 
 async function resolveThread(
   api: gmail_v1.Gmail,
+  account: string,
   id: string,
 ): Promise<ResolvedThread> {
   // First attempt: interpret as a thread ID.
@@ -103,7 +104,7 @@ async function resolveThread(
     return { thread: res.data, resolved_via_message: undefined };
   } catch (err) {
     const translated = translateGoogleError(err, {
-      account: "me",
+      account,
       operation: "gmail.threads.get",
     });
     if (translated.code !== "NOT_FOUND") throw translated;
@@ -121,7 +122,7 @@ async function resolveThread(
     message = res.data;
   } catch (err) {
     const translated = translateGoogleError(err, {
-      account: "me",
+      account,
       operation: "gmail.messages.get",
     });
     if (translated.code === "NOT_FOUND") {
@@ -273,7 +274,11 @@ export async function gmailReadCommand(
 ): Promise<string> {
   const flags = parseFlags(args);
   const api = await gmailClient(account);
-  const { thread, resolved_via_message } = await resolveThread(api, flags.id);
+  const { thread, resolved_via_message } = await resolveThread(
+    api,
+    account,
+    flags.id,
+  );
 
   const messages = thread.messages ?? [];
   const rows = messages.map((m, i) => buildMessageRow(m, i));
