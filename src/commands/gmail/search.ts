@@ -13,14 +13,19 @@ import {
 } from "../../output/index.js";
 
 export const SEARCH_HELP = `usage: gws-axi gmail search [flags]
-flags[5]:
+flags[6]:
   --query <text>             Gmail search query (defaults to \`in:inbox\` when
                              omitted). Supports full Gmail syntax: from:, to:,
-                             subject:, is:unread, label:, has:attachment,
-                             newer_than:, before:, after:, AND/OR/-.
-  --in <label>               Shortcut for a \`label:<name>\` filter prepended
-                             to --query (combine with other operators freely).
+                             subject:, is:unread, has:attachment, newer_than:,
+                             before:, after:, AND/OR/-. Use --in for label
+                             filtering (see below).
+  --in <label>               Filter by label name (e.g. "Work/Clients",
+                             "INBOX"). Resolves the name to an internal
+                             label ID via the API, so nested labels with
+                             slashes and spaces work correctly.
   --limit <n>                Max threads to return (default: 25, max: 500).
+  --page <token>             Fetch the next page of results. Token comes
+                             from the \`next_page\` field of a prior run.
   --include-spam-trash       Include spam/trash in results.
   --account <email>          Account override when 2+ are configured.
 examples:
@@ -48,6 +53,7 @@ interface ParsedFlags {
   query: string | undefined;
   inLabel: string | undefined;
   limit: number;
+  page: string | undefined;
   includeSpamTrash: boolean;
 }
 
@@ -55,6 +61,7 @@ function parseFlags(args: string[]): ParsedFlags {
   let query: string | undefined;
   let inLabel: string | undefined;
   let limit = DEFAULT_LIMIT;
+  let page: string | undefined;
   let includeSpamTrash = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -72,28 +79,57 @@ function parseFlags(args: string[]): ParsedFlags {
         limit = Math.max(1, Math.min(MAX_LIMIT, parseInt(next, 10) || DEFAULT_LIMIT));
         i++;
         break;
+      case "--page":
+        page = next;
+        i++;
+        break;
       case "--include-spam-trash":
         includeSpamTrash = true;
         break;
     }
   }
-  return { query, inLabel, limit, includeSpamTrash };
+  return { query, inLabel, limit, page, includeSpamTrash };
 }
 
 function effectiveQuery(flags: ParsedFlags): string {
-  const parts: string[] = [];
-  if (flags.inLabel) parts.push(`label:${quoteIfNeeded(flags.inLabel)}`);
-  if (flags.query) {
-    parts.push(flags.query);
-  } else if (!flags.inLabel) {
-    // Neither --query nor --in specified: default to recent inbox.
-    parts.push("in:inbox");
-  }
-  return parts.join(" ");
+  // --in is applied via the labelIds API parameter, not by injecting a
+  // `label:X` operator into the text query. Labels with slashes or spaces
+  // need exact-ID matching; the text operator is lenient and can miss.
+  if (flags.query) return flags.query;
+  // Neither --query nor --in specified: default to recent inbox.
+  if (!flags.inLabel) return "in:inbox";
+  // --in without --query: no text query; the labelIds param does the work.
+  return "";
 }
 
-function quoteIfNeeded(v: string): string {
-  return /\s/.test(v) ? `"${v}"` : v;
+// Build the labelIds param for threads.list from a --in value. Resolves
+// user-supplied label names (e.g. "Work/Clients") to Gmail's internal
+// label IDs so the search is robust against name-operator quirks.
+async function resolveLabelId(
+  api: gmail_v1.Gmail,
+  name: string,
+  labels: gmail_v1.Schema$Label[],
+): Promise<string> {
+  // Try exact name match first (case-sensitive; Gmail labels are).
+  const exact = labels.find((l) => l.name === name);
+  if (exact?.id) return exact.id;
+  // Case-insensitive fallback for usability.
+  const insensitive = labels.find(
+    (l) => l.name?.toLowerCase() === name.toLowerCase(),
+  );
+  if (insensitive?.id) return insensitive.id;
+  // Accept a raw label ID passthrough (system labels like INBOX, or
+  // Label_XXXX ids copied from another command).
+  const byId = labels.find((l) => l.id === name);
+  if (byId?.id) return byId.id;
+  throw new AxiError(
+    `Label '${name}' not found`,
+    "LABEL_NOT_FOUND",
+    [
+      `Run \`gws-axi gmail labels\` to see all available labels`,
+      `Label names are case-sensitive; check for typos or extra whitespace`,
+    ],
+  );
 }
 
 function getHeader(
@@ -123,6 +159,7 @@ async function fetchThreadSummary(
   api: gmail_v1.Gmail,
   account: string,
   id: string,
+  labelNames: Map<string, string>,
 ): Promise<ThreadRow | null> {
   try {
     const res = await withRateLimitRetry(
@@ -159,7 +196,10 @@ async function fetchThreadSummary(
           continue;
         }
         if (isSystemLabel(l)) continue;
-        labelSet.add(l);
+        // Resolve the internal id (e.g., Label_4234223) to the
+        // user-facing name. Fall back to the id if we somehow have a
+        // label we couldn't look up.
+        labelSet.add(labelNames.get(l) ?? l);
       }
     }
 
@@ -191,6 +231,7 @@ async function fetchAllThreadSummaries(
   api: gmail_v1.Gmail,
   account: string,
   ids: string[],
+  labelNames: Map<string, string>,
 ): Promise<ThreadRow[]> {
   const results: Array<ThreadRow | null> = new Array(ids.length).fill(null);
   let nextIdx = 0;
@@ -198,7 +239,12 @@ async function fetchAllThreadSummaries(
     while (true) {
       const idx = nextIdx++;
       if (idx >= ids.length) return;
-      results[idx] = await fetchThreadSummary(api, account, ids[idx]);
+      results[idx] = await fetchThreadSummary(
+        api,
+        account,
+        ids[idx],
+        labelNames,
+      );
     }
   }
   const workers = Array.from(
@@ -207,6 +253,21 @@ async function fetchAllThreadSummaries(
   );
   await Promise.all(workers);
   return results.filter((r): r is ThreadRow => r !== null);
+}
+
+function rebuildSearchInvocation(flags: ParsedFlags, pageToken: string): string {
+  const parts = ["gws-axi gmail search"];
+  if (flags.query) parts.push(`--query ${shellQuote(flags.query)}`);
+  if (flags.inLabel) parts.push(`--in ${shellQuote(flags.inLabel)}`);
+  if (flags.limit !== DEFAULT_LIMIT) parts.push(`--limit ${flags.limit}`);
+  if (flags.includeSpamTrash) parts.push(`--include-spam-trash`);
+  parts.push(`--page ${pageToken}`);
+  return parts.join(" ");
+}
+
+function shellQuote(v: string): string {
+  if (!/[\s"'$`\\]/.test(v)) return v;
+  return `"${v.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
 function schema(): FieldDef[] {
@@ -233,12 +294,37 @@ export async function gmailSearchCommand(
   const api = await gmailClient(account);
   const query = effectiveQuery(flags);
 
+  // Always fetch labels once per command — the resulting id→name map is
+  // used both to resolve --in <name> to a label ID for the API, and to
+  // translate the thread summaries' labelIds back to user-facing names.
+  let labelList: gmail_v1.Schema$Label[];
+  try {
+    const res = await api.users.labels.list({ userId: "me" });
+    labelList = res.data.labels ?? [];
+  } catch (err) {
+    throw translateGoogleError(err, {
+      account,
+      operation: "gmail.labels.list",
+    });
+  }
+  const labelNames = new Map<string, string>();
+  for (const l of labelList) {
+    if (l.id && l.name) labelNames.set(l.id, l.name);
+  }
+
+  const labelIds: string[] = [];
+  if (flags.inLabel) {
+    labelIds.push(await resolveLabelId(api, flags.inLabel, labelList));
+  }
+
   let threadsListed: gmail_v1.Schema$ListThreadsResponse;
   try {
     const res = await api.users.threads.list({
       userId: "me",
-      q: query,
+      q: query || undefined,
+      labelIds: labelIds.length > 0 ? labelIds : undefined,
       maxResults: flags.limit,
+      pageToken: flags.page,
       includeSpamTrash: flags.includeSpamTrash,
     });
     threadsListed = res.data;
@@ -251,19 +337,22 @@ export async function gmailSearchCommand(
 
   const stubs = threadsListed.threads ?? [];
   const ids = stubs.map((t) => t.id ?? "").filter(Boolean);
-  const rows = await fetchAllThreadSummaries(api, account, ids);
+  const rows = await fetchAllThreadSummaries(api, account, ids, labelNames);
 
   const header: Record<string, unknown> = {
     account,
-    effective_query: query,
+    effective_query: query || "(none)",
   };
+  if (flags.inLabel) {
+    header.label_filter = flags.inLabel;
+  }
+  if (threadsListed.nextPageToken) {
+    header.next_page = threadsListed.nextPageToken;
+  }
 
   const summary: Record<string, unknown> = {
     count: rows.length,
   };
-  if (threadsListed.nextPageToken) {
-    summary.more_available = true;
-  }
   const estimate = threadsListed.resultSizeEstimate ?? 0;
   if (estimate > rows.length) {
     summary.estimated_total = estimate;
@@ -275,8 +364,11 @@ export async function gmailSearchCommand(
       `Run \`gws-axi gmail read <id>\` on any id to see the full thread (smart — accepts thread-id or message-id)`,
     );
     if (threadsListed.nextPageToken) {
+      // Echo the full next-page command with the token filled in so the
+      // agent can copy-paste or parse the exact invocation.
+      const invocation = rebuildSearchInvocation(flags, threadsListed.nextPageToken);
       suggestions.push(
-        `More matches available — increase --limit (currently ${flags.limit}, max ${MAX_LIMIT}) or narrow --query`,
+        `More matches available — paginate with \`${invocation}\``,
       );
     }
   } else {
