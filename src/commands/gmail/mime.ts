@@ -133,13 +133,46 @@ function collectParts(
 
   // Leaf text parts: decode and stash.
   if ((mime === "text/plain" || mime === "text/html") && bodyData) {
-    textParts.push({ mimeType: mime, data: decodeBase64Url(bodyData) });
+    const charset = parseCharset(partHeader(part, "Content-Type"));
+    textParts.push({ mimeType: mime, data: decodeBase64Url(bodyData, charset) });
   }
 }
 
-function decodeBase64Url(data: string): string {
+function decodeBase64Url(data: string, charset: BufferEncoding): string {
   // Node 22 natively understands base64url — no manual -_/+/ swap needed.
-  return Buffer.from(data, "base64url").toString("utf8");
+  return Buffer.from(data, "base64url").toString(charset);
+}
+
+// Map a declared charset string to a Node-supported encoding. Node's
+// Buffer supports: utf8, utf-8, utf16le, latin1, ascii, base64, base64url,
+// hex, ucs-2 — so we can handle the mainstream mail charsets natively.
+// Windows-1252 and other legacy encodings would need iconv-lite; we fall
+// back to utf-8 for those and note it's a lossy best-effort.
+function parseCharset(contentType: string | undefined): BufferEncoding {
+  if (!contentType) return "utf8";
+  const match = /charset\s*=\s*"?([^";\s]+)/i.exec(contentType);
+  if (!match) return "utf8";
+  const declared = match[1].toLowerCase();
+  switch (declared) {
+    case "utf-8":
+    case "utf8":
+      return "utf8";
+    case "us-ascii":
+    case "ascii":
+      return "ascii";
+    case "iso-8859-1":
+    case "latin1":
+    case "latin-1":
+      return "latin1";
+    case "utf-16":
+    case "utf-16le":
+    case "utf16le":
+      return "utf16le";
+    default:
+      // Unknown (e.g., windows-1252, iso-8859-2) — default to utf-8.
+      // Mojibake is possible for non-UTF-8 mail in these rarer encodings.
+      return "utf8";
+  }
 }
 
 export function headerList(
