@@ -6,7 +6,7 @@ import { homeCommand } from "./commands/home.js";
 import { authCommand, AUTH_HELP } from "./commands/auth.js";
 import { doctorCommand, DOCTOR_HELP } from "./commands/doctor.js";
 import { calendarCommand } from "./commands/calendar.js";
-import { gmailCommand, GMAIL_HELP } from "./commands/gmail.js";
+import { gmailCommand } from "./commands/gmail.js";
 import { docsCommand } from "./commands/docs.js";
 import { driveCommand, DRIVE_HELP } from "./commands/drive.js";
 import { slidesCommand, SLIDES_HELP } from "./commands/slides.js";
@@ -34,7 +34,6 @@ examples:
 const COMMAND_HELP: Record<string, string> = {
   auth: AUTH_HELP,
   doctor: DOCTOR_HELP,
-  gmail: GMAIL_HELP,
   drive: DRIVE_HELP,
   slides: SLIDES_HELP,
 };

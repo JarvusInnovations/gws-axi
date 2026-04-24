@@ -12,7 +12,7 @@ import {
   type FieldDef,
 } from "../../output/index.js";
 import { renderBodyAsMarkdown } from "./markdown.js";
-import { resolveOutputPath } from "./paths.js";
+import { resolveOutputPath } from "../../util/paths.js";
 
 export const READ_HELP = `usage: gws-axi docs read <documentId> [flags]
 args[1]:
