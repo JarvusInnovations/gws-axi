@@ -13,6 +13,7 @@ import {
   setDefaultAccount,
   setupProgress,
   tokensPathForAccount,
+  writeSetupState,
   SETUP_STEP_ORDER,
   type SetupStepKey,
 } from "../config.js";
@@ -25,6 +26,7 @@ import {
   advanceGcpProject,
   advanceOauthClient,
   advanceTestUserAdded,
+  consoleUrl,
   type SetupFlags,
   type StepOutcome,
 } from "../auth/steps.js";
@@ -35,11 +37,21 @@ import {
 } from "../auth/loopback.js";
 import { readPendingAuth } from "../auth/pending.js";
 import { setupHtmlPath, writeSetupHtml } from "../auth/setup-html.js";
+import {
+  predictUnverifiedAppWarning,
+  probeRestrictedScope,
+  summarizeAccountHealth,
+} from "../auth/health.js";
+import { readTokens } from "../google/tokens.js";
+import { getValidAccessToken } from "../google/tokens.js";
+import { findLikelyTypo } from "../util/typo.js";
 
 export const AUTH_HELP = `usage: gws-axi auth <subcommand> [flags]
-subcommands[7]:
+subcommands[8]:
   setup     Progressive agent-guided OAuth setup (run repeatedly until complete)
-  login     Prepare OAuth flow (non-blocking by default); add --wait to block
+  login     Authenticate or re-auth an account (prepares + blocks on callback by default)
+  publish   Walk through publishing the consent screen to "In Production"
+            (lifts the 7-day Testing-state refresh-token expiry)
   accounts  List authenticated accounts
   use       Set the default account: gws-axi auth use <email>
   revoke    Delete an account's tokens: gws-axi auth revoke <email>
@@ -52,27 +64,40 @@ setup flags[6]:
   --credentials-json <path>   Path to downloaded OAuth client JSON (step 4)
   --test-user <email>         Record test user email (step 6 metadata)
   --confirm-step <step>       Mark a manual step done (consent_screen, test_user_added)
-login flags[2]:
+login flags[3]:
   --account <email>           Authenticate or re-auth a specific account
-  --wait                      Block on the callback (up to 5 min). Run this
-                              AFTER instructing the user to click the
-                              Authenticate button on the setup page.
+  --no-wait                   Prepare only and return fast (for agent flows
+                              that want to relay instructions to the user
+                              before binding the callback server). Pair
+                              with a follow-up \`auth login --wait\`.
+  --wait                      Block on the callback for a previously
+                              prepared session (paired with --no-wait).
+publish flags[1]:
+  --confirm                   Mark the consent screen as published in
+                              setup state (after clicking "PUBLISH APP"
+                              in the Console).
 reset flags[1]:
   --from <step>               Clear from this step forward
 examples:
   gws-axi auth setup
   gws-axi auth setup --create-project gws-axi-chris-9f3a
   gws-axi auth setup --credentials-json ~/Downloads/client_secret_xxx.json
-  gws-axi auth login --account chris@personal.com   # prepare only, returns fast
-  gws-axi auth login --wait                         # blocks until user clicks
+  gws-axi auth login --account chris@personal.com           # prepares + blocks (default)
+  gws-axi auth login --account chris@personal.com --no-wait # agent prepare-only
+  gws-axi auth login --wait                                 # agent block-only
+  gws-axi auth publish                                      # show publish walkthrough
+  gws-axi auth publish --confirm                            # mark consent screen as published
   gws-axi auth accounts
   gws-axi auth use chris@jarv.us
   gws-axi auth revoke chris@personal.com
 flow:
-  For agent-driven auth: run \`gws-axi auth login --account <email>\`,
-  relay the returned instructions to the user, THEN run
-  \`gws-axi auth login --wait\`. Splitting lets the agent tell the user
-  what to do before committing to the blocking callback wait.
+  Humans: \`gws-axi auth login --account <email>\` is one command that
+  prepares, prints a brief instruction, and waits for the OAuth
+  callback (up to 5 min).
+  Agents: pass --no-wait so the prepare returns immediately, relay the
+  instructions to the user, then call \`gws-axi auth login --wait\` in
+  a SEPARATE bash turn — the wait command binds the callback server
+  and must be listening before the user clicks.
 `;
 
 interface ParsedArgs {
@@ -81,6 +106,8 @@ interface ParsedArgs {
   resetFromKey?: SetupStepKey;
   account?: string;
   wait: boolean;
+  noWait: boolean;
+  confirm: boolean;
   positional: string[];
 }
 
@@ -91,6 +118,8 @@ function parseArgs(args: string[]): ParsedArgs {
   let resetFromKey: SetupStepKey | undefined;
   let account: string | undefined;
   let wait = false;
+  let noWait = false;
+  let confirm = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -131,13 +160,19 @@ function parseArgs(args: string[]): ParsedArgs {
       case "--wait":
         wait = true;
         break;
+      case "--no-wait":
+        noWait = true;
+        break;
+      case "--confirm":
+        confirm = true;
+        break;
       default:
         if (!arg.startsWith("--")) {
           positional.push(arg);
         }
     }
   }
-  return { flags, confirmStep, resetFromKey, account, wait, positional };
+  return { flags, confirmStep, resetFromKey, account, wait, noWait, confirm, positional };
 }
 
 function expandHome(path: string | undefined): string | undefined {
@@ -341,28 +376,37 @@ function collapseHome(path: string): string {
 }
 
 async function runLogin(args: string[]): Promise<Record<string, unknown>> {
-  const { account, wait } = parseArgs(args);
+  const { account, wait, noWait } = parseArgs(args);
 
+  // --wait: block on a previously-prepared session (agent flow second step).
   if (wait) {
-    // Phase 2: block on callback.
-    const outcome = await awaitPendingAuth();
-    if (outcome.advanced) {
-      return {
-        status: "ok",
-        ...(outcome.detail ?? {}),
-        accounts: listAccounts(),
-        default_account: getDefaultAccount(),
-        help: ["Run `gws-axi doctor` to verify runtime health"],
-      };
-    }
-    throw new AxiError(
-      outcome.error ?? "OAuth flow failed",
-      outcome.code ?? "OAUTH_FAILED",
-      outcome.instructions ?? [],
-    );
+    return await blockOnCallback();
   }
 
-  // Phase 1: prepare, return fast with instructions.
+  // Otherwise: always prepare. Then either return immediately (--no-wait,
+  // agent flow first step) or block inline (default, human one-shot flow).
+  const prepared = await prepareLogin(account);
+
+  if (noWait) {
+    return prepared;
+  }
+
+  // Default: emit a brief stderr note so the human sees what's happening,
+  // then block on the callback. The Record we return becomes the final
+  // success/failure output on stdout once the callback fires.
+  const acct = (prepared.account as string | undefined) ?? "the target Google account";
+  const htmlPath = prepared.setup_html as string;
+  process.stderr.write(
+    `Authenticating ${acct}. Open ${htmlPath} in the browser ` +
+      `signed into that account and click "Authenticate with Google" ` +
+      `(waiting up to 5 min)…\n`,
+  );
+  return await blockOnCallback();
+}
+
+async function prepareLogin(
+  account: string | undefined,
+): Promise<Record<string, unknown>> {
   if (!existsSync(credentialsPath())) {
     throw new AxiError(
       "OAuth credentials not saved — complete setup steps 1-4 first",
@@ -370,6 +414,30 @@ async function runLogin(args: string[]): Promise<Record<string, unknown>> {
       ["Run `gws-axi auth setup` to continue progressive setup"],
     );
   }
+
+  // Pre-flight typo check: if --account is close to (but not exactly) an
+  // existing authenticated account, abort before burning an OAuth round-
+  // trip. Catches the gmai/gmail.com class of typos at command time, so
+  // the user doesn't have to walk through the consent flow + see a post-
+  // hoc mismatch error to discover it.
+  if (account) {
+    const normalized = normalizeEmail(account);
+    const existing = listAccounts();
+    if (!existing.includes(normalized)) {
+      const likely = findLikelyTypo(normalized, existing);
+      if (likely) {
+        throw new AxiError(
+          `\`${normalized}\` looks like a typo — differs by ≤2 characters from existing account \`${likely}\``,
+          "LIKELY_TYPO",
+          [
+            `Did you mean: \`gws-axi auth login --account ${likely}\` ?`,
+            `If you really intend to add a new account named \`${normalized}\`, double-check the spelling and retry — the command was rejected to prevent burning an OAuth round-trip on a likely typo`,
+          ],
+        );
+      }
+    }
+  }
+
   const prepared = await preparePendingAuth({
     expectedAccount: account ? normalizeEmail(account) : undefined,
   });
@@ -380,21 +448,82 @@ async function runLogin(args: string[]): Promise<Record<string, unknown>> {
   }
   const htmlPath = collapseHome(prepared.htmlPath);
   const normalizedAccount = account ? normalizeEmail(account) : undefined;
+  const setupState = readSetupState();
+  const warningLevel = predictUnverifiedAppWarning(
+    normalizedAccount,
+    !!setupState.published,
+  );
+  const instructions: string[] = [
+    `The gws-axi setup page (${htmlPath}) must be open in the browser PROFILE/SESSION where the user is signed into ${normalizedAccount ? `\`${normalizedAccount}\`` : "the target Google account"}. This may be a DIFFERENT browser profile than the one used for initial setup (e.g., personal Chrome profile vs work). If the setup page is open in the wrong profile, tell the user to open ${htmlPath} in the correct profile.`,
+    `In that setup page tab, the user waits for the yellow "Authenticate with Google" button to appear (up to 10s auto-refresh), clicks it, signs in${normalizedAccount ? ` as \`${normalizedAccount}\`` : ""}, approves the requested scopes, and sees the success page.`,
+  ];
+  if (warningLevel === "always") {
+    instructions.push(
+      `IMPORTANT — relay this to the user explicitly: a "Google hasn't verified this app" screen WILL appear during sign-in. To proceed, click the small "Advanced" link below the warning, then "Go to <app name> (unsafe)". This is normal for unverified personal-use OAuth apps.`,
+    );
+  } else {
+    instructions.push(
+      `If a "Google hasn't verified this app" screen appears, the user must click "Advanced" then "Go to <app name> (unsafe)" to proceed.`,
+    );
+  }
+  instructions.push(
+    "After RELAYING these instructions to the user, IMMEDIATELY run `gws-axi auth login --wait` in a new bash turn — do NOT wait for the user to confirm they're ready. The wait command binds the callback server; it must be listening BEFORE the user clicks. If you delay, the user's click hits an unreachable localhost URL. The wait is harmless: it just listens for up to 5 minutes while the user takes their time.",
+  );
+
   return {
     status: "prepared",
     ...(normalizedAccount ? { account: normalizedAccount } : {}),
     setup_html: htmlPath,
     expires_at: prepared.pending.expires_at,
-    instructions: [
-      `The gws-axi setup page (${htmlPath}) must be open in the browser PROFILE/SESSION where the user is signed into ${normalizedAccount ? `\`${normalizedAccount}\`` : "the target Google account"}. This may be a DIFFERENT browser profile than the one used for initial setup (e.g., personal Chrome profile vs work). If the setup page is open in the wrong profile, tell the user to open ${htmlPath} in the correct profile.`,
-      `In that setup page tab, the user waits for the yellow "Authenticate with Google" button to appear (up to 10s auto-refresh), clicks it, signs in${normalizedAccount ? ` as \`${normalizedAccount}\`` : ""}, approves the requested scopes, and sees the success page.`,
-      "After RELAYING these instructions to the user, IMMEDIATELY run `gws-axi auth login --wait` in a new bash turn — do NOT wait for the user to confirm they're ready. The wait command binds the callback server; it must be listening BEFORE the user clicks. If you delay, the user's click hits an unreachable localhost URL. The wait is harmless: it just listens for up to 5 minutes while the user takes their time.",
-    ],
+    instructions,
     help: [
       "Relay instructions, then IMMEDIATELY run `gws-axi auth login --wait` in the next bash turn — no user-confirmation step between them.",
       "The pending flow expires in 10 minutes — if you don't --wait by then, re-run this prepare step",
     ],
   };
+}
+
+async function blockOnCallback(): Promise<Record<string, unknown>> {
+  const outcome = await awaitPendingAuth();
+  if (!outcome.advanced) {
+    throw new AxiError(
+      outcome.error ?? "OAuth flow failed",
+      outcome.code ?? "OAUTH_FAILED",
+      outcome.instructions ?? [],
+    );
+  }
+
+  // Post-auth health check: report whether the just-issued token is
+  // permanent (post-publish) and whether restricted-scope access is
+  // actually working at the API level. Both checks are best-effort —
+  // a probe failure shouldn't block the success response since the
+  // OAuth flow itself succeeded.
+  const detail = (outcome.detail ?? {}) as Record<string, unknown>;
+  const account = typeof detail.account === "string" ? detail.account : undefined;
+
+  const result: Record<string, unknown> = {
+    status: "ok",
+    ...detail,
+  };
+
+  if (account) {
+    const health = summarizeAccountHealth(account);
+    if (health) {
+      result.token_permanence = health.permanence_detail;
+    }
+    try {
+      const tokens = await getValidAccessToken(account);
+      const probe = await probeRestrictedScope(tokens);
+      result.restricted_scope = probe.detail;
+    } catch (err) {
+      result.restricted_scope = `probe failed: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
+  result.accounts = listAccounts();
+  result.default_account = getDefaultAccount();
+  result.help = ["Run `gws-axi doctor` to verify runtime health for all accounts"];
+  return result;
 }
 
 interface AccountSummary {
@@ -530,6 +659,139 @@ function runStatus(): Record<string, unknown> {
   };
 }
 
+function runPublish(args: string[]): Record<string, unknown> {
+  const { confirm } = parseArgs(args);
+  const state = readSetupState();
+
+  const projectId = state.steps.gcp_project.project_id;
+  if (typeof projectId !== "string") {
+    throw new AxiError(
+      "OAuth project not yet configured — can't publish a consent screen we don't know about",
+      "PRECONDITION_FAILED",
+      ["Run `gws-axi auth setup` to provision the GCP project + OAuth client first"],
+    );
+  }
+
+  // The current Cloud Console URL for the publish UI is under
+  // /auth/audience (the new Auth Platform section). Google migrated away
+  // from the older /apis/credentials/consent path; that one redirects but
+  // can land on the wrong screen depending on project state.
+  const audienceUrl = consoleUrl("/auth/audience", projectId);
+
+  if (confirm) {
+    // --confirm: record the change in setup state.
+    state.published = { confirmed_at: new Date().toISOString() };
+    writeSetupState(state);
+
+    const tokenStatus = summarizeAccountTokens(state.published.confirmed_at);
+    const help: string[] = [
+      `Consent screen for project ${projectId} marked as published`,
+    ];
+    if (tokenStatus.preExisting.length > 0) {
+      help.push(
+        `Re-auth each account once to issue a permanent refresh token (existing tokens were issued before publish and still inherit the 7-day Testing-state expiry):`,
+      );
+      for (const email of tokenStatus.preExisting) {
+        help.push(`  gws-axi auth login --account ${email}`);
+      }
+    } else {
+      help.push(
+        `All authenticated accounts are post-publish — their refresh tokens should already be permanent`,
+      );
+    }
+    return {
+      status: "ok",
+      project_id: projectId,
+      published_at: state.published.confirmed_at,
+      accounts: tokenStatus.rows,
+      help,
+    };
+  }
+
+  if (state.published) {
+    const tokenStatus = summarizeAccountTokens(state.published.confirmed_at);
+    const help: string[] = [
+      `Project ${projectId} is marked as published in setup state`,
+    ];
+    if (tokenStatus.preExisting.length > 0) {
+      help.push(
+        `${tokenStatus.preExisting.length} account${tokenStatus.preExisting.length === 1 ? " was" : "s were"} authenticated before publish — those tokens still expire on the 7-day clock until you re-auth:`,
+      );
+      for (const email of tokenStatus.preExisting) {
+        help.push(`  gws-axi auth login --account ${email}`);
+      }
+    } else {
+      help.push(
+        `All authenticated accounts were re-auth'd after publish — refresh tokens should be permanent`,
+      );
+      help.push(
+        `(Google doesn't expose a "permanent" flag we can read; the heuristic compares each account's obtained_at against the publish timestamp.)`,
+      );
+    }
+    return {
+      status: "already_published",
+      project_id: projectId,
+      published_at: state.published.confirmed_at,
+      consent_screen_url: audienceUrl,
+      accounts: tokenStatus.rows,
+      help,
+    };
+  }
+
+  // Not yet published — walkthrough.
+  return {
+    status: "instructions",
+    project_id: projectId,
+    consent_screen_url: audienceUrl,
+    instructions: [
+      `1. Open: ${audienceUrl}`,
+      `2. Click "PUBLISH APP" near the top of the Audience page`,
+      `3. Click "CONFIRM" on the warning dialog ("Push your app to production?")`,
+      `4. Run \`gws-axi auth publish --confirm\` to mark it published in setup state`,
+      `5. Re-auth each account once to issue permanent refresh tokens (\`gws-axi auth login --account <email>\`)`,
+    ],
+    notes: [
+      "After publishing, the 7-day refresh-token expiry stops applying — that's a Testing-state-specific limit, NOT a verification requirement. Existing tokens still die on their natural schedule; re-running auth login post-publish issues a permanent refresh token in their place.",
+      "Google may show a banner saying 'Your app requires verification' — that's about removing the unverified-app warning during OAuth consent, NOT about token longevity. For personal/single-developer use under 100 users, you can ignore it indefinitely.",
+      "The 'unverified app' intermediate screen during OAuth consent will continue to appear (skip via 'Advanced → Go to <app> (unsafe)'). That's the cost of skipping formal verification.",
+      "Both your Workspace and personal Gmail accounts go through the same publish action — your consent screen is already 'External' (otherwise the personal Gmail couldn't have authenticated), so flipping Testing → Production benefits both.",
+    ],
+    help: [
+      `Run \`gws-axi auth publish --confirm\` after clicking "PUBLISH APP" in the Console`,
+    ],
+  };
+}
+
+interface AccountTokenRow {
+  email: string;
+  obtained_at: string;
+  pre_publish: boolean;
+}
+
+interface TokenSummary {
+  rows: AccountTokenRow[];
+  preExisting: string[];
+}
+
+function summarizeAccountTokens(publishedAt: string): TokenSummary {
+  const publishedMs = new Date(publishedAt).getTime();
+  const rows: AccountTokenRow[] = [];
+  const preExisting: string[] = [];
+  for (const email of listAccounts()) {
+    const tokens = readTokens(email);
+    if (!tokens) continue;
+    const obtainedMs = new Date(tokens.obtained_at).getTime();
+    const prePublish = obtainedMs < publishedMs;
+    rows.push({
+      email,
+      obtained_at: tokens.obtained_at,
+      pre_publish: prePublish,
+    });
+    if (prePublish) preExisting.push(email);
+  }
+  return { rows, preExisting };
+}
+
 function runReset(args: string[]): Record<string, unknown> {
   const { resetFromKey } = parseArgs(args);
   if (resetFromKey && !SETUP_STEP_ORDER.includes(resetFromKey)) {
@@ -560,6 +822,8 @@ export async function authCommand(
       return runSetup(rest);
     case "login":
       return runLogin(rest);
+    case "publish":
+      return runPublish(rest);
     case "accounts":
       return runAccounts();
     case "use":

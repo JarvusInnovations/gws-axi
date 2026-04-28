@@ -32,6 +32,10 @@ export interface SetupState {
   version: number;
   auth_mode: "byo";
   steps: Record<SetupStepKey, SetupStep>;
+  // Set when the user has published their OAuth consent screen to
+  // "In Production" via `gws-axi auth publish --confirm`. Lifts the 7-day
+  // refresh-token expiry that applies in "Testing" state.
+  published?: { confirmed_at: string };
   last_action?: string;
   resume_hint?: string;
 }

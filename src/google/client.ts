@@ -1,6 +1,7 @@
 import { AxiError } from "axi-sdk-js";
 import { google, type calendar_v3, type docs_v1, type drive_v3, type gmail_v1, type slides_v1 } from "googleapis";
 import { OAuth2Client } from "google-auth-library";
+import { readSetupState } from "../config.js";
 import { getValidAccessToken } from "./tokens.js";
 
 /**
@@ -94,13 +95,20 @@ export function translateGoogleError(
   const { account, operation } = context;
 
   if (code === 401 || status === "UNAUTHENTICATED") {
+    const suggestions = [
+      `Run \`gws-axi auth login --account ${account}\` and complete the OAuth flow in the browser (the command blocks for up to 5 min waiting on the callback)`,
+    ];
+    if (!readSetupState().published) {
+      // The 7-day Testing-state expiry is the most common cause; nudge the
+      // user toward publishing so they don't re-hit this every week.
+      suggestions.push(
+        "Tokens issued by OAuth apps in 'Testing' state expire after 7 days — run `gws-axi auth publish` to walk through publishing your consent screen to Production (eliminates the recurring re-auth)",
+      );
+    }
     return new AxiError(
-      `Authentication failed for ${account} — token revoked or invalid`,
+      `Authentication failed for ${account} — token revoked or expired`,
       "TOKEN_INVALID",
-      [
-        `Run \`gws-axi auth login --account ${account}\` to re-authenticate`,
-        "Then run `gws-axi auth login --wait` to complete the OAuth flow",
-      ],
+      suggestions,
     );
   }
 

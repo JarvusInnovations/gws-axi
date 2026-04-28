@@ -14,12 +14,15 @@ import {
   listAccounts,
   normalizeEmail,
   profilePathForAccount,
+  readSetupState,
   setDefaultAccount,
   tokensPathForAccount,
   getDefaultAccount,
 } from "../config.js";
 import { markStepDone } from "./state.js";
+import { predictUnverifiedAppWarning } from "./health.js";
 import { allScopes } from "./scopes.js";
+import { editDistance } from "../util/typo.js";
 import {
   clearPendingAuth,
   isPendingAuthExpired,
@@ -186,10 +189,25 @@ async function fetchUserinfo(accessToken: string): Promise<UserInfo> {
   return (await res.json()) as UserInfo;
 }
 
+interface CallbackHandle {
+  code: string;
+  scope?: string;
+  /**
+   * Renders the final response to the browser. Hold the request open
+   * during token-exchange + write so the page reflects the actual outcome
+   * — sending a "success" page before we know the write succeeded was
+   * misleading users into thinking re-auth had completed when it hadn't.
+   */
+  finalize: (result:
+    | { ok: true }
+    | { ok: false; error: string }
+  ) => void;
+}
+
 async function waitForCallback(
   server: Server,
   expectedState: string,
-): Promise<{ code: string; scope?: string }> {
+): Promise<CallbackHandle> {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       reject(new Error("Timed out waiting for OAuth callback after 5 minutes"));
@@ -208,25 +226,45 @@ async function waitForCallback(
       const state = u.searchParams.get("state");
       const errorParam = u.searchParams.get("error");
 
-      res.statusCode = 200;
-      res.setHeader("content-type", "text/html; charset=utf-8");
-
       if (errorParam) {
+        res.statusCode = 200;
+        res.setHeader("content-type", "text/html; charset=utf-8");
         res.end(errorPage(errorParam));
         clearTimeout(timeout);
         reject(new Error(`OAuth error: ${errorParam}`));
         return;
       }
       if (!code || state !== expectedState) {
+        res.statusCode = 200;
+        res.setHeader("content-type", "text/html; charset=utf-8");
         res.end(errorPage("invalid_state_or_missing_code"));
         clearTimeout(timeout);
         reject(new Error("OAuth callback missing code or state mismatch"));
         return;
       }
 
-      res.end(successPage());
+      // Don't respond yet — hold the connection so the browser page can
+      // reflect the actual exchange/write outcome. The caller calls
+      // finalize() after attempting the rest of the flow.
+      const finalize = (result:
+        | { ok: true }
+        | { ok: false; error: string }
+      ): void => {
+        res.statusCode = 200;
+        res.setHeader("content-type", "text/html; charset=utf-8");
+        if (result.ok) {
+          res.end(successPage());
+        } else {
+          res.end(errorPage(result.error));
+        }
+      };
+
       clearTimeout(timeout);
-      resolve({ code, scope: u.searchParams.get("scope") ?? undefined });
+      resolve({
+        code,
+        scope: u.searchParams.get("scope") ?? undefined,
+        finalize,
+      });
     });
   });
 }
@@ -325,8 +363,21 @@ export async function preparePendingAuth(
   };
   writePendingAuth(pending);
 
+  // Predict the unverified-app warning so the setup.html pending-auth
+  // panel can surface it prominently — users miss the small "Advanced"
+  // link and bail thinking the app is broken.
+  const setupState = readSetupState();
   writeSetupHtml({
-    pendingAuth: { url: authUrl, account: options.expectedAccount },
+    pendingAuth: {
+      url: authUrl,
+      account: options.expectedAccount,
+      warnings: {
+        unverifiedApp: predictUnverifiedAppWarning(
+          options.expectedAccount,
+          !!setupState.published,
+        ),
+      },
+    },
   });
 
   return {
@@ -413,12 +464,13 @@ export async function awaitPendingAuth(): Promise<StepOutcome> {
   // default) vs. an additional one (default stays put).
   const accountsBefore = listAccounts();
 
+  let handle: CallbackHandle | undefined;
   try {
-    const { code, scope } = await waitForCallback(server, pending.state);
+    handle = await waitForCallback(server, pending.state);
     const tokens = await exchangeCode({
       clientId: creds.client_id,
       clientSecret: creds.client_secret,
-      code,
+      code: handle.code,
       redirectUri,
       verifier: pending.verifier,
     });
@@ -429,20 +481,36 @@ export async function awaitPendingAuth(): Promise<StepOutcome> {
       pending.expected_account &&
       normalizeEmail(pending.expected_account) !== authenticatedEmail
     ) {
+      const expected = pending.expected_account;
+      const distance = editDistance(expected, authenticatedEmail);
+      const looksLikeTypo =
+        distance <= 2 && Math.abs(expected.length - authenticatedEmail.length) <= 2;
+      const browserMsg = looksLikeTypo
+        ? `Likely typo in --account. You signed in as ${authenticatedEmail}, but --account was ${expected} (off by ${distance} character${distance === 1 ? "" : "s"}). Re-run \`gws-axi auth login --account ${authenticatedEmail}\` to use the account you signed in as.`
+        : `Expected ${expected}, got ${authenticatedEmail}. Sign in as ${expected} and retry, or re-run with \`--account ${authenticatedEmail}\` if you meant the account you actually signed in as.`;
+      handle.finalize({ ok: false, error: browserMsg });
+      const cliInstructions = looksLikeTypo
+        ? [
+            `Looks like \`--account ${expected}\` had a typo (differs from the signed-in \`${authenticatedEmail}\` by ${distance} character${distance === 1 ? "" : "s"})`,
+            `Re-run: \`gws-axi auth login --account ${authenticatedEmail}\``,
+          ]
+        : [
+            `Re-run with: \`gws-axi auth login --account ${expected}\` and sign in as that account`,
+            `Or, if you meant the account you actually signed in as: \`gws-axi auth login --account ${authenticatedEmail}\``,
+          ];
       return {
         step,
         advanced: false,
-        title: "Authenticated account does not match expected",
-        error: `Expected ${pending.expected_account}, got ${authenticatedEmail}`,
+        title: looksLikeTypo
+          ? "Account mismatch — likely a typo in --account"
+          : "Authenticated account does not match expected",
+        error: `Expected ${expected}, got ${authenticatedEmail}`,
         code: "ACCOUNT_MISMATCH",
-        instructions: [
-          `Re-run with: \`gws-axi auth login --account ${pending.expected_account}\``,
-          "Make sure you sign in as the correct account in the browser",
-        ],
+        instructions: cliInstructions,
       };
     }
 
-    const grantedScopes = (scope ?? tokens.scope).split(" ").filter(Boolean);
+    const grantedScopes = (handle.scope ?? tokens.scope).split(" ").filter(Boolean);
     const stored: StoredTokens = {
       client_id: creds.client_id,
       access_token: tokens.access_token,
@@ -478,6 +546,9 @@ export async function awaitPendingAuth(): Promise<StepOutcome> {
       latest_account: authenticatedEmail,
     });
 
+    // Token write succeeded — let the browser render the success page.
+    handle.finalize({ ok: true });
+
     return {
       step,
       advanced: true,
@@ -490,11 +561,15 @@ export async function awaitPendingAuth(): Promise<StepOutcome> {
       },
     };
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // If the browser request is still open (waitForCallback succeeded but
+    // a later step blew up), surface the error there too.
+    handle?.finalize({ ok: false, error: message });
     return {
       step,
       advanced: false,
       title: "OAuth flow failed",
-      error: err instanceof Error ? err.message : String(err),
+      error: message,
       code: "OAUTH_FAILED",
       instructions: [
         "Check that the consent screen (step 5) and test user (step 6) are configured",
