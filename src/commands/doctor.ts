@@ -10,6 +10,7 @@ import {
   SETUP_STEP_ORDER,
 } from "../config.js";
 import { probeAccount } from "../google/probe.js";
+import { summarizeAccountHealth } from "../auth/health.js";
 import { SERVICES } from "../auth/scopes.js";
 
 function collapseHomeDirectory(path: string): string {
@@ -185,13 +186,40 @@ export async function doctorCommand(
       ? await checkRuntime(tier === "runtime" ? name : undefined)
       : [];
 
+  // Compute auth_health rows up front so they roll into the failing/warning
+  // tally alongside the other tiers.
+  const accountsForHealth = listAccounts();
+  const authHealthRows: CheckRow[] =
+    accountsForHealth.length > 0 && (!tier || tier === "setup" || tier === "runtime")
+      ? accountsForHealth.map((email) => {
+          const h = summarizeAccountHealth(email);
+          if (!h) {
+            return {
+              check: email,
+              status: "fail" as const,
+              detail: "no stored tokens",
+            };
+          }
+          return {
+            check: email,
+            status: (h.permanence === "permanent" ? "ok" : "warn") as
+              | "ok"
+              | "warn"
+              | "fail",
+            detail: h.permanence_detail,
+          };
+        })
+      : [];
+
   const failing =
     prereqs.filter((r) => r.status === "fail").length +
     setupRows.filter((r) => r.status === "fail").length +
+    authHealthRows.filter((r) => r.status === "fail").length +
     runtimeRows.filter((r) => r.status === "fail").length;
   const warning =
     prereqs.filter((r) => r.status === "warn").length +
     setupRows.filter((r) => r.status === "warn").length +
+    authHealthRows.filter((r) => r.status === "warn").length +
     runtimeRows.filter((r) => r.status === "warn").length;
 
   if (summaryMode) {
@@ -212,6 +240,7 @@ export async function doctorCommand(
 
   const accounts = listAccounts();
   const defaultAccount = getDefaultAccount();
+  const setupState = readSetupState();
 
   const output: Record<string, unknown> = {};
   if (accounts.length > 0) {
@@ -223,6 +252,20 @@ export async function doctorCommand(
   }
   if (prereqs.length > 0) output.prerequisites = prereqs;
   if (setupRows.length > 0) output.setup = setupRows;
+
+  // Auth health: per-account token permanence (compares each token's
+  // obtained_at against state.published.confirmed_at). Cheap, no API
+  // calls — pure timestamp arithmetic on local data. Restricted-scope
+  // verification stays in the runtime tier since it costs an API call.
+  if (authHealthRows.length > 0) {
+    output.auth_health = {
+      published: setupState.published
+        ? `yes (since ${setupState.published.confirmed_at})`
+        : "no — consent screen still in Testing (run `auth publish`)",
+      tokens: authHealthRows,
+    };
+  }
+
   if (runtimeRows.length > 0) output.runtime = runtimeRows;
   output.summary = `${failing} failing, ${warning} warning`;
 
@@ -249,6 +292,26 @@ export async function doctorCommand(
     help.push(
       `Scope gaps on ${accts.join(", ")} — re-auth to re-consent to the full scope set`,
     );
+  }
+  // Auth-health-specific hints: nudge towards `auth publish` if the
+  // consent screen hasn't been published, or list pre-publish accounts
+  // that need a one-time re-auth to upgrade to permanent tokens.
+  if (!setupState.published && authHealthRows.length > 0) {
+    help.push(
+      "Consent screen still in Testing (7-day token expiry) — run `gws-axi auth publish` to lift the limit",
+    );
+  } else if (setupState.published) {
+    const prePublish = authHealthRows.filter(
+      (r) => r.status === "warn" && /pre-publish|7-day clock — issued/.test(r.detail),
+    );
+    if (prePublish.length > 0) {
+      help.push(
+        `${prePublish.length} account${prePublish.length === 1 ? " was" : "s were"} authenticated before publish — re-auth to upgrade to permanent tokens:`,
+      );
+      for (const r of prePublish) {
+        help.push(`  gws-axi auth login --account ${r.check}`);
+      }
+    }
   }
   if (failing === 0 && warning === 0) {
     help.push("All checks passed — you can start using service commands");
