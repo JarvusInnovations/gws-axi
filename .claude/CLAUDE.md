@@ -29,7 +29,7 @@ Tool versions are pinned in `.tool-versions` (bun 1.3.11 / nodejs 22.22.0 via as
 - **BYO OAuth client** (single-user, no shared client) — see `docs/shared-client-future.md` for when/if we ship a public shared client
 - **Multi-account**: one OAuth client handles many accounts (each added as a test user). Write operations require explicit `--account <email>` when 2+ accounts are authenticated — prevents silent wrong-account mutations. Reads default to `default_account` from `config.json`. Central rule lives in `resolveAccount()` in `src/google/account.ts`.
 - **Setup UX**: setup.html is the single browser surface — the CLI never auto-launches browsers (avoids wrong-profile issues). All Google Cloud Console links live on the HTML page, which auto-refreshes every 10s.
-- **Auth login split**: `auth login --account X` prepares (fast), `auth login --wait` blocks on the callback. Agents should run them in two bash turns with instructions-relayed-to-user between.
+- **Auth login default vs split**: `auth login --account X` runs prepare + wait in one command (default — best for humans who can see their own browser). For agent-driven re-auth, pass `--no-wait` on the first call to get fast prepare-only output, relay instructions to the user, then run `auth login --wait` in a SEPARATE bash turn — the wait command binds the callback server and must be listening before the user clicks. Never run the default (blocking) form from an agent context: it'll sit on the callback for up to 5 min while the user can't see what's happening.
 
 ## Conventions
 
