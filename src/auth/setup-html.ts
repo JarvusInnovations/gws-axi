@@ -88,6 +88,11 @@ export interface SetupHtmlOptions {
   pendingAuth?: {
     url: string;
     account?: string;
+    warnings?: {
+      // 'always' = predicted to appear (personal Gmail or Testing-state
+      // app); 'maybe' = depends on Workspace admin trust policy.
+      unverifiedApp: "always" | "maybe";
+    };
   };
 }
 
@@ -164,11 +169,29 @@ export function writeSetupHtml(options: SetupHtmlOptions = {}): string {
   const now = new Date();
   const nowLabel = now.toLocaleTimeString();
 
+  const warnings = options.pendingAuth?.warnings;
+  const unverifiedBlock = warnings?.unverifiedApp === "always"
+    ? `<p class="warn-block">
+  <strong>⚠️ A "Google hasn't verified this app" screen will appear.</strong>
+  To proceed, click <strong>Advanced</strong> (small link below the warning),
+  then <strong>Go to &lt;app name&gt; (unsafe)</strong>. This is normal for
+  unverified personal-use OAuth apps and does not indicate any actual risk.
+</p>`
+    : warnings?.unverifiedApp === "maybe"
+      ? `<p class="warn-block-soft">
+  If a "Google hasn't verified this app" screen appears, click
+  <strong>Advanced</strong> then <strong>Go to &lt;app name&gt; (unsafe)</strong>.
+  Workspace admins may have trusted this app already, in which case you
+  won't see the warning.
+</p>`
+      : "";
+
   const pendingAuthBlock = options.pendingAuth
     ? `<div class="pending-auth">
   <div class="pending-auth-title">Waiting for authentication${options.pendingAuth.account ? ` as <code>${options.pendingAuth.account}</code>` : ""}</div>
   <p><strong>Wrong browser profile?</strong> If you're not currently signed into ${options.pendingAuth.account ? `<code>${options.pendingAuth.account}</code>` : "the target account"} in this browser, open <code>~/.config/gws-axi/setup.html</code> in the correct profile before clicking below — Google will pick up whichever account is active here.</p>
   <a class="auth-button" href="${options.pendingAuth.url}" target="_blank" rel="noopener">Authenticate with Google &rarr;</a>
+  ${unverifiedBlock}
   <p class="pending-auth-note">The CLI is listening for the callback on 127.0.0.1 — this button only works while <code>gws-axi auth login --wait</code> is blocking in your terminal. Sign in${options.pendingAuth.account ? ` as <code>${options.pendingAuth.account}</code>` : ""} at Google's prompt and approve the scopes.</p>
 </div>`
     : "";
@@ -238,6 +261,8 @@ ${accounts
   .pending-auth-note { font-size: 13px; color: #78350f; }
   .auth-button { display: inline-block; padding: 10px 20px; background: #4285f4; color: white; text-decoration: none; border-radius: 6px; font-weight: 500; margin: 8px 0; }
   .auth-button:hover { background: #3367d6; }
+  .warn-block { background: #fff7ed; border: 1px solid #fb923c; border-radius: 4px; padding: 10px 14px; margin: 12px 0; font-size: 14px; color: #7c2d12; }
+  .warn-block-soft { background: #fafafa; border: 1px solid #d4d4d8; border-radius: 4px; padding: 10px 14px; margin: 12px 0; font-size: 13px; color: #52525b; }
   table { width: 100%; border-collapse: collapse; }
   th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #e4e4e7; vertical-align: top; }
   th { background: #fafafa; font-size: 13px; color: #555; text-transform: uppercase; letter-spacing: 0.5px; }

@@ -60,6 +60,36 @@ function formatDelta(ms: number): string {
   return `${Math.round(ms / 86_400_000)}d`;
 }
 
+export type UnverifiedAppWarning = "always" | "maybe";
+
+/**
+ * Predict whether the "Google hasn't verified this app" intermediate
+ * screen will appear during the OAuth consent flow for `email`.
+ *
+ *   - "always": personal Gmail account, OR app still in Testing state.
+ *     The warning shows every time and the user must click "Advanced"
+ *     and then "Go to <app name> (unsafe)" to proceed.
+ *   - "maybe": Workspace account + published app. The warning is
+ *     suppressed if the Workspace admin has added the OAuth client to
+ *     their app-trust policy; otherwise it appears. We can't detect
+ *     admin policy from this side, so we hedge.
+ *
+ * The action is the same either way (click Advanced → Go to (unsafe)),
+ * but the instruction can be more emphatic when we know it will fire.
+ */
+export function predictUnverifiedAppWarning(
+  email: string | undefined,
+  published: boolean,
+): UnverifiedAppWarning {
+  if (!email) return "maybe";
+  const domain = email.split("@")[1]?.toLowerCase() ?? "";
+  const isPersonalGoogle =
+    domain === "gmail.com" || domain === "googlemail.com";
+  if (!published) return "always";
+  if (isPersonalGoogle) return "always";
+  return "maybe";
+}
+
 export interface RestrictedScopeProbe {
   ok: boolean;
   detail: string;
