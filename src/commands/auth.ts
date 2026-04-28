@@ -44,6 +44,7 @@ import {
 } from "../auth/health.js";
 import { readTokens } from "../google/tokens.js";
 import { getValidAccessToken } from "../google/tokens.js";
+import { findLikelyTypo } from "../util/typo.js";
 
 export const AUTH_HELP = `usage: gws-axi auth <subcommand> [flags]
 subcommands[8]:
@@ -413,6 +414,30 @@ async function prepareLogin(
       ["Run `gws-axi auth setup` to continue progressive setup"],
     );
   }
+
+  // Pre-flight typo check: if --account is close to (but not exactly) an
+  // existing authenticated account, abort before burning an OAuth round-
+  // trip. Catches the gmai/gmail.com class of typos at command time, so
+  // the user doesn't have to walk through the consent flow + see a post-
+  // hoc mismatch error to discover it.
+  if (account) {
+    const normalized = normalizeEmail(account);
+    const existing = listAccounts();
+    if (!existing.includes(normalized)) {
+      const likely = findLikelyTypo(normalized, existing);
+      if (likely) {
+        throw new AxiError(
+          `\`${normalized}\` looks like a typo — differs by ≤2 characters from existing account \`${likely}\``,
+          "LIKELY_TYPO",
+          [
+            `Did you mean: \`gws-axi auth login --account ${likely}\` ?`,
+            `If you really intend to add a new account named \`${normalized}\`, double-check the spelling and retry — the command was rejected to prevent burning an OAuth round-trip on a likely typo`,
+          ],
+        );
+      }
+    }
+  }
+
   const prepared = await preparePendingAuth({
     expectedAccount: account ? normalizeEmail(account) : undefined,
   });
