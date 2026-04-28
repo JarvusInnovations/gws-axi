@@ -13,6 +13,7 @@ import {
   setDefaultAccount,
   setupProgress,
   tokensPathForAccount,
+  writeSetupState,
   SETUP_STEP_ORDER,
   type SetupStepKey,
 } from "../config.js";
@@ -25,6 +26,7 @@ import {
   advanceGcpProject,
   advanceOauthClient,
   advanceTestUserAdded,
+  consoleUrl,
   type SetupFlags,
   type StepOutcome,
 } from "../auth/steps.js";
@@ -37,9 +39,11 @@ import { readPendingAuth } from "../auth/pending.js";
 import { setupHtmlPath, writeSetupHtml } from "../auth/setup-html.js";
 
 export const AUTH_HELP = `usage: gws-axi auth <subcommand> [flags]
-subcommands[7]:
+subcommands[8]:
   setup     Progressive agent-guided OAuth setup (run repeatedly until complete)
   login     Authenticate or re-auth an account (prepares + blocks on callback by default)
+  publish   Walk through publishing the consent screen to "In Production"
+            (lifts the 7-day Testing-state refresh-token expiry)
   accounts  List authenticated accounts
   use       Set the default account: gws-axi auth use <email>
   revoke    Delete an account's tokens: gws-axi auth revoke <email>
@@ -60,6 +64,10 @@ login flags[3]:
                               with a follow-up \`auth login --wait\`.
   --wait                      Block on the callback for a previously
                               prepared session (paired with --no-wait).
+publish flags[1]:
+  --confirm                   Mark the consent screen as published in
+                              setup state (after clicking "PUBLISH APP"
+                              in the Console).
 reset flags[1]:
   --from <step>               Clear from this step forward
 examples:
@@ -69,6 +77,8 @@ examples:
   gws-axi auth login --account chris@personal.com           # prepares + blocks (default)
   gws-axi auth login --account chris@personal.com --no-wait # agent prepare-only
   gws-axi auth login --wait                                 # agent block-only
+  gws-axi auth publish                                      # show publish walkthrough
+  gws-axi auth publish --confirm                            # mark consent screen as published
   gws-axi auth accounts
   gws-axi auth use chris@jarv.us
   gws-axi auth revoke chris@personal.com
@@ -89,6 +99,7 @@ interface ParsedArgs {
   account?: string;
   wait: boolean;
   noWait: boolean;
+  confirm: boolean;
   positional: string[];
 }
 
@@ -100,6 +111,7 @@ function parseArgs(args: string[]): ParsedArgs {
   let account: string | undefined;
   let wait = false;
   let noWait = false;
+  let confirm = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -143,13 +155,16 @@ function parseArgs(args: string[]): ParsedArgs {
       case "--no-wait":
         noWait = true;
         break;
+      case "--confirm":
+        confirm = true;
+        break;
       default:
         if (!arg.startsWith("--")) {
           positional.push(arg);
         }
     }
   }
-  return { flags, confirmStep, resetFromKey, account, wait, noWait, positional };
+  return { flags, confirmStep, resetFromKey, account, wait, noWait, confirm, positional };
 }
 
 function expandHome(path: string | undefined): string | undefined {
@@ -569,6 +584,79 @@ function runStatus(): Record<string, unknown> {
   };
 }
 
+function runPublish(args: string[]): Record<string, unknown> {
+  const { confirm } = parseArgs(args);
+  const state = readSetupState();
+
+  // Need step 1 (gcp_project) at minimum so we know which project's consent
+  // screen to point at. The full setup doesn't need to be complete to
+  // publish — but realistically a user only hits this after re-auth pain,
+  // which means they're already past step 7.
+  const projectId = state.steps.gcp_project.project_id;
+  if (typeof projectId !== "string") {
+    throw new AxiError(
+      "OAuth project not yet configured — can't publish a consent screen we don't know about",
+      "PRECONDITION_FAILED",
+      ["Run `gws-axi auth setup` to provision the GCP project + OAuth client first"],
+    );
+  }
+
+  const consentScreenUrl = consoleUrl("/apis/credentials/consent", projectId);
+
+  if (state.published && !confirm) {
+    return {
+      status: "already_published",
+      project_id: projectId,
+      published_at: state.published.confirmed_at,
+      consent_screen_url: consentScreenUrl,
+      help: [
+        `This project is already marked as published in setup state`,
+        `If you've reverted to Testing in the Console, run \`gws-axi auth publish --confirm\` again to refresh the timestamp, or \`gws-axi auth reset --from tokens_obtained\` to walk the full re-auth flow`,
+      ],
+    };
+  }
+
+  if (!confirm) {
+    return {
+      status: "instructions",
+      project_id: projectId,
+      consent_screen_url: consentScreenUrl,
+      instructions: [
+        `1. Open: ${consentScreenUrl}`,
+        `2. Click "PUBLISH APP" near the top of the page`,
+        `3. Click "CONFIRM" on the warning dialog ("Push your app to production?")`,
+        `4. Run \`gws-axi auth publish --confirm\` to mark it published in setup state`,
+        `5. Re-auth each account once to issue permanent refresh tokens (\`gws-axi auth login --account <email>\`)`,
+      ],
+      notes: [
+        "After publishing, the 7-day refresh-token expiry stops applying. Existing tokens still die on their natural schedule; re-running auth login post-publish issues a permanent refresh token in their place.",
+        "The 'unverified app' intermediate screen during OAuth consent will continue to appear (it's a separate Google verification process not relevant for personal use; capped at 100 users for unverified apps with sensitive scopes).",
+        "Both your Workspace and personal Gmail accounts go through the same publish action — your consent screen is already 'External' (otherwise the personal Gmail couldn't have authenticated), so flipping Testing → Production benefits both.",
+      ],
+      help: [
+        `Run \`gws-axi auth publish --confirm\` after clicking "PUBLISH APP" in the Console`,
+      ],
+    };
+  }
+
+  // --confirm: record the change in setup state.
+  state.published = { confirmed_at: new Date().toISOString() };
+  writeSetupState(state);
+
+  const accounts = listAccounts();
+  return {
+    status: "ok",
+    project_id: projectId,
+    published_at: state.published.confirmed_at,
+    accounts: accounts,
+    help: [
+      `Consent screen for project ${projectId} marked as published`,
+      `Re-auth each account once to upgrade to permanent refresh tokens:`,
+      ...accounts.map((email) => `  gws-axi auth login --account ${email}`),
+    ],
+  };
+}
+
 function runReset(args: string[]): Record<string, unknown> {
   const { resetFromKey } = parseArgs(args);
   if (resetFromKey && !SETUP_STEP_ORDER.includes(resetFromKey)) {
@@ -599,6 +687,8 @@ export async function authCommand(
       return runSetup(rest);
     case "login":
       return runLogin(rest);
+    case "publish":
+      return runPublish(rest);
     case "accounts":
       return runAccounts();
     case "use":
