@@ -37,7 +37,9 @@ import {
 } from "../auth/loopback.js";
 import { readPendingAuth } from "../auth/pending.js";
 import { setupHtmlPath, writeSetupHtml } from "../auth/setup-html.js";
+import { probeRestrictedScope, summarizeAccountHealth } from "../auth/health.js";
 import { readTokens } from "../google/tokens.js";
+import { getValidAccessToken } from "../google/tokens.js";
 
 export const AUTH_HELP = `usage: gws-axi auth <subcommand> [flags]
 subcommands[8]:
@@ -436,20 +438,45 @@ async function prepareLogin(
 
 async function blockOnCallback(): Promise<Record<string, unknown>> {
   const outcome = await awaitPendingAuth();
-  if (outcome.advanced) {
-    return {
-      status: "ok",
-      ...(outcome.detail ?? {}),
-      accounts: listAccounts(),
-      default_account: getDefaultAccount(),
-      help: ["Run `gws-axi doctor` to verify runtime health"],
-    };
+  if (!outcome.advanced) {
+    throw new AxiError(
+      outcome.error ?? "OAuth flow failed",
+      outcome.code ?? "OAUTH_FAILED",
+      outcome.instructions ?? [],
+    );
   }
-  throw new AxiError(
-    outcome.error ?? "OAuth flow failed",
-    outcome.code ?? "OAUTH_FAILED",
-    outcome.instructions ?? [],
-  );
+
+  // Post-auth health check: report whether the just-issued token is
+  // permanent (post-publish) and whether restricted-scope access is
+  // actually working at the API level. Both checks are best-effort —
+  // a probe failure shouldn't block the success response since the
+  // OAuth flow itself succeeded.
+  const detail = (outcome.detail ?? {}) as Record<string, unknown>;
+  const account = typeof detail.account === "string" ? detail.account : undefined;
+
+  const result: Record<string, unknown> = {
+    status: "ok",
+    ...detail,
+  };
+
+  if (account) {
+    const health = summarizeAccountHealth(account);
+    if (health) {
+      result.token_permanence = health.permanence_detail;
+    }
+    try {
+      const tokens = await getValidAccessToken(account);
+      const probe = await probeRestrictedScope(tokens);
+      result.restricted_scope = probe.detail;
+    } catch (err) {
+      result.restricted_scope = `probe failed: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
+  result.accounts = listAccounts();
+  result.default_account = getDefaultAccount();
+  result.help = ["Run `gws-axi doctor` to verify runtime health for all accounts"];
+  return result;
 }
 
 interface AccountSummary {
