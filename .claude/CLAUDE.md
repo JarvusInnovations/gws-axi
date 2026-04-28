@@ -66,8 +66,12 @@ Tool versions are pinned in `.tool-versions` (bun 1.3.11 / nodejs 22.22.0 via as
 ## Current implementation status (check before adding features)
 
 - ✅ Auth setup (7 steps), multi-account, write protection, doctor with live probes
+- ✅ `auth publish` helper to walk through Testing→Production (eliminates 7-day token expiry)
 - ✅ Calendar reads: `events`, `get`, `calendars`, `search`, `freebusy`
 - ✅ Calendar writes: `create`, `update`, `delete`, `respond`
-- 🚧 Gmail, Docs, Drive, Slides: scaffolded stubs with real account resolution but `NOT_IMPLEMENTED` handlers
-- 🚧 `auth publish` helper to exit Testing mode (eliminates 7-day token expiry)
-- 🚧 Vitest test coverage (vitest installed, zero test files)
+- ✅ Docs reads: `read`, `find`, `comments`, `download`
+- ✅ Gmail reads: `search`, `read`, `labels`, `download`
+- 🚧 Drive, Slides: scaffolded stubs with real account resolution but `NOT_IMPLEMENTED` handlers
+- 🚧 Docs writes: `append`, `insert-text`, `delete-range`, etc. (planned, all stubbed)
+- 🚧 Gmail writes: `send`, `draft`, `modify`, etc. (planned, all stubbed)
+- ✅ Vitest test coverage scaffolded (25 tests for mime + paths)
