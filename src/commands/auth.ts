@@ -37,6 +37,7 @@ import {
 } from "../auth/loopback.js";
 import { readPendingAuth } from "../auth/pending.js";
 import { setupHtmlPath, writeSetupHtml } from "../auth/setup-html.js";
+import { readTokens } from "../google/tokens.js";
 
 export const AUTH_HELP = `usage: gws-axi auth <subcommand> [flags]
 subcommands[8]:
@@ -588,10 +589,6 @@ function runPublish(args: string[]): Record<string, unknown> {
   const { confirm } = parseArgs(args);
   const state = readSetupState();
 
-  // Need step 1 (gcp_project) at minimum so we know which project's consent
-  // screen to point at. The full setup doesn't need to be complete to
-  // publish — but realistically a user only hits this after re-auth pain,
-  // which means they're already past step 7.
   const projectId = state.steps.gcp_project.project_id;
   if (typeof projectId !== "string") {
     throw new AxiError(
@@ -601,60 +598,124 @@ function runPublish(args: string[]): Record<string, unknown> {
     );
   }
 
-  const consentScreenUrl = consoleUrl("/apis/credentials/consent", projectId);
+  // The current Cloud Console URL for the publish UI is under
+  // /auth/audience (the new Auth Platform section). Google migrated away
+  // from the older /apis/credentials/consent path; that one redirects but
+  // can land on the wrong screen depending on project state.
+  const audienceUrl = consoleUrl("/auth/audience", projectId);
 
-  if (state.published && !confirm) {
+  if (confirm) {
+    // --confirm: record the change in setup state.
+    state.published = { confirmed_at: new Date().toISOString() };
+    writeSetupState(state);
+
+    const tokenStatus = summarizeAccountTokens(state.published.confirmed_at);
+    const help: string[] = [
+      `Consent screen for project ${projectId} marked as published`,
+    ];
+    if (tokenStatus.preExisting.length > 0) {
+      help.push(
+        `Re-auth each account once to issue a permanent refresh token (existing tokens were issued before publish and still inherit the 7-day Testing-state expiry):`,
+      );
+      for (const email of tokenStatus.preExisting) {
+        help.push(`  gws-axi auth login --account ${email}`);
+      }
+    } else {
+      help.push(
+        `All authenticated accounts are post-publish — their refresh tokens should already be permanent`,
+      );
+    }
+    return {
+      status: "ok",
+      project_id: projectId,
+      published_at: state.published.confirmed_at,
+      accounts: tokenStatus.rows,
+      help,
+    };
+  }
+
+  if (state.published) {
+    const tokenStatus = summarizeAccountTokens(state.published.confirmed_at);
+    const help: string[] = [
+      `Project ${projectId} is marked as published in setup state`,
+    ];
+    if (tokenStatus.preExisting.length > 0) {
+      help.push(
+        `${tokenStatus.preExisting.length} account${tokenStatus.preExisting.length === 1 ? " was" : "s were"} authenticated before publish — those tokens still expire on the 7-day clock until you re-auth:`,
+      );
+      for (const email of tokenStatus.preExisting) {
+        help.push(`  gws-axi auth login --account ${email}`);
+      }
+    } else {
+      help.push(
+        `All authenticated accounts were re-auth'd after publish — refresh tokens should be permanent`,
+      );
+      help.push(
+        `(Google doesn't expose a "permanent" flag we can read; the heuristic compares each account's obtained_at against the publish timestamp.)`,
+      );
+    }
     return {
       status: "already_published",
       project_id: projectId,
       published_at: state.published.confirmed_at,
-      consent_screen_url: consentScreenUrl,
-      help: [
-        `This project is already marked as published in setup state`,
-        `If you've reverted to Testing in the Console, run \`gws-axi auth publish --confirm\` again to refresh the timestamp, or \`gws-axi auth reset --from tokens_obtained\` to walk the full re-auth flow`,
-      ],
+      consent_screen_url: audienceUrl,
+      accounts: tokenStatus.rows,
+      help,
     };
   }
 
-  if (!confirm) {
-    return {
-      status: "instructions",
-      project_id: projectId,
-      consent_screen_url: consentScreenUrl,
-      instructions: [
-        `1. Open: ${consentScreenUrl}`,
-        `2. Click "PUBLISH APP" near the top of the page`,
-        `3. Click "CONFIRM" on the warning dialog ("Push your app to production?")`,
-        `4. Run \`gws-axi auth publish --confirm\` to mark it published in setup state`,
-        `5. Re-auth each account once to issue permanent refresh tokens (\`gws-axi auth login --account <email>\`)`,
-      ],
-      notes: [
-        "After publishing, the 7-day refresh-token expiry stops applying. Existing tokens still die on their natural schedule; re-running auth login post-publish issues a permanent refresh token in their place.",
-        "The 'unverified app' intermediate screen during OAuth consent will continue to appear (it's a separate Google verification process not relevant for personal use; capped at 100 users for unverified apps with sensitive scopes).",
-        "Both your Workspace and personal Gmail accounts go through the same publish action — your consent screen is already 'External' (otherwise the personal Gmail couldn't have authenticated), so flipping Testing → Production benefits both.",
-      ],
-      help: [
-        `Run \`gws-axi auth publish --confirm\` after clicking "PUBLISH APP" in the Console`,
-      ],
-    };
-  }
-
-  // --confirm: record the change in setup state.
-  state.published = { confirmed_at: new Date().toISOString() };
-  writeSetupState(state);
-
-  const accounts = listAccounts();
+  // Not yet published — walkthrough.
   return {
-    status: "ok",
+    status: "instructions",
     project_id: projectId,
-    published_at: state.published.confirmed_at,
-    accounts: accounts,
+    consent_screen_url: audienceUrl,
+    instructions: [
+      `1. Open: ${audienceUrl}`,
+      `2. Click "PUBLISH APP" near the top of the Audience page`,
+      `3. Click "CONFIRM" on the warning dialog ("Push your app to production?")`,
+      `4. Run \`gws-axi auth publish --confirm\` to mark it published in setup state`,
+      `5. Re-auth each account once to issue permanent refresh tokens (\`gws-axi auth login --account <email>\`)`,
+    ],
+    notes: [
+      "After publishing, the 7-day refresh-token expiry stops applying — that's a Testing-state-specific limit, NOT a verification requirement. Existing tokens still die on their natural schedule; re-running auth login post-publish issues a permanent refresh token in their place.",
+      "Google may show a banner saying 'Your app requires verification' — that's about removing the unverified-app warning during OAuth consent, NOT about token longevity. For personal/single-developer use under 100 users, you can ignore it indefinitely.",
+      "The 'unverified app' intermediate screen during OAuth consent will continue to appear (skip via 'Advanced → Go to <app> (unsafe)'). That's the cost of skipping formal verification.",
+      "Both your Workspace and personal Gmail accounts go through the same publish action — your consent screen is already 'External' (otherwise the personal Gmail couldn't have authenticated), so flipping Testing → Production benefits both.",
+    ],
     help: [
-      `Consent screen for project ${projectId} marked as published`,
-      `Re-auth each account once to upgrade to permanent refresh tokens:`,
-      ...accounts.map((email) => `  gws-axi auth login --account ${email}`),
+      `Run \`gws-axi auth publish --confirm\` after clicking "PUBLISH APP" in the Console`,
     ],
   };
+}
+
+interface AccountTokenRow {
+  email: string;
+  obtained_at: string;
+  pre_publish: boolean;
+}
+
+interface TokenSummary {
+  rows: AccountTokenRow[];
+  preExisting: string[];
+}
+
+function summarizeAccountTokens(publishedAt: string): TokenSummary {
+  const publishedMs = new Date(publishedAt).getTime();
+  const rows: AccountTokenRow[] = [];
+  const preExisting: string[] = [];
+  for (const email of listAccounts()) {
+    const tokens = readTokens(email);
+    if (!tokens) continue;
+    const obtainedMs = new Date(tokens.obtained_at).getTime();
+    const prePublish = obtainedMs < publishedMs;
+    rows.push({
+      email,
+      obtained_at: tokens.obtained_at,
+      pre_publish: prePublish,
+    });
+    if (prePublish) preExisting.push(email);
+  }
+  return { rows, preExisting };
 }
 
 function runReset(args: string[]): Record<string, unknown> {
