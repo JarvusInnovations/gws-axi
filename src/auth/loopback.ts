@@ -32,6 +32,29 @@ import {
 import { setupHtmlPath, writeSetupHtml } from "./setup-html.js";
 import type { StepOutcome } from "./steps.js";
 
+/**
+ * Levenshtein distance for catching --account typos (off-by-one chars
+ * like `gmai.com` vs `gmail.com`). Small enough to inline; not worth a
+ * dependency.
+ */
+function editDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  const prev: number[] = Array(b.length + 1);
+  const curr: number[] = Array(b.length + 1);
+  for (let j = 0; j <= b.length; j++) prev[j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
+    }
+    for (let j = 0; j <= b.length; j++) prev[j] = curr[j];
+  }
+  return prev[b.length];
+}
+
 function collapseHome(path: string): string {
   const home = process.env.HOME ?? "";
   return home && path.startsWith(home) ? `~${path.slice(home.length)}` : path;
@@ -480,23 +503,32 @@ export async function awaitPendingAuth(): Promise<StepOutcome> {
       pending.expected_account &&
       normalizeEmail(pending.expected_account) !== authenticatedEmail
     ) {
-      // The browser's still holding the callback request — render an error
-      // page so the user sees what went wrong without having to switch
-      // back to the terminal.
-      handle.finalize({
-        ok: false,
-        error: `Expected ${pending.expected_account}, got ${authenticatedEmail}. Sign in as the expected account and retry.`,
-      });
+      const expected = pending.expected_account;
+      const distance = editDistance(expected, authenticatedEmail);
+      const looksLikeTypo =
+        distance <= 2 && Math.abs(expected.length - authenticatedEmail.length) <= 2;
+      const browserMsg = looksLikeTypo
+        ? `Likely typo in --account. You signed in as ${authenticatedEmail}, but --account was ${expected} (off by ${distance} character${distance === 1 ? "" : "s"}). Re-run \`gws-axi auth login --account ${authenticatedEmail}\` to use the account you signed in as.`
+        : `Expected ${expected}, got ${authenticatedEmail}. Sign in as ${expected} and retry, or re-run with \`--account ${authenticatedEmail}\` if you meant the account you actually signed in as.`;
+      handle.finalize({ ok: false, error: browserMsg });
+      const cliInstructions = looksLikeTypo
+        ? [
+            `Looks like \`--account ${expected}\` had a typo (differs from the signed-in \`${authenticatedEmail}\` by ${distance} character${distance === 1 ? "" : "s"})`,
+            `Re-run: \`gws-axi auth login --account ${authenticatedEmail}\``,
+          ]
+        : [
+            `Re-run with: \`gws-axi auth login --account ${expected}\` and sign in as that account`,
+            `Or, if you meant the account you actually signed in as: \`gws-axi auth login --account ${authenticatedEmail}\``,
+          ];
       return {
         step,
         advanced: false,
-        title: "Authenticated account does not match expected",
-        error: `Expected ${pending.expected_account}, got ${authenticatedEmail}`,
+        title: looksLikeTypo
+          ? "Account mismatch — likely a typo in --account"
+          : "Authenticated account does not match expected",
+        error: `Expected ${expected}, got ${authenticatedEmail}`,
         code: "ACCOUNT_MISMATCH",
-        instructions: [
-          `Re-run with: \`gws-axi auth login --account ${pending.expected_account}\``,
-          "Make sure you sign in as the correct account in the browser",
-        ],
+        instructions: cliInstructions,
       };
     }
 
