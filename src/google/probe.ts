@@ -86,6 +86,9 @@ async function probeGmail(ctx: ProbeContext): Promise<ProbeResult> {
   if (!hasScope(ctx.tokens, SERVICE_SCOPES.gmail)) {
     return { service, status: "fail", detail: "scope not granted" };
   }
+  // users/me/profile requires gmail.modify (a Restricted scope per Google's
+  // classification) — a 200 here confirms unverified-app restricted-scope
+  // access is working, which is the failure mode users worry about most.
   const { status, body } = await gfetch(
     "https://gmail.googleapis.com/gmail/v1/users/me/profile",
     ctx.accessToken,
@@ -98,7 +101,7 @@ async function probeGmail(ctx: ProbeContext): Promise<ProbeResult> {
     return {
       service,
       status: "ok",
-      detail: `${profile.emailAddress ?? ctx.email}${profile.messagesTotal !== undefined ? ` · ${profile.messagesTotal} messages` : ""}`,
+      detail: `${profile.emailAddress ?? ctx.email}${profile.messagesTotal !== undefined ? ` · ${profile.messagesTotal} messages` : ""} · restricted scope (gmail.modify) ✓`,
     };
   }
   return classifyError(service, status, body);
