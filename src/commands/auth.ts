@@ -37,7 +37,11 @@ import {
 } from "../auth/loopback.js";
 import { readPendingAuth } from "../auth/pending.js";
 import { setupHtmlPath, writeSetupHtml } from "../auth/setup-html.js";
-import { probeRestrictedScope, summarizeAccountHealth } from "../auth/health.js";
+import {
+  predictUnverifiedAppWarning,
+  probeRestrictedScope,
+  summarizeAccountHealth,
+} from "../auth/health.js";
 import { readTokens } from "../google/tokens.js";
 import { getValidAccessToken } from "../google/tokens.js";
 
@@ -419,16 +423,34 @@ async function prepareLogin(
   }
   const htmlPath = collapseHome(prepared.htmlPath);
   const normalizedAccount = account ? normalizeEmail(account) : undefined;
+  const setupState = readSetupState();
+  const warningLevel = predictUnverifiedAppWarning(
+    normalizedAccount,
+    !!setupState.published,
+  );
+  const instructions: string[] = [
+    `The gws-axi setup page (${htmlPath}) must be open in the browser PROFILE/SESSION where the user is signed into ${normalizedAccount ? `\`${normalizedAccount}\`` : "the target Google account"}. This may be a DIFFERENT browser profile than the one used for initial setup (e.g., personal Chrome profile vs work). If the setup page is open in the wrong profile, tell the user to open ${htmlPath} in the correct profile.`,
+    `In that setup page tab, the user waits for the yellow "Authenticate with Google" button to appear (up to 10s auto-refresh), clicks it, signs in${normalizedAccount ? ` as \`${normalizedAccount}\`` : ""}, approves the requested scopes, and sees the success page.`,
+  ];
+  if (warningLevel === "always") {
+    instructions.push(
+      `IMPORTANT — relay this to the user explicitly: a "Google hasn't verified this app" screen WILL appear during sign-in. To proceed, click the small "Advanced" link below the warning, then "Go to <app name> (unsafe)". This is normal for unverified personal-use OAuth apps.`,
+    );
+  } else {
+    instructions.push(
+      `If a "Google hasn't verified this app" screen appears, the user must click "Advanced" then "Go to <app name> (unsafe)" to proceed.`,
+    );
+  }
+  instructions.push(
+    "After RELAYING these instructions to the user, IMMEDIATELY run `gws-axi auth login --wait` in a new bash turn — do NOT wait for the user to confirm they're ready. The wait command binds the callback server; it must be listening BEFORE the user clicks. If you delay, the user's click hits an unreachable localhost URL. The wait is harmless: it just listens for up to 5 minutes while the user takes their time.",
+  );
+
   return {
     status: "prepared",
     ...(normalizedAccount ? { account: normalizedAccount } : {}),
     setup_html: htmlPath,
     expires_at: prepared.pending.expires_at,
-    instructions: [
-      `The gws-axi setup page (${htmlPath}) must be open in the browser PROFILE/SESSION where the user is signed into ${normalizedAccount ? `\`${normalizedAccount}\`` : "the target Google account"}. This may be a DIFFERENT browser profile than the one used for initial setup (e.g., personal Chrome profile vs work). If the setup page is open in the wrong profile, tell the user to open ${htmlPath} in the correct profile.`,
-      `In that setup page tab, the user waits for the yellow "Authenticate with Google" button to appear (up to 10s auto-refresh), clicks it, signs in${normalizedAccount ? ` as \`${normalizedAccount}\`` : ""}, approves the requested scopes, and sees the success page.`,
-      "After RELAYING these instructions to the user, IMMEDIATELY run `gws-axi auth login --wait` in a new bash turn — do NOT wait for the user to confirm they're ready. The wait command binds the callback server; it must be listening BEFORE the user clicks. If you delay, the user's click hits an unreachable localhost URL. The wait is harmless: it just listens for up to 5 minutes while the user takes their time.",
-    ],
+    instructions,
     help: [
       "Relay instructions, then IMMEDIATELY run `gws-axi auth login --wait` in the next bash turn — no user-confirmation step between them.",
       "The pending flow expires in 10 minutes — if you don't --wait by then, re-run this prepare step",
