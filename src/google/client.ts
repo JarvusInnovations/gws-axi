@@ -95,11 +95,11 @@ export function translateGoogleError(
 
   if (code === 401 || status === "UNAUTHENTICATED") {
     return new AxiError(
-      `Authentication failed for ${account} — token revoked or invalid`,
+      `Authentication failed for ${account} — token revoked or expired`,
       "TOKEN_INVALID",
       [
-        `Run \`gws-axi auth login --account ${account}\` to re-authenticate`,
-        "Then run `gws-axi auth login --wait` to complete the OAuth flow",
+        `Run \`gws-axi auth login --account ${account}\` and complete the OAuth flow in the browser (the command blocks for up to 5 min waiting on the callback)`,
+        "Tokens issued by OAuth apps in 'Testing' state expire after 7 days — publishing the consent screen to 'Production' eliminates the recurring re-auth (deferred helper: `auth publish`)",
       ],
     );
   }

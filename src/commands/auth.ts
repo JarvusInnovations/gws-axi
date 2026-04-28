@@ -39,7 +39,7 @@ import { setupHtmlPath, writeSetupHtml } from "../auth/setup-html.js";
 export const AUTH_HELP = `usage: gws-axi auth <subcommand> [flags]
 subcommands[7]:
   setup     Progressive agent-guided OAuth setup (run repeatedly until complete)
-  login     Prepare OAuth flow (non-blocking by default); add --wait to block
+  login     Authenticate or re-auth an account (prepares + blocks on callback by default)
   accounts  List authenticated accounts
   use       Set the default account: gws-axi auth use <email>
   revoke    Delete an account's tokens: gws-axi auth revoke <email>
@@ -52,27 +52,34 @@ setup flags[6]:
   --credentials-json <path>   Path to downloaded OAuth client JSON (step 4)
   --test-user <email>         Record test user email (step 6 metadata)
   --confirm-step <step>       Mark a manual step done (consent_screen, test_user_added)
-login flags[2]:
+login flags[3]:
   --account <email>           Authenticate or re-auth a specific account
-  --wait                      Block on the callback (up to 5 min). Run this
-                              AFTER instructing the user to click the
-                              Authenticate button on the setup page.
+  --no-wait                   Prepare only and return fast (for agent flows
+                              that want to relay instructions to the user
+                              before binding the callback server). Pair
+                              with a follow-up \`auth login --wait\`.
+  --wait                      Block on the callback for a previously
+                              prepared session (paired with --no-wait).
 reset flags[1]:
   --from <step>               Clear from this step forward
 examples:
   gws-axi auth setup
   gws-axi auth setup --create-project gws-axi-chris-9f3a
   gws-axi auth setup --credentials-json ~/Downloads/client_secret_xxx.json
-  gws-axi auth login --account chris@personal.com   # prepare only, returns fast
-  gws-axi auth login --wait                         # blocks until user clicks
+  gws-axi auth login --account chris@personal.com           # prepares + blocks (default)
+  gws-axi auth login --account chris@personal.com --no-wait # agent prepare-only
+  gws-axi auth login --wait                                 # agent block-only
   gws-axi auth accounts
   gws-axi auth use chris@jarv.us
   gws-axi auth revoke chris@personal.com
 flow:
-  For agent-driven auth: run \`gws-axi auth login --account <email>\`,
-  relay the returned instructions to the user, THEN run
-  \`gws-axi auth login --wait\`. Splitting lets the agent tell the user
-  what to do before committing to the blocking callback wait.
+  Humans: \`gws-axi auth login --account <email>\` is one command that
+  prepares, prints a brief instruction, and waits for the OAuth
+  callback (up to 5 min).
+  Agents: pass --no-wait so the prepare returns immediately, relay the
+  instructions to the user, then call \`gws-axi auth login --wait\` in
+  a SEPARATE bash turn — the wait command binds the callback server
+  and must be listening before the user clicks.
 `;
 
 interface ParsedArgs {
@@ -81,6 +88,7 @@ interface ParsedArgs {
   resetFromKey?: SetupStepKey;
   account?: string;
   wait: boolean;
+  noWait: boolean;
   positional: string[];
 }
 
@@ -91,6 +99,7 @@ function parseArgs(args: string[]): ParsedArgs {
   let resetFromKey: SetupStepKey | undefined;
   let account: string | undefined;
   let wait = false;
+  let noWait = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -131,13 +140,16 @@ function parseArgs(args: string[]): ParsedArgs {
       case "--wait":
         wait = true;
         break;
+      case "--no-wait":
+        noWait = true;
+        break;
       default:
         if (!arg.startsWith("--")) {
           positional.push(arg);
         }
     }
   }
-  return { flags, confirmStep, resetFromKey, account, wait, positional };
+  return { flags, confirmStep, resetFromKey, account, wait, noWait, positional };
 }
 
 function expandHome(path: string | undefined): string | undefined {
@@ -341,28 +353,37 @@ function collapseHome(path: string): string {
 }
 
 async function runLogin(args: string[]): Promise<Record<string, unknown>> {
-  const { account, wait } = parseArgs(args);
+  const { account, wait, noWait } = parseArgs(args);
 
+  // --wait: block on a previously-prepared session (agent flow second step).
   if (wait) {
-    // Phase 2: block on callback.
-    const outcome = await awaitPendingAuth();
-    if (outcome.advanced) {
-      return {
-        status: "ok",
-        ...(outcome.detail ?? {}),
-        accounts: listAccounts(),
-        default_account: getDefaultAccount(),
-        help: ["Run `gws-axi doctor` to verify runtime health"],
-      };
-    }
-    throw new AxiError(
-      outcome.error ?? "OAuth flow failed",
-      outcome.code ?? "OAUTH_FAILED",
-      outcome.instructions ?? [],
-    );
+    return await blockOnCallback();
   }
 
-  // Phase 1: prepare, return fast with instructions.
+  // Otherwise: always prepare. Then either return immediately (--no-wait,
+  // agent flow first step) or block inline (default, human one-shot flow).
+  const prepared = await prepareLogin(account);
+
+  if (noWait) {
+    return prepared;
+  }
+
+  // Default: emit a brief stderr note so the human sees what's happening,
+  // then block on the callback. The Record we return becomes the final
+  // success/failure output on stdout once the callback fires.
+  const acct = (prepared.account as string | undefined) ?? "the target Google account";
+  const htmlPath = prepared.setup_html as string;
+  process.stderr.write(
+    `Authenticating ${acct}. Open ${htmlPath} in the browser ` +
+      `signed into that account and click "Authenticate with Google" ` +
+      `(waiting up to 5 min)…\n`,
+  );
+  return await blockOnCallback();
+}
+
+async function prepareLogin(
+  account: string | undefined,
+): Promise<Record<string, unknown>> {
   if (!existsSync(credentialsPath())) {
     throw new AxiError(
       "OAuth credentials not saved — complete setup steps 1-4 first",
@@ -395,6 +416,24 @@ async function runLogin(args: string[]): Promise<Record<string, unknown>> {
       "The pending flow expires in 10 minutes — if you don't --wait by then, re-run this prepare step",
     ],
   };
+}
+
+async function blockOnCallback(): Promise<Record<string, unknown>> {
+  const outcome = await awaitPendingAuth();
+  if (outcome.advanced) {
+    return {
+      status: "ok",
+      ...(outcome.detail ?? {}),
+      accounts: listAccounts(),
+      default_account: getDefaultAccount(),
+      help: ["Run `gws-axi doctor` to verify runtime health"],
+    };
+  }
+  throw new AxiError(
+    outcome.error ?? "OAuth flow failed",
+    outcome.code ?? "OAUTH_FAILED",
+    outcome.instructions ?? [],
+  );
 }
 
 interface AccountSummary {
