@@ -145,6 +145,26 @@ export async function calendarGetCommand(
     blocks.push(renderObject(descBlock));
   }
 
+  // Surface attached files (Drive Docs, Sheets, etc.) — this is where
+  // Gemini Notes land for meetings recorded with the AI Note Taker, so
+  // an agent looking up a past meeting can hand off to `docs read` for
+  // the transcript / summary.
+  const attachments = event.attachments ?? [];
+  if (attachments.length > 0) {
+    const attachmentSchema = [
+      field("title"),
+      field("mime_type"),
+      field("file_id"),
+    ];
+    const rows = attachments.map((a) => ({
+      title: a.title ?? "",
+      mime_type: a.mimeType ?? "",
+      file_id: a.fileId ?? "",
+      file_url: a.fileUrl ?? "",
+    }));
+    blocks.push(renderList("attachments", rows, attachmentSchema));
+  }
+
   const attendees = event.attendees ?? [];
   if (attendees.length > 0) {
     const maxAttendees = flags.full ? attendees.length : 20;
@@ -195,6 +215,26 @@ export async function calendarGetCommand(
   }
   if (event.htmlLink) {
     suggestions.push(`Open in browser: ${event.htmlLink}`);
+  }
+  if (attachments.length > 0) {
+    const docs = attachments.filter(
+      (a) => a.mimeType === "application/vnd.google-apps.document",
+    );
+    if (docs.length > 0) {
+      // Gemini Notes are Google Docs; read directly with docs read.
+      const first = docs[0];
+      suggestions.push(
+        `${docs.length} Google Doc${docs.length === 1 ? "" : "s"} attached (likely meeting notes / agendas) — read with \`gws-axi docs read ${first.fileId}\`${docs.length > 1 ? ` (or any other file_id from the attachments list)` : ""}`,
+      );
+    }
+    const others = attachments.filter(
+      (a) => a.mimeType !== "application/vnd.google-apps.document",
+    );
+    if (others.length > 0) {
+      suggestions.push(
+        `${others.length} non-Doc attachment${others.length === 1 ? "" : "s"} — fetch with \`gws-axi docs download <file-id> [--out <path>]\``,
+      );
+    }
   }
 
   if (suggestions.length > 0) blocks.push(renderHelp(suggestions));

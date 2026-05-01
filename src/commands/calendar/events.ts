@@ -37,7 +37,10 @@ output note:
   columns must handle both formats.
 default columns:
   id, summary, start, end, my_response (your responseStatus if you're
-  an attendee; blank for self-organized events with no attendee list).
+  an attendee; blank for self-organized events with no attendee list),
+  attachments (compact count; "(N Docs)" suffix when meeting notes /
+  Gemini Notes Docs are attached — chase any with \`calendar get <id>\`
+  to see file_ids and hand off to \`docs read\`).
   status column suppressed by default (most events are "confirmed" —
   add --fields status to see cancelled/tentative).
 `;
@@ -135,6 +138,25 @@ function baseSchema(): FieldDef[] {
         if (!attendees?.length) return "";
         const me = attendees.find((a) => a.self);
         return me?.responseStatus ?? "";
+      },
+    },
+    // attachments: compact count, with "(N Docs)" suffix when at least
+    // one is a Google Doc — meeting-notes / Gemini Notes show up here,
+    // and surfacing them by default lets agents notice "this event has
+    // a transcript" without having to expand into `calendar get`.
+    {
+      name: "attachments",
+      extract: (item) => {
+        const a = item.attachments as
+          | Array<{ mimeType?: string }>
+          | undefined;
+        if (!a?.length) return "";
+        const docs = a.filter(
+          (x) => x.mimeType === "application/vnd.google-apps.document",
+        ).length;
+        return docs > 0 && docs < a.length
+          ? `${a.length} (${docs} Doc${docs === 1 ? "" : "s"})`
+          : `${a.length}`;
       },
     },
   ];
