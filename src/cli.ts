@@ -9,7 +9,7 @@ import { calendarCommand } from "./commands/calendar.js";
 import { gmailCommand } from "./commands/gmail.js";
 import { docsCommand } from "./commands/docs.js";
 import { driveCommand } from "./commands/drive.js";
-import { slidesCommand, SLIDES_HELP } from "./commands/slides.js";
+import { slidesCommand } from "./commands/slides.js";
 
 const DESCRIPTION =
   "Agent ergonomic CLI for Google Workspace. Unified interface for Gmail, Calendar, Docs, Drive, and Slides with agent-guided OAuth setup.";
@@ -34,7 +34,6 @@ examples:
 const COMMAND_HELP: Record<string, string> = {
   auth: AUTH_HELP,
   doctor: DOCTOR_HELP,
-  slides: SLIDES_HELP,
 };
 
 export async function main(): Promise<void> {
