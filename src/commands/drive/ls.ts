@@ -17,8 +17,11 @@ flags[6]:
                        relative to the queried folder. Off by default; for
                        a quality overview of an entire client/project
                        folder, pass --recursive.
-  --depth <n>          Max recursion depth (default: 10). Only meaningful
-                       with --recursive.
+  --depth <n>          Cap recursion depth (default: unlimited — the
+                       --limit safety bound stops runaway walks). Only
+                       meaningful with --recursive; useful for "give me
+                       a 2-level overview without diving into every
+                       subfolder."
   --limit <n>          Max items to return (default: 500, max: 5000).
                        For --recursive, this is the total file count
                        across the walk; for non-recursive, it's the page
@@ -47,7 +50,11 @@ notes:
 
 const DEFAULT_LIMIT = 500;
 const MAX_LIMIT = 5000;
-const DEFAULT_DEPTH = 10;
+// Recursion defaults to unlimited depth; --limit (total file count)
+// is the practical safety bound. Most folder trees aren't deeper
+// than 5-6 levels anyway, so a depth cap rarely fires before --limit
+// does. Callers who want a "shallow overview" pass --depth explicitly.
+const DEFAULT_DEPTH = Number.POSITIVE_INFINITY;
 const FOLDER_MIME = "application/vnd.google-apps.folder";
 
 interface ParsedFlags {
@@ -74,10 +81,12 @@ function parseFlags(args: string[]): ParsedFlags {
       case "-r":
         recursive = true;
         break;
-      case "--depth":
-        depth = Math.max(0, parseInt(next, 10) || DEFAULT_DEPTH);
+      case "--depth": {
+        const parsed = parseInt(next, 10);
+        depth = Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_DEPTH;
         i++;
         break;
+      }
       case "--limit":
         limit = Math.max(1, Math.min(MAX_LIMIT, parseInt(next, 10) || DEFAULT_LIMIT));
         i++;
