@@ -16,7 +16,7 @@ flags[8]:
   --calendar <id>      Calendar to query (default: "primary")
   --from <iso>         Earliest event start (default: now)
   --to <iso>           Latest event start (default: 7 days from now)
-  --limit <n>          Max events to return (default: 25, max: 2500)
+  --limit <n>          Max events to return (default: 100, max: 2500)
   --query <text>       Full-text search across summary/description/location/attendees
   --single-events      Expand recurring events into individual instances (default: true)
   --fields <list>      Extra columns: status, organizer, location, attendees, description, htmlLink, hangoutLink
@@ -60,7 +60,7 @@ function parseEventsFlags(args: string[]): ParsedFlags {
     calendar: "primary",
     from: new Date().toISOString(),
     to: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
-    limit: 25,
+    limit: 100,
     query: undefined,
     singleEvents: true,
     extraFields: [],
@@ -83,7 +83,7 @@ function parseEventsFlags(args: string[]): ParsedFlags {
         i++;
         break;
       case "--limit":
-        flags.limit = Math.min(2500, Math.max(1, parseInt(next, 10) || 25));
+        flags.limit = Math.min(2500, Math.max(1, parseInt(next, 10) || 100));
         i++;
         break;
       case "--query":
