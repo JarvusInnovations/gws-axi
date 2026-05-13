@@ -64,14 +64,18 @@ export function renderListResponse(options: {
   if (options.header) blocks.push(renderObject(options.header));
   if (options.summary) blocks.push(renderObject(options.summary));
   if (options.items.length === 0) {
-    // Emit an empty array so `<name>` stays polymorphically-stable as a
-    // list type (strict parsers don't need to handle string-valued
-    // variants of the same field). Put the human-readable reason in a
-    // separate `message` sibling when provided.
-    blocks.push(renderObject({ [options.name]: [] }));
-    if (options.emptyMessage) {
-      blocks.push(renderObject({ message: options.emptyMessage }));
-    }
+    // Empty result: collapse to a scalar message under the same field
+    // name, matching AXI's canonical empty-list shape. We previously
+    // emitted `<name>[0]:` + a separate `message:` sibling for parser
+    // stability, but the AXI convention prefers a single field whose
+    // value is the human-readable reason — agents read one field instead
+    // of two, and the type-polymorphism (array vs string) is resolved by
+    // checking which form arrived.
+    blocks.push(
+      renderObject({
+        [options.name]: options.emptyMessage ?? `0 ${options.name} found`,
+      }),
+    );
   } else {
     blocks.push(renderList(options.name, options.items, options.schema));
   }

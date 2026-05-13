@@ -49,7 +49,7 @@ Tool versions are pinned in `.tool-versions` (bun 1.3.11 / nodejs 22.22.0 via as
 - Vitest for unit tests (state mutations, flag parsing, output shape)
 - No tests hit real Google APIs in CI — use mocks or recorded fixtures
 - Manual E2E for the OAuth flow (can't automate browser consent)
-- When adding a service subcommand, test: (1) empty result renders as `<name>[0]:` + message sibling, not string-valued field; (2) populated result renders default schema; (3) error translation for 401/403/404; (4) account resolution honors write-protection
+- When adding a service subcommand, test: (1) empty result collapses to `<name>: <human message>` (scalar value under the list's field name — AXI canonical empty-list shape, set in `renderListResponse`); (2) populated result renders default schema; (3) error translation for 401/403/404; (4) account resolution honors write-protection
 
 ## Docs
 

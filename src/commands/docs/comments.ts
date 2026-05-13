@@ -180,10 +180,11 @@ export async function docsCommentsCommand(
   blocks.push(renderObject({ account, document: flags.documentId }));
 
   if (commentRows.length === 0) {
-    blocks.push(renderObject({ comments: [] }));
+    // AXI canonical empty-list: collapse to a scalar message under the
+    // same field name (rather than `comments[0]:` + `message:` sibling).
     blocks.push(
       renderObject({
-        message: flags.includeResolved
+        comments: flags.includeResolved
           ? "no comments on this document"
           : "no open comments (pass --include-resolved to include resolved)",
       }),
