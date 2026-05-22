@@ -4,7 +4,7 @@ Agent-ergonomic CLI for Google Workspace — Gmail, Calendar, Docs, Drive, and S
 
 Designed for use by AI agents. Every response is structured, every error names a specific fix, and write operations lock to the explicit account when multiple are authenticated — so two agents in parallel sessions can't silently touch the wrong mailbox.
 
-> **Status (v0.3):** **Calendar is complete** — all 9 subcommands (5 reads + 4 writes) are implemented. Gmail, Docs, Drive, and Slides are scaffolded stubs that exercise auth + account resolution but return `NOT_IMPLEMENTED` on their concrete operations. Auth, doctor (with live per-account API probes), and multi-account management are stable.
+> **Status:** Read coverage is in across all five services — Calendar, Gmail, Docs, Drive, and Slides — and Calendar has full write support (`create`, `update`, `delete`, `respond`). Gmail writes (`send`, `draft`, `modify`) and Docs writes (`append`, `insert-text`, `delete-range`) are the next frontier. Auth (including a single-developer `auth publish` walkthrough that retires the 7-day Testing-token expiry), doctor with live per-account API probes, and multi-account write-protection are stable.
 
 ## Requirements
 
@@ -84,7 +84,9 @@ Every subcommand supports `--help`. The bare `gws-axi` command prints current st
 ```bash
 gws-axi                                  # home view — current state + suggestions
 gws-axi auth accounts                    # list authenticated Google accounts
-gws-axi auth login --account <email>     # add another account (prepare + --wait)
+gws-axi auth login --account <email>     # add another account (blocks on callback)
+gws-axi auth login --account <email> --no-wait  # agent-friendly split: prepare now, run --wait separately
+gws-axi auth publish                     # walk Testing → Production to retire 7-day token expiry
 gws-axi auth use <email>                 # set the default account
 gws-axi doctor                           # prerequisites + setup + live API probes
 ```
@@ -119,6 +121,51 @@ gws-axi calendar respond <event-id> --response accepted
 
 Writes default `--send-updates` to `none` so agent-created events don't spam attendees. Pass `--send-updates all` for production-style invite behavior.
 
+### Gmail
+
+```bash
+gws-axi gmail search                              # in:inbox by default
+gws-axi gmail search --query "from:alice has:attachment"
+gws-axi gmail search --page <token>               # paginate
+gws-axi gmail read <thread-or-message-id>         # whole thread, text/plain preferred
+gws-axi gmail read <id> --message-only            # just one message
+gws-axi gmail read <id> --out ./thread.md         # write the full thread to a markdown file
+gws-axi gmail labels                              # list labels with IDs
+gws-axi gmail download <message-id> <attachment-id>  # fetch attachment bytes
+```
+
+Bodies are decoded per declared `Content-Type` charset (UTF-8, latin-1, ascii, utf-16). HTML-only messages convert to markdown via turndown. Address headers parse with `addressparser` so display names with commas don't get split.
+
+### Docs
+
+```bash
+gws-axi docs read <documentId>                    # full Doc as markdown
+gws-axi docs read <documentId> --out ./doc.md     # write to a file
+gws-axi docs find <documentId> --query "deadline" # search inside one Doc
+gws-axi docs comments <documentId>                # threaded comments + suggestions
+gws-axi docs download <documentId> --format pdf   # native export (pdf, docx, odt, txt, html, epub, rtf)
+```
+
+Non-native files (uploaded `.docx`, `.pdf`, etc.) get pointed at `docs download` automatically rather than failing with a cryptic Google API error.
+
+### Drive
+
+```bash
+gws-axi drive ls                                  # top of My Drive
+gws-axi drive ls <folder-id> --recursive          # depth-unbounded; bounded by --limit instead
+gws-axi drive get <fileId>                        # metadata for one file
+gws-axi drive search --query "name contains 'budget'"
+gws-axi drive permissions <fileId>                # who has access
+```
+
+### Slides
+
+```bash
+gws-axi slides get <presentationId>               # deck metadata + slide list
+gws-axi slides page <presentationId> <slideId>    # one slide's content
+gws-axi slides summarize <presentationId>         # all slides condensed to text per slide
+```
+
 ### Multi-account with write protection
 
 gws-axi supports multiple Google accounts under one OAuth client. When two or more are authenticated, write operations require `--account <email>` explicitly — silent wrong-account mutations are impossible:
@@ -151,9 +198,9 @@ help[2]:
 
 ## Known issues & roadmap
 
-- **Testing-mode tokens expire every 7 days.** Google's OAuth policy for unpublished apps. Re-run `gws-axi auth login --account <email>` + `auth login --wait` when it happens. A future `gws-axi auth publish` helper will walk single-developer verification to eliminate this.
-- **Gmail, Docs, Drive, Slides**: not yet implemented. Stubs exercise auth + account resolution so write-protection errors still surface correctly; actual operations return `NOT_IMPLEMENTED`. Gmail is next.
-- **Tests**: not yet — coming alongside Gmail.
+- **Gmail writes** (`send`, `draft`, `modify`, label add/remove): scaffolded as `NOT_IMPLEMENTED`. Coming next.
+- **Docs writes** (`append`, `insert-text`, `delete-range`, etc.): scaffolded as `NOT_IMPLEMENTED`. Coming alongside Gmail writes.
+- **Testing-mode tokens** still expire every 7 days *if* you haven't published your OAuth app yet. Run `gws-axi auth publish` for the walkthrough — it covers the single-developer Production flow and removes the expiry once you've re-auth'd each account.
 
 ## Contributing
 
