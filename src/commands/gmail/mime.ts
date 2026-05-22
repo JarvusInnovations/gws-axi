@@ -88,11 +88,12 @@ function partHeader(
 
 function isInlineDisposition(part: gmail_v1.Schema$MessagePart): boolean {
   // RFC 2183: Content-Disposition: inline [; filename="..."]
-  // Gmail also sets Content-ID on inline parts (referenced from HTML via
-  // `src="cid:..."`). Either signal treats the part as embedded rather
-  // than a user-facing attachment.
-  const disp = partHeader(part, "Content-Disposition")?.toLowerCase() ?? "";
-  if (disp.startsWith("inline")) return true;
+  // Explicit disposition wins — Gmail's composer stamps a Content-ID on
+  // every user-attached file too, so treating any Content-ID as inline
+  // would demote real attachments. Only fall back to the cid:-heuristic
+  // when no disposition was declared at all.
+  const disp = partHeader(part, "Content-Disposition")?.toLowerCase();
+  if (disp) return disp.trimStart().startsWith("inline");
   if (partHeader(part, "Content-ID")) return true;
   return false;
 }

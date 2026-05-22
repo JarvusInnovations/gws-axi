@@ -180,7 +180,7 @@ describe("parseMessage — attachments vs inline", () => {
     expect(parsed.inline_image_count).toBe(1);
   });
 
-  it("filters parts that have a Content-ID (even without disposition)", () => {
+  it("filters parts that have a Content-ID but no disposition", () => {
     const part = attachmentPart("image/png", "embed.png", 512, null);
     part.headers = headers([
       ["Content-Type", "image/png"],
@@ -196,6 +196,32 @@ describe("parseMessage — attachments vs inline", () => {
     const parsed = parseMessage(msg);
     expect(parsed.attachments).toHaveLength(0);
     expect(parsed.inline_image_count).toBe(1);
+  });
+
+  it("treats Content-Disposition: attachment as an attachment even when Content-ID is present", () => {
+    // Gmail's composer stamps a Content-ID on user-attached files alongside
+    // the explicit attachment disposition; the disposition must win.
+    const part = attachmentPart(
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "Response.docx",
+      27530,
+      'attachment; filename="Response.docx"',
+    );
+    part.headers = [
+      ...(part.headers ?? []),
+      { name: "Content-ID", value: "<f_movy511a0>" },
+    ];
+    const msg = message(
+      [["Subject", "With doc"]],
+      multipart("multipart/mixed", [
+        textPart("text/plain", "See attached"),
+        part,
+      ]),
+    );
+    const parsed = parseMessage(msg);
+    expect(parsed.attachments).toHaveLength(1);
+    expect(parsed.attachments[0].filename).toBe("Response.docx");
+    expect(parsed.inline_image_count).toBe(0);
   });
 
   it("classifies mixed inline + attachment correctly", () => {
