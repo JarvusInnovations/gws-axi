@@ -43,7 +43,9 @@ export async function homeCommand(): Promise<Record<string, unknown>> {
       help.push("Run `gws-axi auth accounts` to see all accounts");
     }
   }
-  help.push("Run `gws-axi --help` for the full command list");
+  help.push(
+    "Run `gws-axi --help` to see the full command list, or `gws-axi <command> --help` for usage on any command",
+  );
   output.help = help;
 
   return output;
