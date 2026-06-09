@@ -35,7 +35,10 @@ export function renderObject(value: Record<string, unknown>): string {
  */
 export function renderHelp(suggestions: string[]): string {
   if (suggestions.length === 0) return "";
-  return encode({ help: suggestions });
+  // Multi-line `help[N]:` block — the canonical AXI form (first-party
+  // chrome-devtools-axi + slack-axi hand-render it; encode() would inline a
+  // primitive array as `help[N]: a,b,c`). Help is read as guidance, not decoded.
+  return `help[${suggestions.length}]:\n${suggestions.map((s) => `  ${s}`).join("\n")}`;
 }
 
 /**

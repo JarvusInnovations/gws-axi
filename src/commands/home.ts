@@ -4,22 +4,23 @@ import {
   readSetupState,
   setupProgress,
 } from "../config.js";
+import { joinBlocks, renderHelp, renderObject } from "../output/index.js";
 
-export async function homeCommand(): Promise<Record<string, unknown>> {
+export async function homeCommand(): Promise<string> {
   const state = readSetupState();
   const { done, total, nextStep } = setupProgress(state);
   const accounts = listAccounts();
   const defaultAccount = getDefaultAccount();
 
-  const output: Record<string, unknown> = {};
+  const fields: Record<string, unknown> = {};
 
   if (accounts.length > 0) {
-    output.account = defaultAccount ?? accounts[0];
+    fields.account = defaultAccount ?? accounts[0];
     if (accounts.length > 1) {
-      output.other_accounts = accounts.filter(
+      fields.other_accounts = accounts.filter(
         (a) => a !== (defaultAccount ?? accounts[0]),
       );
-      output.write_protection = "enabled (2+ accounts — writes require --account)";
+      fields.write_protection = "enabled (2+ accounts — writes require --account)";
     }
   }
 
@@ -27,7 +28,7 @@ export async function homeCommand(): Promise<Record<string, unknown>> {
     progress: `${done} of ${total} steps complete`,
   };
   if (nextStep) setup.next_step = nextStep;
-  output.setup = setup;
+  fields.setup = setup;
 
   const help: string[] = [];
   if (done < total) {
@@ -46,7 +47,9 @@ export async function homeCommand(): Promise<Record<string, unknown>> {
   help.push(
     "Run `gws-axi --help` to see the full command list, or `gws-axi <command> --help` for usage on any command",
   );
-  output.help = help;
 
-  return output;
+  // Return a composed string (not an object) so the help block renders
+  // multi-line — the canonical AXI form. The SDK prepends the bin/description
+  // header to a string home result.
+  return joinBlocks(renderObject(fields), renderHelp(help));
 }
