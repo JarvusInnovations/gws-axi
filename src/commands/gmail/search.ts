@@ -1,4 +1,3 @@
-import { AxiError } from "axi-sdk-js";
 import type { gmail_v1 } from "googleapis";
 import {
   gmailClient,
@@ -11,6 +10,7 @@ import {
   truncated,
   type FieldDef,
 } from "../../output/index.js";
+import { isSystemLabel, resolveLabelId } from "./labels-shared.js";
 
 export const SEARCH_HELP = `usage: gws-axi gmail search [flags]
 flags[6]:
@@ -102,36 +102,6 @@ function effectiveQuery(flags: ParsedFlags): string {
   return "";
 }
 
-// Build the labelIds param for threads.list from a --in value. Resolves
-// user-supplied label names (e.g. "Work/Clients") to Gmail's internal
-// label IDs so the search is robust against name-operator quirks.
-async function resolveLabelId(
-  api: gmail_v1.Gmail,
-  name: string,
-  labels: gmail_v1.Schema$Label[],
-): Promise<string> {
-  // Try exact name match first (case-sensitive; Gmail labels are).
-  const exact = labels.find((l) => l.name === name);
-  if (exact?.id) return exact.id;
-  // Case-insensitive fallback for usability.
-  const insensitive = labels.find(
-    (l) => l.name?.toLowerCase() === name.toLowerCase(),
-  );
-  if (insensitive?.id) return insensitive.id;
-  // Accept a raw label ID passthrough (system labels like INBOX, or
-  // Label_XXXX ids copied from another command).
-  const byId = labels.find((l) => l.id === name);
-  if (byId?.id) return byId.id;
-  throw new AxiError(
-    `Label '${name}' not found`,
-    "LABEL_NOT_FOUND",
-    [
-      `Run \`gws-axi gmail labels\` to see all available labels`,
-      `Label names are case-sensitive; check for typos or extra whitespace`,
-    ],
-  );
-}
-
 function getHeader(
   headers: gmail_v1.Schema$MessagePartHeader[] | undefined,
   name: string,
@@ -218,13 +188,6 @@ async function fetchThreadSummary(
     // (the count reflects successful fetches).
     return null;
   }
-}
-
-function isSystemLabel(id: string): boolean {
-  // Gmail's system labels are ALL_CAPS; user labels use mixed case / nested
-  // slashes / Label_<n> format. The built-in system set is finite but
-  // matching on all-caps catches any future additions cheaply.
-  return /^[A-Z_]+$/.test(id);
 }
 
 async function fetchAllThreadSummaries(
@@ -314,7 +277,7 @@ export async function gmailSearchCommand(
 
   const labelIds: string[] = [];
   if (flags.inLabel) {
-    labelIds.push(await resolveLabelId(api, flags.inLabel, labelList));
+    labelIds.push(resolveLabelId(flags.inLabel, labelList));
   }
 
   let threadsListed: gmail_v1.Schema$ListThreadsResponse;
