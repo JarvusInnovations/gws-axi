@@ -71,7 +71,12 @@ Tool versions are pinned in `.tool-versions` (bun 1.3.11 / nodejs 22.22.0 via as
 - ✅ Calendar writes: `create`, `update`, `delete`, `respond`
 - ✅ Docs reads: `read`, `find`, `comments`, `download`
 - ✅ Gmail reads: `search`, `read`, `labels`, `download`
-- 🚧 Drive, Slides: scaffolded stubs with real account resolution but `NOT_IMPLEMENTED` handlers
+- ✅ Gmail writes: `draft`, `modify`, `batch-modify`, `label-create/update/delete`, `filter-list/create/delete`
+  - ❌ `send` is intentionally OUT OF SCOPE — short-circuits with `NOT_SUPPORTED` redirecting to `draft`. No Gmail scope grants drafting+label edits while withholding send, so the boundary is a code/product decision, not a scope (the token is send-capable). Don't "implement" send.
+  - Filters need the `gmail.settings.basic` scope (added to `src/auth/scopes.ts` as `ADDITIONAL_SCOPES`; NOT covered by `gmail.modify`) — pre-existing accounts must re-auth once.
+  - Shared label name↔id resolution lives in `src/commands/gmail/labels-shared.ts` (used by search + all write commands)
+- ✅ Drive reads: `search`, `get`, `ls`, `permissions`, `download`
+- ✅ Slides reads: `get`, `page`, `summarize`
+- 🚧 Drive writes (`create`, `copy`, `move`, `rename`, `delete`, `mkdir`) and Slides writes (`create`, `update`): scaffolded stubs, `NOT_IMPLEMENTED`
 - 🚧 Docs writes: `append`, `insert-text`, `delete-range`, etc. (planned, all stubbed)
-- 🚧 Gmail writes: `send`, `draft`, `modify`, etc. (planned, all stubbed)
-- ✅ Vitest test coverage scaffolded (25 tests for mime + paths)
+- ✅ Vitest test coverage (mime, paths, gmail compose + label resolution)

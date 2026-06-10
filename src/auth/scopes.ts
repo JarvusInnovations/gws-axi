@@ -8,6 +8,15 @@ export const SERVICE_SCOPES = {
   slides: "https://www.googleapis.com/auth/presentations",
 } as const;
 
+// Scopes layered on top of the representative per-service scope above.
+// gmail.settings.basic is required for Gmail filter management
+// (users.settings.filters.*); it is NOT covered by gmail.modify. Kept
+// separate so the per-service probe/health checks keep keying off the
+// single representative scope in SERVICE_SCOPES.
+export const ADDITIONAL_SCOPES = [
+  "https://www.googleapis.com/auth/gmail.settings.basic",
+] as const;
+
 export type ServiceName = keyof typeof SERVICE_SCOPES;
 
 export const SERVICES: ServiceName[] = [
@@ -27,7 +36,7 @@ export const REQUIRED_APIS: Record<ServiceName, string> = {
 };
 
 export function allScopes(): string[] {
-  return [...BASE_SCOPES, ...Object.values(SERVICE_SCOPES)];
+  return [...BASE_SCOPES, ...Object.values(SERVICE_SCOPES), ...ADDITIONAL_SCOPES];
 }
 
 export function allApis(): string[] {
