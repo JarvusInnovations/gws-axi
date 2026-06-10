@@ -4,7 +4,7 @@ Agent-ergonomic CLI for Google Workspace — Gmail, Calendar, Docs, Drive, and S
 
 Designed for use by AI agents. Every response is structured, every error names a specific fix, and write operations lock to the explicit account when multiple are authenticated — so two agents in parallel sessions can't silently touch the wrong mailbox.
 
-> **Status:** Read coverage is in across all five services — Calendar, Gmail, Docs, Drive, and Slides — and Calendar has full write support (`create`, `update`, `delete`, `respond`). Gmail writes (`send`, `draft`, `modify`) and Docs writes (`append`, `insert-text`, `delete-range`) are the next frontier. Auth (including a single-developer `auth publish` walkthrough that retires the 7-day Testing-token expiry), doctor with live per-account API probes, and multi-account write-protection are stable.
+> **Status:** Read coverage is in across all five services — Calendar, Gmail, Docs, Drive, and Slides. **Calendar** and **Gmail** both have full write support: Calendar does `create` / `update` / `delete` / `respond`, and Gmail does triage (`modify`, `batch-modify`), drafting (`draft`), label CRUD (`label-create` / `label-update` / `label-delete`), and server-side filters (`filter-create` / `filter-delete` / `filter-list`). Gmail **`send` is intentionally out of scope** — gws-axi drafts mail for human review but never sends it. Docs writes (`append`, `insert-text`, `delete-range`) are the next frontier. Auth (including a single-developer `auth publish` walkthrough that retires the 7-day Testing-token expiry), doctor with live per-account API probes, and multi-account write-protection are stable.
 
 ## Requirements
 
@@ -123,6 +123,8 @@ Writes default `--send-updates` to `none` so agent-created events don't spam att
 
 ### Gmail
 
+**Reads:**
+
 ```bash
 gws-axi gmail search                              # in:inbox by default
 gws-axi gmail search --query "from:alice has:attachment"
@@ -134,7 +136,40 @@ gws-axi gmail labels                              # list labels with IDs
 gws-axi gmail download <message-id> <attachment-id>  # fetch attachment bytes
 ```
 
+**Writes** (triage, drafting, labels, filters — but never *send*):
+
+```bash
+# Triage — Gmail state IS labels, so archive/read/star are label edits:
+gws-axi gmail modify <message-id> --remove-label INBOX        # archive
+gws-axi gmail modify <message-id> --remove-label UNREAD       # mark read
+gws-axi gmail modify <message-id> --add-label STARRED         # star
+gws-axi gmail modify <message-id> --add-label "Work/Clients" --remove-label INBOX
+gws-axi gmail modify <thread-id> --thread --remove-label UNREAD  # whole thread
+
+# Bulk triage by query:
+gws-axi gmail batch-modify --query "from:news@x.com" --remove-label INBOX
+gws-axi gmail batch-modify --query "is:unread older_than:30d" --remove-label UNREAD
+
+# Drafts (composed for you; you send from Gmail):
+gws-axi gmail draft --to alice@x.com --subject "Re: budget" --body "Approved."
+gws-axi gmail draft --to a@x.com,b@x.com --subject Hi --body-file ./note.txt --thread <id>
+
+# Label management:
+gws-axi gmail label-create --name "Work/Clients"
+gws-axi gmail label-update <label-id|name> --name "Archive"
+gws-axi gmail label-delete <label-id|name>
+
+# Server-side auto-sort filters:
+gws-axi gmail filter-list
+gws-axi gmail filter-create --from news@x.com --remove-label INBOX --add-label News
+gws-axi gmail filter-delete <filter-id>
+```
+
 Bodies are decoded per declared `Content-Type` charset (UTF-8, latin-1, ascii, utf-16). HTML-only messages convert to markdown via turndown. Address headers parse with `addressparser` so display names with commas don't get split.
+
+**On `send`:** gws-axi has no `send` command by design — an agent can triage, label, and draft replies, but a human reviews and sends from Gmail. This is a guardrail against *accidental* sends, not a hard security boundary (the OAuth token is send-capable; there is no Gmail scope that grants drafting + label edits while withholding send). `gws-axi gmail send` returns a `NOT_SUPPORTED` error pointing at `draft`.
+
+**Scope note:** the filter commands need the `gmail.settings.basic` scope, which `gmail.modify` does not include. Accounts authenticated before this release will get a `SCOPE_MISSING` (403) on filter commands until you re-run `gws-axi auth login --account <email>` once to re-consent.
 
 ### Docs
 
@@ -198,8 +233,9 @@ help[2]:
 
 ## Known issues & roadmap
 
-- **Gmail writes** (`send`, `draft`, `modify`, label add/remove): scaffolded as `NOT_IMPLEMENTED`. Coming next.
-- **Docs writes** (`append`, `insert-text`, `delete-range`, etc.): scaffolded as `NOT_IMPLEMENTED`. Coming alongside Gmail writes.
+- **Gmail `send`**: intentionally unsupported — gws-axi drafts mail but leaves sending to a human in the Gmail UI. See the Gmail section above.
+- **Docs writes** (`append`, `insert-text`, `delete-range`, etc.): scaffolded as `NOT_IMPLEMENTED`. The next frontier.
+- **Drive/Slides writes**: still scaffolded as `NOT_IMPLEMENTED` (reads are complete).
 - **Testing-mode tokens** still expire every 7 days *if* you haven't published your OAuth app yet. Run `gws-axi auth publish` for the walkthrough — it covers the single-developer Production flow and removes the expiry once you've re-auth'd each account.
 
 ## Contributing
