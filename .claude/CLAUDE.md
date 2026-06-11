@@ -51,6 +51,16 @@ Tool versions are pinned in `.tool-versions` (bun 1.3.11 / nodejs 22.22.0 via as
 - Manual E2E for the OAuth flow (can't automate browser consent)
 - When adding a service subcommand, test: (1) empty result collapses to `<name>: <human message>` (scalar value under the list's field name — AXI canonical empty-list shape, set in `renderListResponse`); (2) populated result renders default schema; (3) error translation for 401/403/404; (4) account resolution honors write-protection
 
+## Spec-driven development (specops)
+
+This repo uses [specops](https://github.com/JarvusInnovations/specops): **specs are the source of truth; code follows.** Start every feature by updating `specs/`, not by editing code.
+
+- `specs/` — the authoritative desired state. `specs/principles.md` (decisive cross-cutting rules — read these first), `specs/architecture.md` (structure/models), `specs/api/conventions.md` (cross-command contracts), `specs/commands/<service>-<cmd>.md` (per-command). Read the relevant spec before implementing; if it's ambiguous or wrong, fix the spec, don't work around it in code.
+- `plans/` — work-in-flight as a micro-DAG (motion, not state). A chunk of work starts with a plan file (`status: planned`), flips to `in-progress`, and the last commit before merge flips it to `done` with `pr:` + checked validation. Protocol: `.agents/skills/specops/references/plans-protocol.md`.
+- Plans dashboard: `.agents/skills/specops/scripts/specops` (also `next`, `dag`). A project SessionStart hook in `.claude/settings.json` loads it each session.
+- **Spec drift auditing**: run `/audit-spec-drift` to launch the auditor comparing `specs/` against the implementation.
+- Spec↔code divergence is a bug, not debt — a PR that changes behavior updates the spec in the same PR.
+
 ## Docs
 
 - `docs/design.md` — architecture, auth model, doctor tiers, command surface, multi-account + write-protection spec
@@ -69,14 +79,16 @@ Tool versions are pinned in `.tool-versions` (bun 1.3.11 / nodejs 22.22.0 via as
 - ✅ `auth publish` helper to walk through Testing→Production (eliminates 7-day token expiry)
 - ✅ Calendar reads: `events`, `get`, `calendars`, `search`, `freebusy`
 - ✅ Calendar writes: `create`, `update`, `delete`, `respond`
-- ✅ Docs reads: `read`, `find`, `comments`, `download`
-- ✅ Gmail reads: `search`, `read`, `labels`, `download`
+- ✅ Docs reads: `read`, `find`, `comments`, `download`, `revisions` (alias of `drive revisions`)
+- ✅ Gmail reads: `search`, `read` (incl. `--headers` full RFC 2822 header set + `--raw` source), `labels`, `download`
 - ✅ Gmail writes: `draft`, `modify`, `batch-modify`, `label-create/update/delete`, `filter-list/create/delete`
   - ❌ `send` is intentionally OUT OF SCOPE — short-circuits with `NOT_SUPPORTED` redirecting to `draft`. No Gmail scope grants drafting+label edits while withholding send, so the boundary is a code/product decision, not a scope (the token is send-capable). Don't "implement" send.
   - Filters need the `gmail.settings.basic` scope (added to `src/auth/scopes.ts` as `ADDITIONAL_SCOPES`; NOT covered by `gmail.modify`) — pre-existing accounts must re-auth once.
   - Shared label name↔id resolution lives in `src/commands/gmail/labels-shared.ts` (used by search + all write commands)
-- ✅ Drive reads: `search`, `get`, `ls`, `permissions`, `download`
+- ✅ Drive reads: `search`, `get`, `ls`, `permissions`, `download`, `revisions`, `activity`
+  - `revisions <fileId>` lists version history (native files carry an incompleteness note; `docs revisions` is an alias); `docs download --revision <id>` fetches historical content (markdown-default for native via exportLinks, `alt=media` for binary). No new scope.
+  - `activity <itemId>` is the Drive Activity API v2 timeline (create/edit/move/rename/delete/permission_change/comment; `--folder`, `--since/--until`, `--action`). Needs the `drive.activity.readonly` scope (added to `ADDITIONAL_SCOPES`; NOT implied by `auth/drive`) + `driveactivity.googleapis.com` (in `ADDITIONAL_APIS`) — **pre-existing accounts must re-auth once**.
 - ✅ Slides reads: `get`, `page`, `summarize`
 - 🚧 Drive writes (`create`, `copy`, `move`, `rename`, `delete`, `mkdir`) and Slides writes (`create`, `update`): scaffolded stubs, `NOT_IMPLEMENTED`
 - 🚧 Docs writes: `append`, `insert-text`, `delete-range`, etc. (planned, all stubbed)
-- ✅ Vitest test coverage (mime, paths, gmail compose + label resolution)
+- ✅ Vitest test coverage (mime, paths, gmail compose + label resolution, gmail read flags, drive revisions + activity helpers, docs download flags)

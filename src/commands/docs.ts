@@ -4,6 +4,10 @@ import { docsCommentsCommand, COMMENTS_HELP } from "./docs/comments.js";
 import { docsDownloadCommand, DOWNLOAD_HELP } from "./docs/download.js";
 import { docsFindCommand, FIND_HELP } from "./docs/find.js";
 import { docsReadCommand, READ_HELP } from "./docs/read.js";
+import {
+  driveRevisionsCommand,
+  REVISIONS_HELP,
+} from "./drive/revisions.js";
 
 interface DocsSubcommand {
   name: string;
@@ -56,6 +60,9 @@ const SUBCOMMANDS: DocsSubcommand[] = [
   { name: "find", mutation: false, help: FIND_HELP, handler: docsFindCommand },
   { name: "comments", mutation: false, help: COMMENTS_HELP, handler: docsCommentsCommand },
   { name: "download", mutation: false, help: DOWNLOAD_HELP, handler: docsDownloadCommand },
+  // Alias for `drive revisions` — version history is a Docs-shaped mental
+  // model, but the implementation is Drive-wide (any file type).
+  { name: "revisions", mutation: false, help: REVISIONS_HELP, handler: driveRevisionsCommand },
   { name: "append", mutation: true, help: APPEND_HELP },
   { name: "insert-text", mutation: true, help: INSERT_TEXT_HELP },
   { name: "delete-range", mutation: true, help: DELETE_RANGE_HELP },
