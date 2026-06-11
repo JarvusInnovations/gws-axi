@@ -8,6 +8,7 @@ specs:
   - specs/principles.md
   - specs/api/conventions.md
 issues: []
+pr: 17
 ---
 
 # Plan: Workspace history & exploration reads
