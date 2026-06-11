@@ -4,8 +4,10 @@ import { AxiError } from "axi-sdk-js";
 import type { gmail_v1 } from "googleapis";
 import { gmailClient, translateGoogleError } from "../../google/client.js";
 import {
+  field,
   joinBlocks,
   renderHelp,
+  renderList,
   renderObject,
 } from "../../output/index.js";
 import { resolveOutputPath } from "../../util/paths.js";
@@ -16,34 +18,50 @@ args[1]:
   <id>                Thread ID or Message ID. Both are 16-char hex strings
                       and indistinguishable by shape — we try thread-get
                       first, then fall back to message-get → parent thread.
-flags[4]:
+flags[6]:
   --message-only      Render ONLY the message with the given ID, not its
                       parent thread. The ID must be a message-id in this
                       mode. For alerts / notifications / one-offs where
                       thread context isn't useful.
+  --headers           Render the message's full RFC 2822 header set (every
+                      Received hop, Message-ID, In-Reply-To, References,
+                      DKIM/ARC auth results, …) alongside the parsed body.
+                      Operates on one message; a thread ID resolves to its
+                      most recent message.
+  --raw               Emit the message exactly as Gmail stores it: the
+                      complete undecoded RFC 2822 source (headers + MIME
+                      body) as one text block. For piping to a parser or
+                      saving verbatim. Resolves a thread ID to its latest
+                      message. Mutually exclusive with --headers.
   --full              Bypass the 30,000-char thread-size threshold; render
                       every message in full inline (can be large).
   --out <path>        Write the full thread to a markdown file instead of
                       embedding it inline (implies --full). Accepts a file
-                      path or directory.
+                      path or directory. With --raw, writes the raw source.
   --account <email>   Account override when 2+ are configured.
 examples:
   gws-axi gmail read 1a2b3c4d5e6f7890
   gws-axi gmail read 1a2b3c4d5e6f7890 --full
   gws-axi gmail read 1a2b3c4d5e6f7890 --out ./thread.md
   gws-axi gmail read 1a2b3c4d5e6f7890 --message-only
+  gws-axi gmail read 1a2b3c4d5e6f7890 --headers
+  gws-axi gmail read 1a2b3c4d5e6f7890 --raw --out ./message.eml
 output:
   A \`thread{id,subject,message_count,unread,resolved_via_message?}\` header,
   followed by a \`messages[N]\` array. Each message object carries from/to/date
   headers, the decoded body (text/plain preferred; HTML fallback converted via
   turndown), and an attachments[] list with id/filename/mime/size you can pass
   to \`gws-axi gmail download\`.
+  --headers adds a \`headers[N]{name,value}\` list (full header set, in order,
+  untruncated) plus \`internal_date\`. --raw replaces the parsed view with a
+  single \`raw:\` block of the decoded RFC 2822 source.
 notes:
   Default behavior renders the entire thread inline when total body size is
   under ~30,000 chars. Longer threads get proportional per-message truncation
   with the usual --full / --out escape hatches. --out writes one complete
   message per section as a markdown conversation, suitable for grep or
   further processing.
+  Reading never marks a message as read — no mutation as a side effect.
 `;
 
 const SIZE_THRESHOLD = 30_000;
@@ -53,13 +71,17 @@ interface ParsedFlags {
   full: boolean;
   out: string | undefined;
   messageOnly: boolean;
+  headers: boolean;
+  raw: boolean;
 }
 
-function parseFlags(args: string[]): ParsedFlags {
+export function parseFlags(args: string[]): ParsedFlags {
   let id: string | undefined;
   let full = false;
   let out: string | undefined;
   let messageOnly = false;
+  let headers = false;
+  let raw = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     const next = args[i + 1];
@@ -73,6 +95,12 @@ function parseFlags(args: string[]): ParsedFlags {
         break;
       case "--message-only":
         messageOnly = true;
+        break;
+      case "--headers":
+        headers = true;
+        break;
+      case "--raw":
+        raw = true;
         break;
       default:
         if (!arg.startsWith("--") && id === undefined) {
@@ -90,8 +118,18 @@ function parseFlags(args: string[]): ParsedFlags {
       ],
     );
   }
+  if (raw && headers) {
+    throw new AxiError(
+      "--raw and --headers cannot be combined",
+      "VALIDATION_ERROR",
+      [
+        "Use --headers for a structured header list plus the parsed body",
+        "Use --raw for the complete undecoded RFC 2822 source",
+      ],
+    );
+  }
   if (out) full = true;
-  return { id, full, out, messageOnly };
+  return { id, full, out, messageOnly, headers, raw };
 }
 
 interface ResolvedThread {
@@ -384,12 +422,237 @@ function renderAsMarkdownConversation(
   return lines.join("\n");
 }
 
+/**
+ * Resolve an id (thread or message) to a single message id. For --raw and
+ * --headers we operate on exactly one message: if the id is a message we use
+ * it directly; if it's a thread we resolve to its most recent message. With
+ * --message-only the id is required to already be a message id.
+ */
+async function resolveMessageId(
+  api: gmail_v1.Gmail,
+  account: string,
+  flags: ParsedFlags,
+): Promise<{ messageId: string; resolvedViaThread: string | undefined }> {
+  if (flags.messageOnly) {
+    return { messageId: flags.id, resolvedViaThread: undefined };
+  }
+  // Try message-get first (cheap, format=minimal); if that 404s, treat the id
+  // as a thread and take its newest message.
+  try {
+    const res = await api.users.messages.get({
+      userId: "me",
+      id: flags.id,
+      format: "minimal",
+    });
+    return { messageId: res.data.id ?? flags.id, resolvedViaThread: undefined };
+  } catch (err) {
+    const translated = translateGoogleError(err, {
+      account,
+      operation: "gmail.messages.get",
+    });
+    if (translated.code !== "NOT_FOUND") throw translated;
+  }
+  // Fall back to thread → latest message.
+  try {
+    const res = await api.users.threads.get({
+      userId: "me",
+      id: flags.id,
+      format: "minimal",
+    });
+    const msgs = res.data.messages ?? [];
+    const last = msgs[msgs.length - 1];
+    if (!last?.id) {
+      throw new AxiError(
+        `Thread ${flags.id} has no messages`,
+        "THREAD_NOT_FOUND",
+        [],
+      );
+    }
+    return { messageId: last.id, resolvedViaThread: flags.id };
+  } catch (err) {
+    if (err instanceof AxiError) throw err;
+    const translated = translateGoogleError(err, {
+      account,
+      operation: "gmail.threads.get",
+    });
+    if (translated.code === "NOT_FOUND") {
+      throw new AxiError(
+        `No thread or message found with ID '${flags.id}'`,
+        "MESSAGE_NOT_FOUND",
+        [
+          "Get a valid ID from `gws-axi gmail search`",
+          "IDs are 16-character hex strings; double-check for typos",
+        ],
+      );
+    }
+    throw translated;
+  }
+}
+
+async function renderHeadersMode(
+  api: gmail_v1.Gmail,
+  account: string,
+  flags: ParsedFlags,
+): Promise<string> {
+  const { messageId, resolvedViaThread } = await resolveMessageId(
+    api,
+    account,
+    flags,
+  );
+  let msg: gmail_v1.Schema$Message;
+  try {
+    const res = await api.users.messages.get({
+      userId: "me",
+      id: messageId,
+      format: "full",
+    });
+    msg = res.data;
+  } catch (err) {
+    throw translateGoogleError(err, {
+      account,
+      operation: "gmail.messages.get",
+    });
+  }
+
+  const row = buildMessageRow(msg, 0);
+  // Full header list in the order Gmail returns it, untruncated.
+  const headerRows = (msg.payload?.headers ?? [])
+    .filter((h) => h.name)
+    .map((h) => ({ name: h.name as string, value: h.value ?? "" }));
+
+  const blocks: string[] = [];
+  blocks.push(renderObject({ account }));
+  blocks.push(
+    renderObject({
+      message: {
+        id: msg.id ?? messageId,
+        thread_id: msg.threadId ?? "",
+        internal_date: msg.internalDate ?? "",
+      },
+    }),
+  );
+  blocks.push(
+    renderList(
+      "headers",
+      headerRows,
+      [field("name"), field("value")],
+    ),
+  );
+  // Parsed body too, so the agent gets provenance + readable content at once.
+  blocks.push(
+    renderObject({
+      body: {
+        from: row.from,
+        to: row.to,
+        cc: row.cc,
+        date: row.date,
+        subject: row.subject,
+        body_source: row.body_source,
+        body: row.body,
+        attachments: row.attachments,
+      },
+    }),
+  );
+
+  const suggestions: string[] = [];
+  if (resolvedViaThread) {
+    suggestions.push(
+      `ID \`${resolvedViaThread}\` was a thread — showed its most recent message \`${msg.id}\`. Pass a message ID with --message-only to target a specific one.`,
+    );
+  }
+  suggestions.push(
+    `Run \`gws-axi gmail read ${msg.id} --raw\` for the complete undecoded RFC 2822 source`,
+  );
+  blocks.push(renderHelp(suggestions));
+  return joinBlocks(...blocks);
+}
+
+async function renderRawMode(
+  api: gmail_v1.Gmail,
+  account: string,
+  flags: ParsedFlags,
+): Promise<string> {
+  const { messageId, resolvedViaThread } = await resolveMessageId(
+    api,
+    account,
+    flags,
+  );
+  let msg: gmail_v1.Schema$Message;
+  try {
+    const res = await api.users.messages.get({
+      userId: "me",
+      id: messageId,
+      format: "raw",
+    });
+    msg = res.data;
+  } catch (err) {
+    throw translateGoogleError(err, {
+      account,
+      operation: "gmail.messages.get",
+    });
+  }
+
+  const source = msg.raw
+    ? Buffer.from(msg.raw, "base64url").toString("utf8")
+    : "";
+
+  const blocks: string[] = [];
+  blocks.push(renderObject({ account }));
+
+  if (flags.out) {
+    const defaultName = `${msg.id ?? messageId}.eml`;
+    const outPath = await resolveOutputPath(flags.out, defaultName);
+    await mkdir(dirname(outPath), { recursive: true });
+    await writeFile(outPath, source);
+    blocks.push(
+      renderObject({
+        message: {
+          id: msg.id ?? messageId,
+          thread_id: msg.threadId ?? "",
+          internal_date: msg.internalDate ?? "",
+          bytes: Buffer.byteLength(source),
+        },
+        saved: outPath,
+      }),
+    );
+    return joinBlocks(...blocks);
+  }
+
+  blocks.push(
+    renderObject({
+      message: {
+        id: msg.id ?? messageId,
+        thread_id: msg.threadId ?? "",
+        internal_date: msg.internalDate ?? "",
+        bytes: Buffer.byteLength(source),
+      },
+    }),
+  );
+  blocks.push(renderObject({ raw: source }));
+
+  if (resolvedViaThread) {
+    blocks.push(
+      renderHelp([
+        `ID \`${resolvedViaThread}\` was a thread — showed its most recent message \`${msg.id}\``,
+      ]),
+    );
+  }
+  return joinBlocks(...blocks);
+}
+
 export async function gmailReadCommand(
   account: string,
   args: string[],
 ): Promise<string> {
   const flags = parseFlags(args);
   const api = await gmailClient(account);
+
+  if (flags.raw) {
+    return renderRawMode(api, account, flags);
+  }
+  if (flags.headers) {
+    return renderHeadersMode(api, account, flags);
+  }
 
   if (flags.messageOnly) {
     return renderSingleMessage(api, account, flags);

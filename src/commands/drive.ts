@@ -7,6 +7,11 @@ import {
   drivePermissionsCommand,
   PERMISSIONS_HELP,
 } from "./drive/permissions.js";
+import { driveActivityCommand, ACTIVITY_HELP } from "./drive/activity.js";
+import {
+  driveRevisionsCommand,
+  REVISIONS_HELP,
+} from "./drive/revisions.js";
 import { driveSearchCommand, SEARCH_HELP } from "./drive/search.js";
 
 interface DriveSubcommand {
@@ -21,15 +26,19 @@ interface DriveSubcommand {
 const DOWNLOAD_HELP = `usage: gws-axi drive download <file-id> [flags]
 args[1]:
   <file-id>            The Drive file ID
-flags[3]:
+flags[4]:
   --out <path>         Where to save (default: ./<sanitized file name>)
   --as <mime>          Export format for native Google files (only valid
                        for Docs/Sheets/Slides/Drawings). Defaults: .docx
-                       / .xlsx / .pptx / .png.
+                       / .xlsx / .pptx / .png; text/markdown when --revision
+                       is set.
+  --revision <id>      Download a specific historical revision (id from
+                       \`gws-axi drive revisions <id>\`) instead of the head.
   --account <email>    Account override when 2+ are configured
 examples:
   gws-axi drive download 1AbC...
   gws-axi drive download 1AbC... --out ./report.pdf --as application/pdf
+  gws-axi drive download 1AbC... --revision 250
 notes:
   This is an alias for \`gws-axi docs download\` — same implementation,
   same behavior. Either spelling works.
@@ -71,6 +80,18 @@ const SUBCOMMANDS: DriveSubcommand[] = [
     help: DOWNLOAD_HELP,
     // Delegates to docs/download.ts — same impl handles any Drive file.
     handler: docsDownloadCommand,
+  },
+  {
+    name: "revisions",
+    mutation: false,
+    help: REVISIONS_HELP,
+    handler: driveRevisionsCommand,
+  },
+  {
+    name: "activity",
+    mutation: false,
+    help: ACTIVITY_HELP,
+    handler: driveActivityCommand,
   },
   { name: "create", mutation: true, help: CREATE_HELP },
   { name: "copy", mutation: true, help: COPY_HELP },

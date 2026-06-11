@@ -79,14 +79,16 @@ This repo uses [specops](https://github.com/JarvusInnovations/specops): **specs 
 - ✅ `auth publish` helper to walk through Testing→Production (eliminates 7-day token expiry)
 - ✅ Calendar reads: `events`, `get`, `calendars`, `search`, `freebusy`
 - ✅ Calendar writes: `create`, `update`, `delete`, `respond`
-- ✅ Docs reads: `read`, `find`, `comments`, `download`
-- ✅ Gmail reads: `search`, `read`, `labels`, `download`
+- ✅ Docs reads: `read`, `find`, `comments`, `download`, `revisions` (alias of `drive revisions`)
+- ✅ Gmail reads: `search`, `read` (incl. `--headers` full RFC 2822 header set + `--raw` source), `labels`, `download`
 - ✅ Gmail writes: `draft`, `modify`, `batch-modify`, `label-create/update/delete`, `filter-list/create/delete`
   - ❌ `send` is intentionally OUT OF SCOPE — short-circuits with `NOT_SUPPORTED` redirecting to `draft`. No Gmail scope grants drafting+label edits while withholding send, so the boundary is a code/product decision, not a scope (the token is send-capable). Don't "implement" send.
   - Filters need the `gmail.settings.basic` scope (added to `src/auth/scopes.ts` as `ADDITIONAL_SCOPES`; NOT covered by `gmail.modify`) — pre-existing accounts must re-auth once.
   - Shared label name↔id resolution lives in `src/commands/gmail/labels-shared.ts` (used by search + all write commands)
-- ✅ Drive reads: `search`, `get`, `ls`, `permissions`, `download`
+- ✅ Drive reads: `search`, `get`, `ls`, `permissions`, `download`, `revisions`, `activity`
+  - `revisions <fileId>` lists version history (native files carry an incompleteness note; `docs revisions` is an alias); `docs download --revision <id>` fetches historical content (markdown-default for native via exportLinks, `alt=media` for binary). No new scope.
+  - `activity <itemId>` is the Drive Activity API v2 timeline (create/edit/move/rename/delete/permission_change/comment; `--folder`, `--since/--until`, `--action`). Needs the `drive.activity.readonly` scope (added to `ADDITIONAL_SCOPES`; NOT implied by `auth/drive`) + `driveactivity.googleapis.com` (in `ADDITIONAL_APIS`) — **pre-existing accounts must re-auth once**.
 - ✅ Slides reads: `get`, `page`, `summarize`
 - 🚧 Drive writes (`create`, `copy`, `move`, `rename`, `delete`, `mkdir`) and Slides writes (`create`, `update`): scaffolded stubs, `NOT_IMPLEMENTED`
 - 🚧 Docs writes: `append`, `insert-text`, `delete-range`, etc. (planned, all stubbed)
-- ✅ Vitest test coverage (mime, paths, gmail compose + label resolution)
+- ✅ Vitest test coverage (mime, paths, gmail compose + label resolution, gmail read flags, drive revisions + activity helpers, docs download flags)
