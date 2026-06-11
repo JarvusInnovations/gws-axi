@@ -24,7 +24,8 @@ Requires a new read-only scope, so it ships behind a one-time re-auth.
 
 - Drive Activity API v2 `activity.query` (POST `https://driveactivity.googleapis.com/v2/activity:query`). Body: `itemName: "items/<id>"` OR `ancestorName: "items/<id>"`, optional `filter` (`time` + `detail.action_detail_case`), `pageSize`, `pageToken`.
 - **New scope** `https://www.googleapis.com/auth/drive.activity.readonly` — read-only, NOT implied by `auth/drive`. Added to `ADDITIONAL_SCOPES` in `src/auth/scopes.ts` (same pattern as `gmail.settings.basic`). Pre-existing accounts must re-auth once; the scope is incremental on the already-restricted `auth/drive` footprint so it doesn't worsen the consent/verification posture.
-- Required API: `driveactivity.googleapis.com` — added to `ADDITIONAL_APIS`, so `allApis()` includes it and the `auth setup` API-enablement step enables/checks it alongside the per-service APIs. (The per-account runtime `probe.ts` health check keys off the five representative `SERVICE_SCOPES` only and does not separately probe this API; an api-not-enabled 403 at call time is translated to `API_NOT_ENABLED` with enablement guidance.)
+- Required API: `driveactivity.googleapis.com` — added to `ADDITIONAL_APIS`, so `allApis()` includes it and the `auth setup` API-enablement step enables/checks it alongside the per-service APIs. (An api-not-enabled 403 at call time is translated to `API_NOT_ENABLED` with enablement guidance.)
+- **Doctor scope check**: `doctor`'s runtime tier checks presence of every `ADDITIONAL_SCOPES` entry (described by `ADDITIONAL_SCOPE_INFO`), including `drive.activity.readonly`, grouped under its parent service (`drive`). A missing one is a `fail` row whose detail contains the word "scope" (so it rolls into the scope-gap re-auth hint) and names the unavailable capability. This means a not-yet-granted additional scope is surfaced by `doctor` directly, not only when the dependent command is run.
 
 ## Display Rules
 
