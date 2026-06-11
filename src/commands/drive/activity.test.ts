@@ -98,10 +98,15 @@ describe("activity field extraction", () => {
     ).toBe("deleted-user");
   });
 
-  it("extracts a driveItem title as target", () => {
+  it("renders driveItem title with id when both present", () => {
     const activity = {
-      targets: [{ driveItem: { title: "Roadmap.gdoc" } }],
+      targets: [{ driveItem: { title: "Roadmap.gdoc", name: "items/1V09rp" } }],
     };
-    expect(primaryTarget(activity)).toBe("Roadmap.gdoc");
+    expect(primaryTarget(activity)).toBe("Roadmap.gdoc (1V09rp)");
+  });
+
+  it("falls back to the bare id when title is absent", () => {
+    const activity = { targets: [{ driveItem: { name: "items/1V09rp" } }] };
+    expect(primaryTarget(activity)).toBe("1V09rp");
   });
 });

@@ -24,7 +24,7 @@ Requires a new read-only scope, so it ships behind a one-time re-auth.
 
 - Drive Activity API v2 `activity.query` (POST `https://driveactivity.googleapis.com/v2/activity:query`). Body: `itemName: "items/<id>"` OR `ancestorName: "items/<id>"`, optional `filter` (`time` + `detail.action_detail_case`), `pageSize`, `pageToken`.
 - **New scope** `https://www.googleapis.com/auth/drive.activity.readonly` — read-only, NOT implied by `auth/drive`. Added to `ADDITIONAL_SCOPES` in `src/auth/scopes.ts` (same pattern as `gmail.settings.basic`). Pre-existing accounts must re-auth once; the scope is incremental on the already-restricted `auth/drive` footprint so it doesn't worsen the consent/verification posture.
-- Required API: `driveactivity.googleapis.com` — added to doctor's API-enablement checks.
+- Required API: `driveactivity.googleapis.com` — added to `ADDITIONAL_APIS`, so `allApis()` includes it and the `auth setup` API-enablement step enables/checks it alongside the per-service APIs. (The per-account runtime `probe.ts` health check keys off the five representative `SERVICE_SCOPES` only and does not separately probe this API; an api-not-enabled 403 at call time is translated to `API_NOT_ENABLED` with enablement guidance.)
 
 ## Display Rules
 
@@ -37,9 +37,9 @@ activities[N]{time,action,actor,target}
 ```
 
 - `time` — the activity timestamp (or the end of its `timeRange`).
-- `action` — the primary action type, normalized to a short label (`create`, `edit`, `move`, `rename`, `delete`, `restore`, `permission_change`, `comment`, …). An activity bundling multiple actions lists the primary one; `--full` (future) could expand all.
-- `actor` — best-effort human identity. The API returns `actor.user.knownUser.personName` = `people/<id>`, not an email. Resolve to a display name/email via the People API when possible; when the actor is anonymous/deleted/unknown or unresolvable, emit a stable fallback (`unknown`, or the raw `people/<id>`) rather than a blank — and never fabricate.
-- `target` — the affected item's title or id (first-class id, never truncated).
+- `action` — the primary action type, normalized to a short label. Filterable types: `create`, `edit`, `move`, `rename`, `delete`, `restore`, `permission_change`, `comment`. Additional labels surfaced in output but not selectable via `--action`: `dlp_change`, `reference`, `settings_change`, `applied_label_change`. An activity bundling multiple actions lists the primary one.
+- `actor` — best-effort identity. The API returns `actor.user.knownUser.personName` = `people/<id>`, not an email; v1 emits that raw `people/<id>` string as the stable identifier (no People API round-trip — resolving to email is out of scope, see below). Other actor types map to stable labels: `deleted-user`, `unknown-user`, `anonymous`, `impersonation`, `administrator`, `system`. Never blank, never fabricated.
+- `target` — the affected item, rendered `"<title> (<id>)"` when both are known, else whichever is present. The item id (`driveItem.name` → `<id>`) is always kept reachable per [principles.md#ids-are-first-class](../principles.md#ids-are-first-class); never truncated.
 
 ### Visibility disclosure (required)
 
@@ -47,9 +47,10 @@ Append a `note` / `help[]` line: results are limited to activity visible to the 
 
 ### help[] suggestions
 
-- Narrow with `--action`, `--since`/`--until`, or widen with `--folder`.
-- Cross-reference content versions with `gws-axi drive revisions <id>`.
+- Widen with `--folder` (when not already in folder scope); in folder scope, narrow with `--action`.
+- Bound the window with `--since`/`--until` when neither is set.
 - Fetch an item surfaced here with `gws-axi drive get <id>` / `docs download <id>`.
+- Cross-reference content versions with `gws-axi drive revisions <id>`.
 
 ## Errors
 

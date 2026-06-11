@@ -26,15 +26,19 @@ interface DriveSubcommand {
 const DOWNLOAD_HELP = `usage: gws-axi drive download <file-id> [flags]
 args[1]:
   <file-id>            The Drive file ID
-flags[3]:
+flags[4]:
   --out <path>         Where to save (default: ./<sanitized file name>)
   --as <mime>          Export format for native Google files (only valid
                        for Docs/Sheets/Slides/Drawings). Defaults: .docx
-                       / .xlsx / .pptx / .png.
+                       / .xlsx / .pptx / .png; text/markdown when --revision
+                       is set.
+  --revision <id>      Download a specific historical revision (id from
+                       \`gws-axi drive revisions <id>\`) instead of the head.
   --account <email>    Account override when 2+ are configured
 examples:
   gws-axi drive download 1AbC...
   gws-axi drive download 1AbC... --out ./report.pdf --as application/pdf
+  gws-axi drive download 1AbC... --revision 250
 notes:
   This is an alias for \`gws-axi docs download\` — same implementation,
   same behavior. Either spelling works.

@@ -193,12 +193,23 @@ export function primaryActor(activity: Record<string, unknown>): string {
   return "unknown";
 }
 
-/** Best-effort target label (title) from an activity's targets[]. */
+/**
+ * Best-effort target label from an activity's targets[]. Prefers the title,
+ * but always keeps the item id reachable (ids-are-first-class): renders
+ * "<title> (<id>)" when both are present, the id alone when only it is.
+ * driveItem.name has the form "items/<id>".
+ */
 export function primaryTarget(activity: Record<string, unknown>): string {
   const targets = (activity.targets as Array<Record<string, unknown>>) ?? [];
   for (const target of targets) {
     const item = target.driveItem as Record<string, unknown> | undefined;
-    if (item?.title) return String(item.title);
+    if (item) {
+      const title = item.title ? String(item.title) : "";
+      const id = item.name ? String(item.name).replace(/^items\//, "") : "";
+      if (title && id) return `${title} (${id})`;
+      if (title) return title;
+      if (id) return id;
+    }
     const drive = target.drive as Record<string, unknown> | undefined;
     if (drive?.title) return String(drive.title);
     const comment = target.fileComment as Record<string, unknown> | undefined;
@@ -307,11 +318,26 @@ export async function driveActivityCommand(
   );
 
   const suggestions: string[] = [];
-  if (!flags.folder) {
+  if (flags.folder) {
+    // Already broad — point at narrowing levers instead of widening.
+    if (flags.actions.length === 0) {
+      suggestions.push(
+        "Narrow by action type, e.g. `--action permission_change,delete`",
+      );
+    }
+  } else {
     suggestions.push(
       `Widen to a folder's whole subtree: \`gws-axi drive activity ${flags.itemId} --folder\``,
     );
   }
+  if (!flags.since && !flags.until) {
+    suggestions.push(
+      "Bound the window with `--since <date>` / `--until <date>`",
+    );
+  }
+  suggestions.push(
+    `Fetch an item surfaced here: \`gws-axi drive get <id>\` or \`gws-axi docs download <id>\``,
+  );
   suggestions.push(
     `Cross-reference content versions with \`gws-axi drive revisions ${flags.itemId}\``,
   );

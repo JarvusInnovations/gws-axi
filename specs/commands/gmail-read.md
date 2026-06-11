@@ -33,7 +33,7 @@ Reads a Gmail thread (or single message) and renders it for agent consumption. T
 - **`--headers`**: in addition to the `account:` header, emit:
   - a `message{id,thread_id,internal_date}` header object;
   - a `headers[N]{name,value}` list of every RFC 2822 header on the message, in the order Gmail returns them, values untruncated ([principles.md#ids-are-first-class](../principles.md#ids-are-first-class) applies to `Message-ID` and the IDs);
-  - the normal parsed `message{...from,to,date,subject,body...}` block, so the agent gets both the provenance headers and the readable body in one call ([feedback: complete-context defaults]).
+  - the normal parsed body under a `body{from,to,cc,date,subject,body_source,body,attachments}` block (keyed `body:` to avoid colliding with the `message{}` header above), so the agent gets both the provenance headers and the readable body in one call ([feedback: complete-context defaults]).
 - **`--raw`**: emit the `account:` header, a `message{id,thread_id,internal_date,bytes}` header, then the decoded RFC 2822 source under a single `raw:` text field. No body parsing, no truncation by the size threshold (the point is fidelity); `--out` may be combined with `--raw` to write the source to a file instead of inline.
 
 ## Actions

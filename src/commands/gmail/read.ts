@@ -606,9 +606,13 @@ async function renderRawMode(
     await writeFile(outPath, source);
     blocks.push(
       renderObject({
-        message: { id: msg.id ?? messageId, thread_id: msg.threadId ?? "" },
+        message: {
+          id: msg.id ?? messageId,
+          thread_id: msg.threadId ?? "",
+          internal_date: msg.internalDate ?? "",
+          bytes: Buffer.byteLength(source),
+        },
         saved: outPath,
-        bytes: Buffer.byteLength(source),
       }),
     );
     return joinBlocks(...blocks);

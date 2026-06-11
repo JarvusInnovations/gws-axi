@@ -229,7 +229,7 @@ export async function driveRevisionsCommand(
   }
   if (native) {
     suggestions.push(
-      "Native-file history is session-level, not the full editor timeline, and excludes version names — see `--help`",
+      "This list may be incomplete — the editor's version-history UI may show more revisions, and version names aren't exposed by the API",
     );
   } else {
     suggestions.push(
