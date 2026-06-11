@@ -46,9 +46,12 @@
     "@toon-format/toon": "^2.1.0",
     "addressparser": "^1.0.1",
     "axi-sdk-js": "^0.1.4",
-    "google-auth-library": "^10.6.2",
-    "googleapis": "^171.4.0",
+    "google-auth-library": "^10.7.0",
+    "googleapis": "^173.0.0",
     "turndown": "^7.2.4"
+  },
+  "overrides": {
+    "google-auth-library": "$google-auth-library"
   },
   "devDependencies": {
     "@types/addressparser": "^1.0.3",
