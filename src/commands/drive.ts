@@ -7,6 +7,10 @@ import {
   drivePermissionsCommand,
   PERMISSIONS_HELP,
 } from "./drive/permissions.js";
+import {
+  driveRevisionsCommand,
+  REVISIONS_HELP,
+} from "./drive/revisions.js";
 import { driveSearchCommand, SEARCH_HELP } from "./drive/search.js";
 
 interface DriveSubcommand {
@@ -71,6 +75,12 @@ const SUBCOMMANDS: DriveSubcommand[] = [
     help: DOWNLOAD_HELP,
     // Delegates to docs/download.ts — same impl handles any Drive file.
     handler: docsDownloadCommand,
+  },
+  {
+    name: "revisions",
+    mutation: false,
+    help: REVISIONS_HELP,
+    handler: driveRevisionsCommand,
   },
   { name: "create", mutation: true, help: CREATE_HELP },
   { name: "copy", mutation: true, help: COPY_HELP },
