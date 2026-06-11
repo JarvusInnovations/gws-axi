@@ -1,4 +1,8 @@
-import { SERVICE_SCOPES, type ServiceName } from "../auth/scopes.js";
+import {
+  ADDITIONAL_SCOPE_INFO,
+  SERVICE_SCOPES,
+  type ServiceName,
+} from "../auth/scopes.js";
 import { getValidAccessToken, type StoredTokens } from "./tokens.js";
 
 export interface ProbeResult {
@@ -7,7 +11,7 @@ export interface ProbeResult {
   detail: string;
 }
 
-interface ProbeContext {
+export interface ProbeContext {
   email: string;
   tokens: StoredTokens;
   accessToken: string;
@@ -210,6 +214,32 @@ function probeSlides(
 }
 
 /**
+ * Presence checks for each ADDITIONAL_SCOPES entry — scopes layered on top of
+ * a service's representative scope that are NOT implied by it. These are a
+ * cheap token-string check (no API call). Each result is keyed to its parent
+ * service so it groups under that service and honors `--check runtime.<service>`.
+ * A missing one is a `fail` prompting re-auth — surfacing it here instead of
+ * only when the dependent command is run.
+ */
+export function probeAdditionalScopes(ctx: ProbeContext): ProbeResult[] {
+  return ADDITIONAL_SCOPE_INFO.map(({ scope, service, capability }) => {
+    const shortName = scope.replace("https://www.googleapis.com/auth/", "");
+    if (hasScope(ctx.tokens, scope)) {
+      return {
+        service,
+        status: "ok" as const,
+        detail: `${shortName} granted (${capability}) ✓`,
+      };
+    }
+    return {
+      service,
+      status: "fail" as const,
+      detail: `${shortName} scope NOT granted — ${capability} unavailable; re-auth to grant it`,
+    };
+  });
+}
+
+/**
  * Run all service probes for a single account in parallel (where they're
  * independent) and return results keyed by service name.
  */
@@ -248,7 +278,14 @@ export async function probeAccount(
   const docs = probeDocs(ctx, driveOk);
   const slides = probeSlides(ctx, driveOk);
 
-  return [gmail, calendar, docs, drive, slides];
+  return [
+    gmail,
+    calendar,
+    docs,
+    drive,
+    slides,
+    ...probeAdditionalScopes(ctx),
+  ];
 }
 
 function errorResult(service: ServiceName, err: unknown): ProbeResult {
