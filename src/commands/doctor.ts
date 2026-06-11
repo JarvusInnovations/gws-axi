@@ -284,14 +284,20 @@ export async function doctorCommand(
   if (tokenFailures.length > 0) {
     const accts = [...new Set(tokenFailures.map((r) => r.account))];
     help.push(
-      `Token issues detected on ${accts.join(", ")} — run \`gws-axi auth login --account <email>\` + \`auth login --wait\` to re-auth`,
+      `Token issues detected on ${accts.join(", ")} — re-auth each (run the prepare command, relay the URL, then \`auth login --wait\` in a separate step):`,
     );
+    for (const acct of accts) {
+      help.push(`  gws-axi auth login --account ${acct} --no-wait`);
+    }
   }
   if (scopeFailures.length > 0) {
     const accts = [...new Set(scopeFailures.map((r) => r.account))];
     help.push(
-      `Scope gaps on ${accts.join(", ")} — re-auth to re-consent to the full scope set`,
+      `Scope gaps on ${accts.join(", ")} — re-auth each to re-consent to the full scope set (run the prepare command, relay the URL, then \`auth login --wait\` in a separate step):`,
     );
+    for (const acct of accts) {
+      help.push(`  gws-axi auth login --account ${acct} --no-wait`);
+    }
   }
   // Auth-health-specific hints: nudge towards `auth publish` if the
   // consent screen hasn't been published, or list pre-publish accounts
