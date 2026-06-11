@@ -51,6 +51,16 @@ Tool versions are pinned in `.tool-versions` (bun 1.3.11 / nodejs 22.22.0 via as
 - Manual E2E for the OAuth flow (can't automate browser consent)
 - When adding a service subcommand, test: (1) empty result collapses to `<name>: <human message>` (scalar value under the list's field name — AXI canonical empty-list shape, set in `renderListResponse`); (2) populated result renders default schema; (3) error translation for 401/403/404; (4) account resolution honors write-protection
 
+## Spec-driven development (specops)
+
+This repo uses [specops](https://github.com/JarvusInnovations/specops): **specs are the source of truth; code follows.** Start every feature by updating `specs/`, not by editing code.
+
+- `specs/` — the authoritative desired state. `specs/principles.md` (decisive cross-cutting rules — read these first), `specs/architecture.md` (structure/models), `specs/api/conventions.md` (cross-command contracts), `specs/commands/<service>-<cmd>.md` (per-command). Read the relevant spec before implementing; if it's ambiguous or wrong, fix the spec, don't work around it in code.
+- `plans/` — work-in-flight as a micro-DAG (motion, not state). A chunk of work starts with a plan file (`status: planned`), flips to `in-progress`, and the last commit before merge flips it to `done` with `pr:` + checked validation. Protocol: `.agents/skills/specops/references/plans-protocol.md`.
+- Plans dashboard: `.agents/skills/specops/scripts/specops` (also `next`, `dag`). A project SessionStart hook in `.claude/settings.json` loads it each session.
+- **Spec drift auditing**: run `/audit-spec-drift` to launch the auditor comparing `specs/` against the implementation.
+- Spec↔code divergence is a bug, not debt — a PR that changes behavior updates the spec in the same PR.
+
 ## Docs
 
 - `docs/design.md` — architecture, auth model, doctor tiers, command surface, multi-account + write-protection spec
