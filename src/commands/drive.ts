@@ -7,6 +7,7 @@ import {
   drivePermissionsCommand,
   PERMISSIONS_HELP,
 } from "./drive/permissions.js";
+import { driveActivityCommand, ACTIVITY_HELP } from "./drive/activity.js";
 import {
   driveRevisionsCommand,
   REVISIONS_HELP,
@@ -81,6 +82,12 @@ const SUBCOMMANDS: DriveSubcommand[] = [
     mutation: false,
     help: REVISIONS_HELP,
     handler: driveRevisionsCommand,
+  },
+  {
+    name: "activity",
+    mutation: false,
+    help: ACTIVITY_HELP,
+    handler: driveActivityCommand,
   },
   { name: "create", mutation: true, help: CREATE_HELP },
   { name: "copy", mutation: true, help: COPY_HELP },
