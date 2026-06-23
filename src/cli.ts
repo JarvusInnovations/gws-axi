@@ -10,6 +10,7 @@ import { gmailCommand } from "./commands/gmail.js";
 import { docsCommand } from "./commands/docs.js";
 import { driveCommand } from "./commands/drive.js";
 import { slidesCommand } from "./commands/slides.js";
+import { setupCommand, SETUP_HELP } from "./commands/setup.js";
 
 const DESCRIPTION =
   "Agent ergonomic CLI for Google Workspace. Unified interface for Gmail, Calendar, Docs, Drive, and Slides with agent-guided OAuth setup.";
@@ -17,8 +18,8 @@ const DESCRIPTION =
 const VERSION = readPackageVersion();
 
 export const TOP_HELP = `usage: gws-axi [command] [args] [flags]
-commands[8]:
-  (none)=home, auth, doctor, calendar, gmail, docs, drive, slides
+commands[9]:
+  (none)=home, auth, doctor, calendar, gmail, docs, drive, slides, setup
 flags[2]:
   --help, -v/-V/--version
 examples:
@@ -26,6 +27,7 @@ examples:
   gws-axi auth setup
   gws-axi doctor
   gws-axi calendar events
+  gws-axi setup hooks
 `;
 
 // Services that have real subcommand dispatchers handle --help themselves
@@ -34,6 +36,7 @@ examples:
 const COMMAND_HELP: Record<string, string> = {
   auth: AUTH_HELP,
   doctor: DOCTOR_HELP,
+  setup: SETUP_HELP,
 };
 
 export async function main(): Promise<void> {
@@ -41,7 +44,6 @@ export async function main(): Promise<void> {
     description: DESCRIPTION,
     version: VERSION,
     topLevelHelp: TOP_HELP,
-    ...(process.env.GWS_AXI_DISABLE_HOOKS === "1" ? { hooks: false } : {}),
     home: async () => homeCommand(),
     commands: {
       auth: authCommand,
@@ -51,6 +53,7 @@ export async function main(): Promise<void> {
       docs: docsCommand,
       drive: driveCommand,
       slides: slidesCommand,
+      setup: setupCommand,
     },
     getCommandHelp: (command) => COMMAND_HELP[command],
   });

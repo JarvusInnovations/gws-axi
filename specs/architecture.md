@@ -13,10 +13,10 @@ Foundational, concrete structure and model decisions for `gws-axi`. These are fa
 ## Entry → dispatch → handler
 
 - Entry `bin/gws-axi.ts` → `src/cli.ts`, which calls `runAxiCli(...)` from `axi-sdk-js` with: description, version (from `package.json`), `TOP_HELP`, a `home` handler, a `commands` map, and `getCommandHelp`.
-- Top-level commands: `(none)=home`, `auth`, `doctor`, `calendar`, `gmail`, `docs`, `drive`, `slides`.
+- Top-level commands: `(none)=home`, `auth`, `doctor`, `calendar`, `gmail`, `docs`, `drive`, `slides`, `setup`.
 - Per service: dispatcher `src/commands/<service>.ts` routes to per-subcommand handlers `src/commands/<service>/<sub>.ts`.
 - A subcommand handler is `(account: string, args: string[]) => Promise<string>`: it parses its own flags (hand-rolled loop over `args`, no arg-parsing library), does the work, and returns a rendered TOON string. Each handler exports a `<SUB>_HELP` constant.
-- Hooks can be disabled via `GWS_AXI_DISABLE_HOOKS=1`.
+- The SessionStart hook is installed **only** by the explicit `setup hooks` command — never as a side effect of running other commands, and there is no env toggle. `runAxiCli` is called without a `hooks` option (the SDK does not auto-install). See [SessionStart hook](#sessionstart-hook) and `specs/commands/setup.md`.
 
 ## Google API client layer (`src/google/`)
 
@@ -88,4 +88,4 @@ Services with a real dispatcher (e.g. Calendar) handle `--help` themselves so `<
 
 ## SessionStart hook
 
-On first invocation, `gws-axi` self-installs a SessionStart hook (via `axi-sdk-js`) into `~/.claude/settings.json` and `~/.codex/hooks.json`. The hook runs `gws-axi --summary`, emitting one compact state line (setup progress / healthy / failing).
+The SessionStart hook is installed **only** by the explicit `setup hooks` command (`gws-axi setup hooks`) — never auto-installed on first run, and there is no env toggle. This is the AXI standard: hooks register from a user-invoked setup command, not as a side effect of ordinary commands. The command delegates to `installSessionStartHooks({ marker: "gws-axi", timeoutSeconds: 10 })` from `axi-sdk-js`, which installs/repairs across Claude Code (`~/.claude/settings.json`), Codex (`~/.codex/hooks.json` + `config.toml`), and OpenCode. It is idempotent and self-repairing (updates a stale executable path). The hook runs `gws-axi --summary`, emitting one compact state line (setup progress / healthy / failing). Full contract: `specs/commands/setup.md`.
