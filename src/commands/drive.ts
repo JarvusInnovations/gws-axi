@@ -14,6 +14,7 @@ import {
 } from "./drive/revisions.js";
 import { driveSearchCommand, SEARCH_HELP } from "./drive/search.js";
 import { driveUploadCommand, UPLOAD_HELP } from "./drive/upload.js";
+import { driveMkdirCommand, MKDIR_HELP } from "./drive/mkdir.js";
 
 interface DriveSubcommand {
   name: string;
@@ -61,9 +62,6 @@ status: planned for v1 writes — not yet implemented
 const DELETE_HELP = `usage: gws-axi drive delete <file-id> [flags]
 status: planned for v1 writes — not yet implemented
 `;
-const MKDIR_HELP = `usage: gws-axi drive mkdir --name <name> --parent <folder-id> [flags]
-status: planned for v1 writes — not yet implemented
-`;
 
 const SUBCOMMANDS: DriveSubcommand[] = [
   { name: "search", mutation: false, help: SEARCH_HELP, handler: driveSearchCommand },
@@ -105,7 +103,12 @@ const SUBCOMMANDS: DriveSubcommand[] = [
   { name: "move", mutation: true, help: MOVE_HELP },
   { name: "rename", mutation: true, help: RENAME_HELP },
   { name: "delete", mutation: true, help: DELETE_HELP },
-  { name: "mkdir", mutation: true, help: MKDIR_HELP },
+  {
+    name: "mkdir",
+    mutation: true,
+    help: MKDIR_HELP,
+    handler: driveMkdirCommand,
+  },
 ];
 
 const SUB_BY_NAME: Record<string, DriveSubcommand> = Object.fromEntries(
@@ -141,8 +144,8 @@ writes[${writes.length}]:
 notes:
   Writes require --account <email> when 2+ accounts are authenticated.
   Reads use the default account when --account is not provided.
-  upload is live; the remaining write subcommands are scaffolded for the
-  next slice and throw NOT_IMPLEMENTED after account resolution runs.
+  upload and mkdir are live; the remaining write subcommands are scaffolded
+  for the next slice and throw NOT_IMPLEMENTED after account resolution runs.
 subcommand help:
   gws-axi drive ls --help            for folder listing (incl. --recursive)
   gws-axi drive get --help           for full file metadata
@@ -150,6 +153,7 @@ subcommand help:
   gws-axi drive permissions --help   for access / sharing
   gws-axi drive download --help      for fetching bytes (alias of docs download)
   gws-axi drive upload --help        for uploading a local file (incl. --convert)
+  gws-axi drive mkdir --help         for creating a folder
 examples:
   gws-axi drive ls
   gws-axi drive ls <folder-id> --recursive
@@ -157,6 +161,7 @@ examples:
   gws-axi drive get <file-id>
   gws-axi drive permissions <file-id>
   gws-axi drive upload ./report.pdf --account you@example.com
+  gws-axi drive mkdir "Q2 Reports" --account you@example.com
 `;
 
 export async function driveCommand(args: string[]): Promise<string> {
