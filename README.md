@@ -37,7 +37,7 @@ I want to authenticate the following Google accounts:
   - personal@gmail.com
 ```
 
-The explicit `gws-axi auth setup` in the prompt matters: this is your very first session, so the agent doesn't yet have any ambient context about `gws-axi`. Naming the first command gets the agent into the structured flow, where the CLI's output takes over. Every subsequent session auto-loads a compact `gws-axi` status line via a session-start hook (installed on first invocation) — so after this one, you can skip the command and just say "use gws-axi to ..." and the agent knows.
+The explicit `gws-axi auth setup` in the prompt matters: this is your very first session, so the agent doesn't yet have any ambient context about `gws-axi`. Naming the first command gets the agent into the structured flow, where the CLI's output takes over. Once you install the SessionStart hook (see [step 4](#4-make-gws-axi-your-agents-default-for-google-workspace)), every subsequent session auto-loads a compact `gws-axi` status line — so after that, you can skip the command and just say "use gws-axi to ..." and the agent knows.
 
 Expect ~10 minutes end-to-end for a fresh Google Cloud project; ~3 minutes if you already have one you want to reuse.
 
@@ -54,7 +54,15 @@ gws-axi calendar events                  # upcoming 7 days on your primary calen
 
 ### 4. Make gws-axi your agent's default for Google Workspace
 
-On first invocation (which already happened during step 2), `gws-axi` auto-installed a **SessionStart hook** into your agent's config (Claude Code's `~/.claude/settings.json`, Codex's `~/.codex/hooks.json`). From now on, every new agent session will see a compact `gws-axi` status line in ambient context — authenticated accounts, write-protection status, setup health — with no extra wiring. Nothing for you to configure.
+gws-axi gives agents two complementary ways to pick up ambient context (per [AXI principle 7](https://axi.md) — context is delivered through hooks and installable skills, and installation is always explicit opt-in, never a side effect of ordinary commands):
+
+```bash
+gws-axi setup hooks
+```
+
+This installs a **SessionStart hook** into your agent's config — Claude Code (`~/.claude/settings.json`), Codex (`~/.codex/hooks.json`), and OpenCode. From then on, every new agent session sees a compact `gws-axi` status line in ambient context — authenticated accounts, write-protection status, setup health. The command is idempotent and self-repairing: re-run it any time (e.g. after upgrading or moving the install) and it repairs a stale executable path without duplicating entries. There is no auto-install — the hook only appears when you run `setup hooks`.
+
+The hook and an installable skill are the two ambient-context paths: the hook injects current state at session start, while a skill can teach the agent the full command surface on demand. Run `gws-axi setup hooks` to get the hook in place.
 
 To make sure agents reach for `gws-axi` instead of stale alternatives, also consider:
 
