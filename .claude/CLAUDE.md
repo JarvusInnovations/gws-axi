@@ -90,6 +90,7 @@ This repo uses [specops](https://github.com/JarvusInnovations/specops): **specs 
   - `activity <itemId>` is the Drive Activity API v2 timeline (create/edit/move/rename/delete/permission_change/comment; `--folder`, `--since/--until`, `--action`). Needs the `drive.activity.readonly` scope (added to `ADDITIONAL_SCOPES`; NOT implied by `auth/drive`) + `driveactivity.googleapis.com` (in `ADDITIONAL_APIS`) — **pre-existing accounts must re-auth once**.
 - ✅ Slides reads: `get`, `page`, `summarize`
 - ✅ Drive writes: `upload` — stream a local file to Drive; `--parent`, `--name`, `--mime`, `--convert` (→ native Doc/Sheet/Slides), `--update <fileId>` (replace content + optional rename). No new scope (rides the full `drive` grant). Logic split into `src/util/mime-types.ts` (extension→MIME + conversion map) + `src/commands/drive/upload.ts`. Spec: `specs/commands/drive-upload.md`.
-- 🚧 Drive writes (`create`, `copy`, `move`, `rename`, `delete`, `mkdir`) and Slides writes (`create`, `update`): scaffolded stubs, `NOT_IMPLEMENTED`
+- ✅ Drive writes: `mkdir <name>` — create a folder (`files.create` with the folder MIME, no media); `--parent` nests it. Produces the folder ID `drive upload --parent` consumes. Non-idempotent (re-run → duplicate), disclosed in help. `src/commands/drive/mkdir.ts`; spec: `specs/commands/drive-mkdir.md`.
+- 🚧 Drive writes (`create`, `copy`, `move`, `rename`, `delete`) and Slides writes (`create`, `update`): scaffolded stubs, `NOT_IMPLEMENTED`
 - 🚧 Docs writes: `append`, `insert-text`, `delete-range`, etc. (planned, all stubbed)
 - ✅ Vitest test coverage (mime, paths, gmail compose + label resolution, gmail read flags, drive revisions + activity helpers, docs download flags)
