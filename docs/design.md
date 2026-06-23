@@ -307,7 +307,7 @@ Non-zero exit codes for unrecoverable errors; zero exit for idempotent no-ops (e
 
 ## Session hook (SessionStart)
 
-On first invocation, `gws-axi` self-installs a SessionStart hook in `~/.claude/settings.json` and `~/.codex/hooks.json` (via `installSessionStartHooks` from `axi-sdk-js`). The hook runs `gws-axi --summary` which emits a compact state line:
+The SessionStart hook is installed **only** by the explicit `gws-axi setup hooks` command (never auto-installed on first run; no env toggle). It delegates to `installSessionStartHooks({ marker: "gws-axi", timeoutSeconds: 10 })` from `axi-sdk-js`, installing/repairing across Claude Code (`~/.claude/settings.json`), Codex (`~/.codex/hooks.json` + `config.toml`), and OpenCode — idempotent and self-repairing. The hook runs `gws-axi --summary` which emits a compact state line:
 
 - If setup incomplete: `gws-axi: setup 3/8 — run 'gws-axi auth setup' to continue`
 - If setup complete and healthy: `gws-axi: ok (5 services, chris@jarv.us)`
