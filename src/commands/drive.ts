@@ -13,6 +13,7 @@ import {
   REVISIONS_HELP,
 } from "./drive/revisions.js";
 import { driveSearchCommand, SEARCH_HELP } from "./drive/search.js";
+import { driveUploadCommand, UPLOAD_HELP } from "./drive/upload.js";
 
 interface DriveSubcommand {
   name: string;
@@ -93,6 +94,12 @@ const SUBCOMMANDS: DriveSubcommand[] = [
     help: ACTIVITY_HELP,
     handler: driveActivityCommand,
   },
+  {
+    name: "upload",
+    mutation: true,
+    help: UPLOAD_HELP,
+    handler: driveUploadCommand,
+  },
   { name: "create", mutation: true, help: CREATE_HELP },
   { name: "copy", mutation: true, help: COPY_HELP },
   { name: "move", mutation: true, help: MOVE_HELP },
@@ -134,20 +141,22 @@ writes[${writes.length}]:
 notes:
   Writes require --account <email> when 2+ accounts are authenticated.
   Reads use the default account when --account is not provided.
-  Write subcommands are scaffolded for the next slice; they throw
-  NOT_IMPLEMENTED after account resolution runs.
+  upload is live; the remaining write subcommands are scaffolded for the
+  next slice and throw NOT_IMPLEMENTED after account resolution runs.
 subcommand help:
   gws-axi drive ls --help            for folder listing (incl. --recursive)
   gws-axi drive get --help           for full file metadata
   gws-axi drive search --help        for full-text search
   gws-axi drive permissions --help   for access / sharing
   gws-axi drive download --help      for fetching bytes (alias of docs download)
+  gws-axi drive upload --help        for uploading a local file (incl. --convert)
 examples:
   gws-axi drive ls
   gws-axi drive ls <folder-id> --recursive
   gws-axi drive search --query "project plan"
   gws-axi drive get <file-id>
   gws-axi drive permissions <file-id>
+  gws-axi drive upload ./report.pdf --account you@example.com
 `;
 
 export async function driveCommand(args: string[]): Promise<string> {
