@@ -1,6 +1,7 @@
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { basename, resolve } from "node:path";
+import type { Readable } from "node:stream";
 import { AxiError } from "axi-sdk-js";
 import type { drive_v3 } from "googleapis";
 import { driveClient, translateGoogleError } from "../../google/client.js";
@@ -10,19 +11,23 @@ import {
   googleConversionTarget,
 } from "../../util/mime-types.js";
 
-export const UPLOAD_HELP = `usage: gws-axi drive upload <local-path> [flags]
+export const UPLOAD_HELP = `usage: gws-axi drive upload <source> [flags]
 args[1]:
-  <local-path>         REQUIRED — path to a readable local file to upload
-flags[5]:
+  <source>             Content source — exactly one of: a local file path
+                       (default), \`-\` to read from stdin, or --content below
+flags[6]:
+  --content <string>   Inline upload body (alternative to a path or stdin)
   --parent <folder-id> Destination folder ID (default: My Drive root).
                        Cannot be combined with --update.
   --name <name>        Name to give the file in Drive (default: the local
-                       file's basename). With --update, renames the target.
-  --mime <type>        Override the source content type (default: detected
-                       from the file extension; unknown → application/octet-stream)
+                       file's basename). REQUIRED for stdin / --content (no
+                       filename to infer). With --update, renames the target.
+  --mime <type>        Override the source content type (default: detected from
+                       the file — or, for stdin/--content, the --name —
+                       extension; unknown → application/octet-stream)
   --convert            Convert to the matching native Google format on upload
-                       (.docx→Doc, .xlsx/.csv→Sheet, .pptx→Slides). Cannot be
-                       combined with --update.
+                       (.docx→Doc, .xlsx/.csv→Sheet, .pptx→Slides). With
+                       --update, only when the target is already that native type.
   --update <file-id>   Replace an existing file's content (new revision)
                        instead of creating a new file.
   --account <email>    REQUIRED when 2+ accounts are authenticated
@@ -30,7 +35,9 @@ examples:
   gws-axi drive upload ./report.pdf
   gws-axi drive upload ./report.pdf --parent 1AbC... --name "Q2 Report.pdf"
   gws-axi drive upload ./notes.docx --convert
-  gws-axi drive upload ./report.pdf --update 1XyZ...
+  echo '# Notes' | gws-axi drive upload - --name notes.md --convert
+  gws-axi drive upload --content '# Notes' --name notes.md --convert
+  gws-axi drive upload ./edited.md --convert --update 1XyZ...
 notes:
   Without --update, every upload creates a NEW Drive file — re-running makes
   another copy (Drive allows duplicate names). Use --update <id> to replace an
@@ -42,6 +49,8 @@ output:
 
 export interface ParsedFlags {
   localPath: string | undefined;
+  stdin: boolean;
+  content: string | undefined;
   parent: string | undefined;
   name: string | undefined;
   mime: string | undefined;
@@ -52,6 +61,8 @@ export interface ParsedFlags {
 export function parseFlags(args: string[]): ParsedFlags {
   const flags: ParsedFlags = {
     localPath: undefined,
+    stdin: false,
+    content: undefined,
     parent: undefined,
     name: undefined,
     mime: undefined,
@@ -62,6 +73,10 @@ export function parseFlags(args: string[]): ParsedFlags {
     const arg = args[i];
     const next = args[i + 1];
     switch (arg) {
+      case "--content":
+        flags.content = next;
+        i++;
+        break;
       case "--parent":
         flags.parent = next;
         i++;
@@ -81,6 +96,10 @@ export function parseFlags(args: string[]): ParsedFlags {
         flags.update = next;
         i++;
         break;
+      case "-":
+        // `-` as the positional means read the body from stdin.
+        flags.stdin = true;
+        break;
       default:
         if (!arg.startsWith("--") && flags.localPath === undefined) {
           flags.localPath = arg;
@@ -99,10 +118,36 @@ const UPLOAD_FIELDS = "id,name,mimeType,size,parents,webViewLink";
  * spec enumerates, so it's unit-testable without touching disk or Google.
  */
 export function validateFlags(flags: ParsedFlags): void {
-  if (!flags.localPath) {
-    throw new AxiError("Missing local file path", "VALIDATION_ERROR", [
-      "Usage: gws-axi drive upload <local-path> [flags]",
+  const sourceCount =
+    (flags.localPath !== undefined ? 1 : 0) +
+    (flags.content !== undefined ? 1 : 0) +
+    (flags.stdin ? 1 : 0);
+  if (sourceCount === 0) {
+    throw new AxiError("Missing content source", "VALIDATION_ERROR", [
+      "Provide a local file path, `-` to read from stdin, or --content <string>",
+      "Usage: gws-axi drive upload <source> [flags]",
     ]);
+  }
+  if (sourceCount > 1) {
+    throw new AxiError(
+      "Provide exactly one content source",
+      "VALIDATION_ERROR",
+      [
+        "A local path, `-` (stdin), and --content are mutually exclusive",
+        "Pick one source",
+      ],
+    );
+  }
+  // stdin / --content have no filename to infer a name (or mime) from.
+  if ((flags.stdin || flags.content !== undefined) && !flags.name) {
+    throw new AxiError(
+      "--name is required when reading from stdin or --content",
+      "VALIDATION_ERROR",
+      [
+        "Pass --name <name> (its extension also sets the default --mime)",
+        "e.g. --name notes.md for a markdown upload",
+      ],
+    );
   }
   if (flags.update && flags.parent) {
     throw new AxiError(
@@ -133,27 +178,44 @@ export async function driveUploadCommand(
   const flags = parseFlags(args);
   validateFlags(flags);
 
-  const absolutePath = resolve(process.cwd(), flags.localPath!);
-  let fileStat;
-  try {
-    fileStat = await stat(absolutePath);
-  } catch {
-    throw new AxiError(
-      `Local file not found: ${flags.localPath}`,
-      "LOCAL_FILE_NOT_FOUND",
-      ["Check the path; it must be a readable file on this machine"],
-    );
-  }
-  if (fileStat.isDirectory()) {
-    throw new AxiError(
-      `Local path is a directory, not a file: ${flags.localPath}`,
-      "LOCAL_PATH_NOT_FILE",
-      ["Upload a single file; recursive directory upload is not supported"],
-    );
-  }
+  // Resolve the content source → { name, sourceMime, body }. stdin and
+  // --content skip the filesystem entirely; their name/mime derive from --name
+  // (validated present above).
+  let name: string;
+  let sourceMime: string;
+  let body: Readable | string;
 
-  const name = flags.name ?? basename(absolutePath);
-  const sourceMime = flags.mime ?? detectMimeType(absolutePath);
+  if (flags.content !== undefined) {
+    name = flags.name!;
+    sourceMime = flags.mime ?? detectMimeType(name);
+    body = flags.content;
+  } else if (flags.stdin) {
+    name = flags.name!;
+    sourceMime = flags.mime ?? detectMimeType(name);
+    body = process.stdin;
+  } else {
+    const absolutePath = resolve(process.cwd(), flags.localPath!);
+    let fileStat;
+    try {
+      fileStat = await stat(absolutePath);
+    } catch {
+      throw new AxiError(
+        `Local file not found: ${flags.localPath}`,
+        "LOCAL_FILE_NOT_FOUND",
+        ["Check the path; it must be a readable file on this machine"],
+      );
+    }
+    if (fileStat.isDirectory()) {
+      throw new AxiError(
+        `Local path is a directory, not a file: ${flags.localPath}`,
+        "LOCAL_PATH_NOT_FILE",
+        ["Upload a single file; recursive directory upload is not supported"],
+      );
+    }
+    name = flags.name ?? basename(absolutePath);
+    sourceMime = flags.mime ?? detectMimeType(absolutePath);
+    body = createReadStream(absolutePath);
+  }
 
   let targetMime: string | undefined;
   if (flags.convert) {
@@ -174,7 +236,7 @@ export async function driveUploadCommand(
   const api = await driveClient(account);
   const media = {
     mimeType: sourceMime,
-    body: createReadStream(absolutePath),
+    body,
   };
 
   let file: drive_v3.Schema$File;
