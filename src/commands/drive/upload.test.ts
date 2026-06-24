@@ -40,11 +40,27 @@ describe("drive upload parseFlags", () => {
     const f = parseFlags(["./a.pdf", "./b.pdf"]);
     expect(f.localPath).toBe("./a.pdf");
   });
+
+  it("parses `-` as stdin (not a local path)", () => {
+    const f = parseFlags(["-", "--name", "notes.md"]);
+    expect(f.stdin).toBe(true);
+    expect(f.localPath).toBeUndefined();
+    expect(f.name).toBe("notes.md");
+  });
+
+  it("parses --content", () => {
+    const f = parseFlags(["--content", "# Hi", "--name", "notes.md"]);
+    expect(f.content).toBe("# Hi");
+    expect(f.localPath).toBeUndefined();
+    expect(f.stdin).toBe(false);
+  });
 });
 
 describe("drive upload validateFlags", () => {
   const base = {
     localPath: "./report.pdf",
+    stdin: false,
+    content: undefined,
     parent: undefined,
     name: undefined,
     mime: undefined,
@@ -60,13 +76,55 @@ describe("drive upload validateFlags", () => {
     expect(() => validateFlags({ ...base, update: "1XyZ" })).not.toThrow();
   });
 
-  it("throws VALIDATION_ERROR when the local path is missing", () => {
+  it("throws VALIDATION_ERROR when no content source is given", () => {
     try {
       validateFlags({ ...base, localPath: undefined });
       throw new Error("should have thrown");
     } catch (err) {
       expect(err).toBeInstanceOf(AxiError);
       expect((err as AxiError).code).toBe("VALIDATION_ERROR");
+    }
+  });
+
+  it("rejects more than one content source", () => {
+    try {
+      validateFlags({ ...base, localPath: "./a.md", content: "# Hi" });
+      throw new Error("should have thrown");
+    } catch (err) {
+      expect((err as AxiError).code).toBe("VALIDATION_ERROR");
+    }
+  });
+
+  it("accepts stdin/--content with a --name", () => {
+    expect(() =>
+      validateFlags({
+        ...base,
+        localPath: undefined,
+        stdin: true,
+        name: "notes.md",
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateFlags({
+        ...base,
+        localPath: undefined,
+        content: "# Hi",
+        name: "notes.md",
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects stdin/--content without a --name", () => {
+    for (const src of [
+      { stdin: true },
+      { content: "# Hi" },
+    ] as const) {
+      try {
+        validateFlags({ ...base, localPath: undefined, ...src });
+        throw new Error("should have thrown");
+      } catch (err) {
+        expect((err as AxiError).code).toBe("VALIDATION_ERROR");
+      }
     }
   });
 
@@ -80,13 +138,9 @@ describe("drive upload validateFlags", () => {
     }
   });
 
-  it("rejects --convert combined with --update", () => {
-    try {
-      validateFlags({ ...base, convert: true, update: "1XyZ" });
-      throw new Error("should have thrown");
-    } catch (err) {
-      expect(err).toBeInstanceOf(AxiError);
-      expect((err as AxiError).code).toBe("VALIDATION_ERROR");
-    }
+  it("allows --convert combined with --update (target-type check happens at runtime)", () => {
+    expect(() =>
+      validateFlags({ ...base, convert: true, update: "1XyZ" }),
+    ).not.toThrow();
   });
 });

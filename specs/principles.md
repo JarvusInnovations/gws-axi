@@ -10,6 +10,12 @@ Default output carries only the fields an agent needs to act; richer detail is o
 
 > **Why:** Token-budget discipline. An agent should parse a response and act without paying for fields it didn't ask for or re-querying for ones it did. Progressive disclosure keeps the common case cheap and the detailed case reachable.
 
+## provenance-by-default
+
+When a command surfaces content an agent may port into another system (download it, copy it, re-author it elsewhere), the content's **provenance** — which revision/version it came from, when, and by whom — rides along in the *default* output, not behind a flag. This deliberately overrides [minimal-default-schemas](#minimal-default-schemas) for the narrow case of provenance fields: they are always worth their tokens.
+
+> **Why:** gws-axi is the read side of cross-system content moves — an agent reads a Doc here and writes it into a ticket, a repo, or another document. If it can't see *which version* it read, the destination records content with no traceable source, and a later "is this still current?" question is unanswerable without a re-query the agent won't know to make. Provenance is the one piece of metadata whose absence silently corrupts the downstream artifact, so it is never opt-in on a content read. This rules out hiding revision identity / recent-revision context behind `--full` on commands whose output is meant to be carried elsewhere.
+
 ## contextual-help-suggestions
 
 Every response — success *and* error — carries a `help[]` array of concrete, runnable next-step commands tailored to the current state, referencing the real IDs/accounts from the result. Never generic advice.
