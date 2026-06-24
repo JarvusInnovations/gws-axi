@@ -40,7 +40,7 @@ A `revisions[N]{id,modified,author}` list of the **most recent 5** revisions, ne
 
 - `id` — revision id, never truncated; the value passed to `docs download --revision` and `docs diff`.
 - Native Docs revision lists are a sparse, session-level sample — this block carries the same completeness caveat as `drive revisions` (a `help[]` line), honoring [principles.md#surface-completeness-limits](../principles.md#surface-completeness-limits). It is the *recent* slice, not the full history; `drive revisions` (with `--limit`) is the complete-as-Drive-allows listing.
-- **Best-effort:** the revisions fetch is a secondary call. If it fails (transient error, permission quirk), the read still returns the content with a `revisions: history unavailable` note and a `help[]` line pointing at `drive revisions` — a failed provenance fetch never fails the content read.
+- **Best-effort:** the revisions fetch is a secondary call. If it fails (transient error, permission quirk), the read still returns the content with a `revisions: history unavailable (revision lookup failed)` scalar — a failed provenance fetch never fails the content read. The unconditional `View full version history: docs revisions <id>` help entry (always present, see help[] below) doubles as the redirect in this case; the `download --revision` / `diff` entries are omitted on failure since there are no ids to interpolate.
 
 ### Content
 

@@ -84,7 +84,7 @@ Extends the existing `docs download`. Without `--revision`, behavior is unchange
 
 - Bad `revisionId` → Drive 404 re-wrapped as `REVISION_NOT_FOUND`, suggesting `drive revisions <fileId>` to list valid ids.
 - Native mime not in `exportLinks` → `EXPORT_FORMAT_REQUIRED` listing available keys.
-- Purged binary content → `REVISION_CONTENT_UNAVAILABLE`.
+- Purged binary content → `REVISION_CONTENT_UNAVAILABLE`. (The same code also covers a failed authenticated GET of a native revision's `exportLinks` URL — any non-OK HTTP response — so a native export that can't be fetched surfaces consistently rather than as a raw HTTP error.)
 
 ## Out of scope (state in help/notes, do not build)
 

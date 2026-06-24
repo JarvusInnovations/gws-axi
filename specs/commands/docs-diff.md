@@ -23,6 +23,7 @@ Native Google Docs only. The revision content path is the same one `docs downloa
 
 - Drive `files.get` (fields `id,name,mimeType`) to label the file and reject non-native files.
 - Drive `revisions.get` per side (fields `id,modifiedTime,lastModifyingUser(displayName),exportLinks`) for provenance + the markdown export URL.
+- When `revB` is omitted, the head id is resolved with `revisions.list` (one page, newest-first sort — the same `listRecentRevisions` path the `docs read` inline block uses).
 - Authenticated GET of each revision's `exportLinks["text/markdown"]` (fallback `text/plain`), same fetch path as `docs download --revision`.
 - Covered by the existing `auth/drive` scope; no new scope.
 
@@ -43,10 +44,11 @@ diff: |
 - `summary.changed` is `false` when the two exports are byte-identical; the `diff` block is then the scalar `diff: no differences` (the markdown exports are identical — which does not prove the source revisions were identical, only their previews).
 - The `diff` body is unified-diff format (git-style hunks), truncated to 8000 chars unless `--full`/`--out`, with a `diff_truncated`/`diff_total_chars` marker and a save suggestion when capped — mirroring `docs read`'s content truncation.
 - **Argument order is respected, never reordered.** If the caller passes a newer revision as `revA` and an older as `revB`, the diff reads as a reversal; the command does not silently sort by time.
+- If either side's markdown export fell back to another format (markdown unavailable for that revision), a `note:` field stating the substitution appears between `summary` and `help[]`, mirroring `docs download`.
 
 ### Fidelity disclosure (required)
 
-A `help[]`/`note` line states the diff compares **markdown exports**, which are lossy: structural/formatting changes that markdown can't represent (and Google-specific constructs) may be invisible, and native revision history is itself a sparse sample. Honors [principles.md#surface-completeness-limits](../principles.md#surface-completeness-limits).
+A `help[]` line states the diff compares **markdown exports**, which are lossy: structural/formatting changes that markdown can't represent (and Google-specific constructs) may be invisible, and native revision history is itself a sparse sample. (Also stated in `DIFF_HELP`'s `notes:`.) Honors [principles.md#surface-completeness-limits](../principles.md#surface-completeness-limits).
 
 ## help[] suggestions
 
@@ -57,6 +59,7 @@ A `help[]`/`note` line states the diff compares **markdown exports**, which are 
 
 ## Errors
 
+- File not found / no access → `FILE_NOT_FOUND` with access-check suggestions (the `files.get` metadata lookup, mirroring `docs download` / `drive revisions`).
 - Non-native file → `NON_NATIVE_DOCUMENT` (a byte diff of binary revisions isn't meaningful; redirect to `drive revisions --full` for size/mime comparison).
 - Bad `revA`/`revB` → `REVISION_NOT_FOUND`, suggesting `docs revisions <fileId>` to list valid ids.
 - A revision with no markdown/plain `exportLinks` → `EXPORT_FORMAT_REQUIRED` listing available keys (same as `docs download --revision`).
