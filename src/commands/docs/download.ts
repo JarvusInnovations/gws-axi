@@ -2,13 +2,10 @@ import { writeFile, mkdir } from "node:fs/promises";
 import { basename, dirname, extname } from "node:path";
 import { AxiError } from "axi-sdk-js";
 import type { drive_v3 } from "googleapis";
-import {
-  driveClient,
-  oauthClientForAccount,
-  translateGoogleError,
-} from "../../google/client.js";
+import { driveClient, translateGoogleError } from "../../google/client.js";
 import { joinBlocks, renderHelp, renderObject } from "../../output/index.js";
 import { resolveOutputPath } from "../../util/paths.js";
+import { fetchNativeRevisionExport } from "./revision-content.js";
 
 export const DOWNLOAD_HELP = `usage: gws-axi docs download <documentId> [flags]
 args[1]:
@@ -303,88 +300,27 @@ async function downloadRevision(
 ): Promise<string> {
   const revisionId = flags.revision as string;
 
-  // Fetch the revision metadata: modifiedTime + (native) exportLinks.
-  let revision: {
-    modifiedTime?: string | null;
-    exportLinks?: { [k: string]: string } | null;
-  };
-  try {
-    const res = await api.revisions.get({
-      fileId: flags.documentId,
-      revisionId,
-      fields: "id,modifiedTime,exportLinks",
-    });
-    revision = res.data;
-  } catch (err) {
-    const translated = translateGoogleError(err, {
-      account,
-      operation: "drive.revisions.get",
-    });
-    if (translated.code === "NOT_FOUND") {
-      throw new AxiError(
-        `Revision '${revisionId}' not found on file '${flags.documentId}'`,
-        "REVISION_NOT_FOUND",
-        [
-          `List valid revisions with \`gws-axi drive revisions ${flags.documentId}\``,
-        ],
-      );
-    }
-    throw translated;
-  }
-
   let bytes: Buffer;
   let effectiveMime: string;
   let extension: string;
+  let revisionModified = "";
   const notes: string[] = [];
 
   if (isNative) {
-    const links = revision.exportLinks ?? {};
-    const requested = flags.as ?? "text/markdown";
-    let chosen = requested;
-    let url = links[requested];
-    // Fallback chain only applies to the default (markdown); an explicit
-    // --as that isn't available is an error the caller must resolve.
-    if (!url && !flags.as) {
-      const fallback = links["text/plain"] ?? Object.values(links)[0];
-      const fallbackMime =
-        Object.keys(links).find((k) => links[k] === fallback) ?? "";
-      if (fallback) {
-        chosen = fallbackMime;
-        url = fallback;
-        notes.push(
-          `text/markdown not available for this revision — exported as ${fallbackMime} instead`,
-        );
-      }
-    }
-    if (!url) {
-      throw new AxiError(
-        `Export format ${requested} not available for revision ${revisionId}`,
-        "EXPORT_FORMAT_REQUIRED",
-        [
-          `Available formats: ${Object.keys(links).join(", ") || "(none)"}`,
-          "Pass a supported --as <mime>",
-        ],
-      );
-    }
-    effectiveMime = chosen;
-    extension = EXTENSION_BY_MIME[chosen] ?? "";
-    // exportLinks are arbitrary URLs (not a googleapis method), so fetch
-    // directly with the account's bearer token.
-    const auth = await oauthClientForAccount(account);
-    const { token } = await auth.getAccessToken();
-    const resp = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!resp.ok) {
-      throw new AxiError(
-        `Failed to export revision ${revisionId} as ${chosen} (HTTP ${resp.status})`,
-        "REVISION_CONTENT_UNAVAILABLE",
-        [
-          `List valid revisions with \`gws-axi drive revisions ${flags.documentId}\``,
-        ],
-      );
-    }
-    bytes = Buffer.from(await resp.arrayBuffer());
+    // Native: export the revision via its exportLinks (markdown default with
+    // fallback when --as is omitted). Shared with `docs diff`.
+    const exported = await fetchNativeRevisionExport(
+      api,
+      account,
+      flags.documentId,
+      revisionId,
+      flags.as,
+    );
+    bytes = exported.bytes;
+    effectiveMime = exported.mime;
+    extension = EXTENSION_BY_MIME[exported.mime] ?? "";
+    revisionModified = exported.modified;
+    if (exported.note) notes.push(exported.note);
   } else {
     if (flags.as) {
       throw new AxiError(
@@ -395,6 +331,31 @@ async function downloadRevision(
     }
     effectiveMime = meta.mimeType;
     extension = extname(meta.name) || EXTENSION_BY_MIME[effectiveMime] || "";
+    // Binary: a metadata get resolves modifiedTime and surfaces a bad id as
+    // REVISION_NOT_FOUND before we attempt the media download.
+    try {
+      const metaRes = await api.revisions.get({
+        fileId: flags.documentId,
+        revisionId,
+        fields: "id,modifiedTime",
+      });
+      revisionModified = metaRes.data.modifiedTime ?? "";
+    } catch (err) {
+      const translated = translateGoogleError(err, {
+        account,
+        operation: "drive.revisions.get",
+      });
+      if (translated.code === "NOT_FOUND") {
+        throw new AxiError(
+          `Revision '${revisionId}' not found on file '${flags.documentId}'`,
+          "REVISION_NOT_FOUND",
+          [
+            `List valid revisions with \`gws-axi drive revisions ${flags.documentId}\``,
+          ],
+        );
+      }
+      throw translated;
+    }
     try {
       const res = await api.revisions.get(
         { fileId: flags.documentId, revisionId, alt: "media" },
@@ -437,7 +398,7 @@ async function downloadRevision(
         saved_mime_type: effectiveMime,
         size_bytes: bytes.length,
         revision: revisionId,
-        revision_modified: revision.modifiedTime ?? "",
+        revision_modified: revisionModified,
       },
     }),
   );
