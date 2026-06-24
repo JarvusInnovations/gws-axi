@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: done
 depends: []
 specs:
   - specs/commands/docs-read.md
@@ -7,6 +7,7 @@ specs:
   - specs/commands/drive-revisions.md
   - specs/principles.md
 issues: []
+pr: 28
 ---
 
 # Plan: Doc revision discoverability + diff
@@ -112,8 +113,6 @@ Each commit: implement → `bun run build` → `bun run test` → add/extend tes
 
 ## Notes
 
-(Finalized at closeout / merge.) Work-in-progress record:
-
 - Verified live against a real multi-tab Doc (`ARC AI Strategy: Running
   Minutes`): `docs read` inline `revisions[4]` block + help funnel; `docs diff`
   two-revision diff, `revB`→head default, identical-revision `changed:false`,
@@ -133,4 +132,13 @@ Each commit: implement → `bun run build` → `bun run test` → add/extend tes
 
 ## Follow-ups
 
-(Populated at closeout.)
+- Deferred to [`drive-upload-inline-content`](drive-upload-inline-content.md) —
+  upload from stdin/`--content` (no temp file). Plan authored in this branch;
+  scope + validation absorb the work.
+- Deferred to [`drive-upload-update-convert`](drive-upload-update-convert.md) —
+  allow `--convert` + `--update` so an existing native Doc's content can be
+  replaced from markdown as a new revision (closes the read→edit→write-back
+  loop). Plan authored in this branch; scope + validation absorb the work.
+- **None required** for the two error paths not triggered live
+  (`NON_NATIVE_DOCUMENT`, `EXPORT_FORMAT_REQUIRED`) — they ride the shared
+  `fetchNativeRevisionExport` path covered by `docs download`'s tests.
