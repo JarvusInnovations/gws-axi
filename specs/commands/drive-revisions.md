@@ -91,7 +91,7 @@ Extends the existing `docs download`. Without `--revision`, behavior is unchange
 - The full per-edit timeline shown in the Docs version-history sidebar — not exposed by any public API.
 - User-assigned version *names* — not on the Drive revision resource.
 - Content integrity hashes for native files — Drive provides none (md5 is binary-only); this tool does not synthesize forensic hashes (see [project: exploration, not forensics]).
-- Diffs between revisions — possible future `--diff <a>..<b>`; not in this scope.
+- Diffs between revisions — now a separate command, [docs diff](docs-diff.md) (native Docs only; diffs markdown exports). Not handled here.
 
 ## Principles
 
