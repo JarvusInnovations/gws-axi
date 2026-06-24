@@ -2,7 +2,11 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { AxiError } from "axi-sdk-js";
 import type { docs_v1 } from "googleapis";
-import { docsClient, translateGoogleError } from "../../google/client.js";
+import {
+  docsClient,
+  driveClient,
+  translateGoogleError,
+} from "../../google/client.js";
 import {
   field,
   joinBlocks,
@@ -12,6 +16,10 @@ import {
   type FieldDef,
 } from "../../output/index.js";
 import { renderBodyAsMarkdown } from "./markdown.js";
+import {
+  listRecentRevisions,
+  type RecentRevision,
+} from "./revision-content.js";
 import { resolveOutputPath } from "../../util/paths.js";
 
 export const READ_HELP = `usage: gws-axi docs read <documentId> [flags]
@@ -32,13 +40,20 @@ examples:
   gws-axi docs read 1BxAbc... --out ./notes.md
 output:
   A \`document{id,title,tab,revision_id}\` header, a \`tabs[N]{id,title,index,parent,active}\`
-  listing (always shown, with ✓ on the active tab if any), and — when a tab is
-  rendered — either a \`content\` block of GitHub-flavored markdown (inline,
-  truncated unless --full) or a \`saved\` path (when --out is set). Multi-tab
-  docs without --tab return only the tabs listing so the agent can pick one.
+  listing (always shown, with ✓ on the active tab if any), a \`revisions[N]{id,modified,author}\`
+  block of the 5 most recent revisions (always shown — provenance travels with the
+  content), and — when a tab is rendered — either a \`content\` block of GitHub-flavored
+  markdown (inline, truncated unless --full) or a \`saved\` path (when --out is set).
+  Multi-tab docs without --tab return only the tabs listing so the agent can pick one.
+  help[] funnels to \`docs revisions\`, \`docs download --revision\`, and \`docs diff\`.
 `;
 
 const DEFAULT_TRUNCATE_CHARS = 8000;
+
+// How many recent revisions to inline in every read. Provenance is shown by
+// default (principles.md#provenance-by-default); `docs revisions` is the full
+// listing for when more history is needed.
+const RECENT_REVISIONS_LIMIT = 5;
 
 interface ParsedFlags {
   documentId: string;
@@ -241,6 +256,38 @@ export async function docsReadCommand(
     );
   }
 
+  // Recent revisions — shown by default so the content's provenance travels
+  // with it (principles.md#provenance-by-default). Best-effort: a failed
+  // secondary fetch must never fail the content read.
+  let recentRevisions: RecentRevision[] = [];
+  let revisionsFailed = false;
+  try {
+    const drive = await driveClient(account);
+    recentRevisions = await listRecentRevisions(
+      drive,
+      flags.documentId,
+      RECENT_REVISIONS_LIMIT,
+    );
+  } catch {
+    revisionsFailed = true;
+  }
+
+  if (recentRevisions.length > 0) {
+    blocks.push(
+      renderList(
+        "revisions",
+        recentRevisions as unknown as Array<Record<string, unknown>>,
+        [field("id"), field("modified"), field("author")],
+      ),
+    );
+  } else if (revisionsFailed) {
+    blocks.push(
+      renderObject({
+        revisions: "history unavailable (revision lookup failed)",
+      }),
+    );
+  }
+
   const suggestions: string[] = [];
 
   if (contentBody) {
@@ -302,6 +349,28 @@ export async function docsReadCommand(
     // Multi-tab, no --tab — steer the agent to pick one.
     suggestions.push(
       `This document has ${flat.length} tabs. Run \`gws-axi docs read ${flags.documentId} --tab <id>\` to read one (the id column above).`,
+    );
+  }
+
+  // Version-history funnel — docs read is the discovery entry point for a
+  // document's revisions (principles.md#contextual-help-suggestions). Always
+  // shown; interpolates real revision ids when the listing was available.
+  suggestions.push(
+    `View full version history: \`gws-axi docs revisions ${flags.documentId}\``,
+  );
+  if (recentRevisions.length > 0) {
+    const newest = recentRevisions[0].id;
+    const older = recentRevisions[1]?.id ?? newest;
+    suggestions.push(
+      `Fetch a past version's content: \`gws-axi docs download ${flags.documentId} --revision ${older}\``,
+    );
+    if (recentRevisions.length > 1) {
+      suggestions.push(
+        `Compare two versions: \`gws-axi docs diff ${flags.documentId} ${older} ${newest}\``,
+      );
+    }
+    suggestions.push(
+      "Recent revisions are a sparse sample — `docs revisions` lists the full history Drive retains; the editor's version-history UI may show more, and version names aren't exposed by the API",
     );
   }
 
