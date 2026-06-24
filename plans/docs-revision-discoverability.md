@@ -78,26 +78,26 @@ Each commit: implement → `bun run build` → `bun run test` → add/extend tes
 
 ## Validation
 
-- [ ] `docs read <nativeDoc>` inlines `revisions[N]{id,modified,author}` (≤5, newest first)
+- [x] `docs read <nativeDoc>` inlines `revisions[N]{id,modified,author}` (≤5, newest first)
       by default with untruncated ids, plus a native-completeness caveat line.
-- [ ] `docs read` `help[]` includes runnable `docs revisions`, `docs download --revision <id>`,
+- [x] `docs read` `help[]` includes runnable `docs revisions`, `docs download --revision <id>`,
       and `docs diff <id> <revA> <revB>` suggestions with a real revision id interpolated.
-- [ ] When the revisions fetch fails, `docs read` still returns content with a
+- [x] When the revisions fetch fails, `docs read` still returns content with a
       `revisions: history unavailable`-style note (read never fails on the secondary call).
-- [ ] `docs read` still marks nothing read (read-only preserved; revisions.list is a read).
-- [ ] `docs diff <fileId> <revA> <revB>` emits `document`/`from`/`to`/`summary`/`diff`
+- [x] `docs read` still marks nothing read (read-only preserved; revisions.list is a read).
+- [x] `docs diff <fileId> <revA> <revB>` emits `document`/`from`/`to`/`summary`/`diff`
       with a unified diff of the two markdown exports; identical exports → `summary.changed=false`
       and `diff: no differences`.
-- [ ] `docs diff <fileId> <rev>` (revB omitted) diffs that revision against head.
-- [ ] `docs diff` respects argument order (no chronological reordering); `--full`/`--out`
+- [x] `docs diff <fileId> <rev>` (revB omitted) diffs that revision against head.
+- [x] `docs diff` respects argument order (no chronological reordering); `--full`/`--out`
       behave like `docs read` (cap 8000, save full to file).
-- [ ] `docs diff` carries the markdown-export fidelity caveat in help/notes.
-- [ ] Error paths: non-native → `NON_NATIVE_DOCUMENT`; bad revision → `REVISION_NOT_FOUND`;
+- [x] `docs diff` carries the markdown-export fidelity caveat in help/notes.
+- [x] Error paths: non-native → `NON_NATIVE_DOCUMENT`; bad revision → `REVISION_NOT_FOUND`;
       missing markdown export → `EXPORT_FORMAT_REQUIRED`; missing revA → `VALIDATION_ERROR`.
-- [ ] `docs diff --help` routes to `DIFF_HELP` (dispatcher wired; not shadowed by COMMAND_HELP).
-- [ ] `bun run build` clean; `bun run test` green incl. new specs for read-inline shape,
+- [x] `docs diff --help` routes to `DIFF_HELP` (dispatcher wired; not shadowed by COMMAND_HELP).
+- [x] `bun run build` clean; `bun run test` green incl. new specs for read-inline shape,
       diff output shape, revB-default, argument-order, and error translation.
-- [ ] CLAUDE.md "Current implementation status" updated; spec-drift auditor run and findings resolved.
+- [x] CLAUDE.md "Current implementation status" updated; spec-drift auditor run and findings resolved.
 
 ## Risks / unknowns
 
@@ -112,7 +112,24 @@ Each commit: implement → `bun run build` → `bun run test` → add/extend tes
 
 ## Notes
 
-(Populated at closeout.)
+(Finalized at closeout / merge.) Work-in-progress record:
+
+- Verified live against a real multi-tab Doc (`ARC AI Strategy: Running
+  Minutes`): `docs read` inline `revisions[4]` block + help funnel; `docs diff`
+  two-revision diff, `revB`→head default, identical-revision `changed:false`,
+  `REVISION_NOT_FOUND`, `VALIDATION_ERROR`, and `docs diff --help` routing.
+- **Not triggered live** (ride the shared, behavior-preserving
+  `fetchNativeRevisionExport` path that `docs download --revision`'s existing
+  tests cover): `NON_NATIVE_DOCUMENT` (test doc was native) and
+  `EXPORT_FORMAT_REQUIRED` (markdown export was available). Both are simple,
+  unit-reasoned branches.
+- The multi-line `diff` value renders with escaped `\n` via `renderObject`,
+  consistent with how `docs read` renders its `content` block (same path).
+- Added the `diff` npm package (+ `@types/diff`) — first non-Google runtime
+  dep of this kind; confirmed with the maintainer before adding.
+- Spec-drift audit run before closeout: 0 unimplemented items, no behavior
+  bugs; all findings were spec-wording clarifications, resolved by tightening
+  the specs to the shipped (correct) behavior.
 
 ## Follow-ups
 
