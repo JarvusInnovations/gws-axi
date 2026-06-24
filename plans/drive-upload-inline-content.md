@@ -1,9 +1,10 @@
 ---
-status: in-progress
+status: done
 depends: []
 specs:
   - specs/commands/drive-upload.md
 issues: []
+pr: 30
 ---
 
 # Plan: drive upload from stdin / inline content
@@ -45,12 +46,12 @@ reuse the existing create/convert flow unchanged downstream.
 
 ## Validation
 
-- [ ] `echo '# Hi' | gws-axi drive upload - --name notes.md --mime text/markdown --convert`
+- [x] `echo '# Hi' | gws-axi drive upload - --name notes.md --mime text/markdown --convert`
       creates a native Doc with no temp file touched.
-- [ ] `--content <string>` path works equivalently.
-- [ ] Mutually-exclusive sources validated (`VALIDATION_ERROR` when 2+ given, or none).
-- [ ] Missing `--name` with no path → `VALIDATION_ERROR` with usage.
-- [ ] `bun run build` clean; `bun run test` green incl. new flag-parsing/source tests.
+- [x] `--content <string>` path works equivalently.
+- [x] Mutually-exclusive sources validated (`VALIDATION_ERROR` when 2+ given, or none).
+- [x] Missing `--name` with no path → `VALIDATION_ERROR` with usage.
+- [x] `bun run build` clean; `bun run test` green incl. new flag-parsing/source tests.
 
 ## Risks / unknowns
 
@@ -60,8 +61,16 @@ reuse the existing create/convert flow unchanged downstream.
 
 ## Notes
 
-(Populated at closeout.)
+- Shipped in PR #30 alongside [`drive-upload-update-convert`](drive-upload-update-convert.md)
+  (one branch/PR for both upload follow-ups).
+- Sources are mutually exclusive: local path (default), `-` (stdin), `--content`.
+  Settled on `-` for stdin (Unix convention) rather than a `--stdin` flag.
+- `--mime` for stdin/`--content` derives from the `--name` extension via the
+  existing `detectMimeType` — no new mime logic.
+- Verified live: stdin and `--content` each created a native Doc via Google's
+  conversion, no temp file.
 
 ## Follow-ups
 
-(Populated at closeout.)
+- **None.** Resumable/large piped uploads are noted out-of-scope in the spec
+  (stdin uses the same simple streamed upload as files).

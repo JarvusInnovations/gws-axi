@@ -1,9 +1,10 @@
 ---
-status: in-progress
+status: done
 depends: []
 specs:
   - specs/commands/drive-upload.md
 issues: []
+pr: 30
 ---
 
 # Plan: update a native Doc's content from markdown (`--convert` + `--update`)
@@ -44,12 +45,12 @@ existing native type, creating a new revision); otherwise structured error. Reus
 
 ## Validation
 
-- [ ] `gws-axi drive upload edited.md --convert --update <docId>` replaces the Doc's
+- [x] `gws-axi drive upload edited.md --convert --update <docId>` replaces the Doc's
       content and produces a new revision (visible in `drive revisions <docId>`).
-- [ ] Source/target type mismatch (e.g. markdown source, existing Sheet) → structured error.
-- [ ] Non-native `--update` target with `--convert` → clear error (no silent type change).
-- [ ] Existing `--update` (no convert) and `--convert` (no update) behavior unchanged.
-- [ ] `bun run build` clean; `bun run test` green incl. new tests.
+- [x] Source/target type mismatch (e.g. markdown source, existing Sheet) → structured error.
+- [x] Non-native `--update` target with `--convert` → clear error (no silent type change).
+- [x] Existing `--update` (no convert) and `--convert` (no update) behavior unchanged.
+- [x] `bun run build` clean; `bun run test` green incl. new tests.
 
 ## Risks / unknowns
 
@@ -61,8 +62,20 @@ existing native type, creating a new revision); otherwise structured error. Reus
 
 ## Notes
 
-(Populated at closeout.)
+- Shipped in PR #30 alongside [`drive-upload-inline-content`](drive-upload-inline-content.md).
+- Confirmed live that `files.update` with source media + the file's native
+  `mimeType` produces a clean conversion-to-new-revision (resolved the open
+  risk): a markdown `--content` update bumped a Doc 1→2 revisions with replaced
+  content, and the prior revision is fetchable via `docs download --revision` /
+  `docs diff`.
+- The legality check (target must already be the matching native type) lives in
+  the command, not the pure `validateFlags`, because it needs a `files.get`.
+- **Not triggered live:** the non-native-target branch (binary file + `--convert
+  --update`) — no binary target on hand; it rides the same `files.get` type
+  check as the verified mismatch case (csv→Sheet onto a Doc, which *was* live-
+  rejected).
 
 ## Follow-ups
 
-(Populated at closeout.)
+- **None.** Changing a file's *type* in place (binary→native, or one native
+  type→another) stays out of scope, documented in the spec.
