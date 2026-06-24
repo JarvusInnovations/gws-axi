@@ -159,16 +159,9 @@ export function validateFlags(flags: ParsedFlags): void {
       ],
     );
   }
-  if (flags.update && flags.convert) {
-    throw new AxiError(
-      "--convert cannot be combined with --update",
-      "VALIDATION_ERROR",
-      [
-        "Converting a file's type in place is not supported",
-        "Drop --convert to replace content as-is, or upload a new file (omit --update) with --convert",
-      ],
-    );
-  }
+  // --convert + --update is allowed, but only against a target that's already
+  // the matching native type. That check needs the target's mimeType (a
+  // files.get), so it lives in the command, not in this pure validator.
 }
 
 export async function driveUploadCommand(
@@ -234,6 +227,58 @@ export async function driveUploadCommand(
   }
 
   const api = await driveClient(account);
+
+  // --convert + --update: the target must already be the native type the
+  // source converts to. Verify before uploading so a mismatch fails clean
+  // rather than producing a surprise revision.
+  if (flags.update && flags.convert) {
+    let existingMime: string;
+    try {
+      const res = await api.files.get({
+        fileId: flags.update,
+        fields: "id,mimeType",
+        supportsAllDrives: true,
+      });
+      existingMime = res.data.mimeType ?? "";
+    } catch (err) {
+      const translated = translateGoogleError(err, {
+        account,
+        operation: "drive.files.get",
+      });
+      if (translated.code === "NOT_FOUND") {
+        throw new AxiError(
+          `File '${flags.update}' not found (or ${account} can't write to it)`,
+          "FILE_NOT_FOUND",
+          [
+            "Verify the ID is correct (from a Drive URL or `drive search` / `drive ls`)",
+            `Confirm ${account} has edit access`,
+          ],
+        );
+      }
+      throw translated;
+    }
+    if (!existingMime.startsWith("application/vnd.google-apps.")) {
+      throw new AxiError(
+        `--convert --update needs a native Google target, but '${flags.update}' is ${existingMime}`,
+        "VALIDATION_ERROR",
+        [
+          "Converting a binary file's type in place isn't supported — upload a new file with --convert instead",
+          "Or drop --convert to replace the binary content as-is",
+        ],
+      );
+    }
+    if (existingMime !== targetMime) {
+      throw new AxiError(
+        `${sourceMime} converts to ${targetMime}, but target file '${flags.update}' is ${existingMime}`,
+        "VALIDATION_ERROR",
+        [
+          "The source's native type must match the existing file's type",
+          "e.g. markdown/docx updates a Doc; csv/xlsx updates a Sheet",
+        ],
+      );
+    }
+  }
+
   const media = {
     mimeType: sourceMime,
     body,
@@ -243,9 +288,13 @@ export async function driveUploadCommand(
   const updating = Boolean(flags.update);
   try {
     if (flags.update) {
+      const requestBody: drive_v3.Schema$File = flags.name ? { name } : {};
+      // Keep the file's native type and re-import the converted media as a
+      // new revision (Drive converts the source bytes into the native file).
+      if (flags.convert && targetMime) requestBody.mimeType = targetMime;
       const res = await api.files.update({
         fileId: flags.update,
-        requestBody: flags.name ? { name } : {},
+        requestBody,
         media,
         fields: UPLOAD_FIELDS,
         supportsAllDrives: true,

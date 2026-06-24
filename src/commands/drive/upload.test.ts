@@ -138,13 +138,9 @@ describe("drive upload validateFlags", () => {
     }
   });
 
-  it("rejects --convert combined with --update", () => {
-    try {
-      validateFlags({ ...base, convert: true, update: "1XyZ" });
-      throw new Error("should have thrown");
-    } catch (err) {
-      expect(err).toBeInstanceOf(AxiError);
-      expect((err as AxiError).code).toBe("VALIDATION_ERROR");
-    }
+  it("allows --convert combined with --update (target-type check happens at runtime)", () => {
+    expect(() =>
+      validateFlags({ ...base, convert: true, update: "1XyZ" }),
+    ).not.toThrow();
   });
 });
