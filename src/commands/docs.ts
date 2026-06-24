@@ -1,6 +1,7 @@
 import { AxiError } from "axi-sdk-js";
 import { resolveAccount } from "../google/account.js";
 import { docsCommentsCommand, COMMENTS_HELP } from "./docs/comments.js";
+import { docsDiffCommand, DIFF_HELP } from "./docs/diff.js";
 import { docsDownloadCommand, DOWNLOAD_HELP } from "./docs/download.js";
 import { docsFindCommand, FIND_HELP } from "./docs/find.js";
 import { docsReadCommand, READ_HELP } from "./docs/read.js";
@@ -63,6 +64,7 @@ const SUBCOMMANDS: DocsSubcommand[] = [
   // Alias for `drive revisions` — version history is a Docs-shaped mental
   // model, but the implementation is Drive-wide (any file type).
   { name: "revisions", mutation: false, help: REVISIONS_HELP, handler: driveRevisionsCommand },
+  { name: "diff", mutation: false, help: DIFF_HELP, handler: docsDiffCommand },
   { name: "append", mutation: true, help: APPEND_HELP },
   { name: "insert-text", mutation: true, help: INSERT_TEXT_HELP },
   { name: "delete-range", mutation: true, help: DELETE_RANGE_HELP },
@@ -115,12 +117,14 @@ subcommand help:
   gws-axi docs find --help        for text-match search
   gws-axi docs comments --help    for review comments + replies
   gws-axi docs download --help    for native-file export / raw download
+  gws-axi docs diff --help        for comparing two revisions
 examples:
   gws-axi docs read 1BxAbc...
   gws-axi docs read 1BxAbc... --tab t.0 --full
   gws-axi docs find 1BxAbc... --query "sprint goal"
   gws-axi docs comments 1BxAbc...
   gws-axi docs download 1BxAbc... --out ./spec.docx
+  gws-axi docs diff 1BxAbc... 841 865
 `;
 
 export async function docsCommand(args: string[]): Promise<string> {
