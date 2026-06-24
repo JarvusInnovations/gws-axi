@@ -4,7 +4,21 @@ Agent-ergonomic CLI for Google Workspace — Gmail, Calendar, Docs, Drive, and S
 
 Designed for use by AI agents. Every response is structured, every error names a specific fix, and write operations lock to the explicit account when multiple are authenticated — so two agents in parallel sessions can't silently touch the wrong mailbox.
 
-> **Status:** Read coverage is in across all five services — Calendar, Gmail, Docs, Drive, and Slides. **Calendar** and **Gmail** both have full write support: Calendar does `create` / `update` / `delete` / `respond`, and Gmail does triage (`modify`, `batch-modify`), drafting (`draft`), label CRUD (`label-create` / `label-update` / `label-delete`), and server-side filters (`filter-create` / `filter-delete` / `filter-list`). Gmail **`send` is intentionally out of scope** — gws-axi drafts mail for human review but never sends it. Docs writes (`append`, `insert-text`, `delete-range`) are the next frontier. Auth (including a single-developer `auth publish` walkthrough that retires the 7-day Testing-token expiry), doctor with live per-account API probes, and multi-account write-protection are stable.
+## Status
+
+Read coverage is complete across all five services; write coverage is rolling out service by service.
+
+| Service | Reads | Writes |
+| --- | --- | --- |
+| **Calendar** | ✅ events · get · calendars · search · freebusy | ✅ create · update · delete · respond |
+| **Gmail** | ✅ search · read · labels · download | ✅ triage · draft · labels · filters &nbsp;·&nbsp; ✋ `send` out of scope |
+| **Docs** | ✅ read · find · comments · download · revisions · diff | 🚧 append · insert-text · delete-range |
+| **Drive** | ✅ ls · get · search · permissions · download · revisions · activity | 🟡 upload · mkdir &nbsp;·&nbsp; 🚧 create · copy · move · rename · delete |
+| **Slides** | ✅ get · page · summarize | 🚧 create · update |
+
+<sub>✅ shipped · 🟡 partial · 🚧 planned · ✋ out of scope by design</sub>
+
+Auth (including the single-developer `auth publish` walkthrough that retires the 7-day Testing-token expiry), `doctor` with live per-account API probes, and multi-account write-protection are stable. Gmail **`send` is intentionally out of scope** — gws-axi drafts mail for human review but never sends it.
 
 ## Requirements
 
@@ -182,16 +196,21 @@ Bodies are decoded per declared `Content-Type` charset (UTF-8, latin-1, ascii, u
 ### Docs
 
 ```bash
-gws-axi docs read <documentId>                    # full Doc as markdown
+gws-axi docs read <documentId>                    # full Doc as markdown (+ recent revisions inline)
 gws-axi docs read <documentId> --out ./doc.md     # write to a file
 gws-axi docs find <documentId> --query "deadline" # search inside one Doc
 gws-axi docs comments <documentId>                # threaded comments + suggestions
-gws-axi docs download <documentId> --format pdf   # native export (pdf, docx, odt, txt, html, epub, rtf)
+gws-axi docs revisions <documentId>               # version history (id, modified, author)
+gws-axi docs diff <documentId> <revA> [revB]      # unified diff between two revisions (revB defaults to head)
+gws-axi docs download <documentId> --as application/pdf   # native export (pdf, docx, odt, txt, html, epub, rtf)
+gws-axi docs download <documentId> --revision <id>        # fetch a past revision's content (markdown by default)
 ```
 
-Non-native files (uploaded `.docx`, `.pdf`, etc.) get pointed at `docs download` automatically rather than failing with a cryptic Google API error.
+Every `docs read` carries the document's recent revisions and points at `docs revisions` / `docs download --revision` / `docs diff` — so an agent always knows which version it read. Non-native files (uploaded `.docx`, `.pdf`, etc.) get pointed at `docs download` automatically rather than failing with a cryptic Google API error.
 
 ### Drive
+
+**Reads:**
 
 ```bash
 gws-axi drive ls                                  # top of My Drive
@@ -199,7 +218,22 @@ gws-axi drive ls <folder-id> --recursive          # depth-unbounded; bounded by 
 gws-axi drive get <fileId>                        # metadata for one file
 gws-axi drive search --query "name contains 'budget'"
 gws-axi drive permissions <fileId>                # who has access
+gws-axi drive revisions <fileId>                  # version history (any file type)
+gws-axi drive activity <itemId>                   # attributed change timeline (Drive Activity API)
+gws-axi drive download <fileId> --out ./file      # fetch bytes / export a native file
 ```
+
+**Writes:**
+
+```bash
+gws-axi drive mkdir "Reports" --account you@example.com         # create a folder
+gws-axi drive upload ./report.pdf --account you@example.com     # upload a local file
+echo '# Notes' | gws-axi drive upload - --name notes.md --convert --account you@example.com   # stdin → native Doc
+gws-axi drive upload --content '# Notes' --name notes.md --convert --account you@example.com   # inline content → native Doc
+gws-axi drive upload ./edited.md --convert --update <docId> --account you@example.com          # replace a Doc's content (new revision)
+```
+
+`drive upload` takes content from a local path, `-` (stdin), or `--content`; `--convert` imports it into the matching native Google format. With `--update` it replaces an existing file's content — and when that file is already the matching native type, `--convert --update` writes edited markdown back into the same Doc as a new revision.
 
 ### Slides
 
@@ -243,7 +277,8 @@ help[2]:
 
 - **Gmail `send`**: intentionally unsupported — gws-axi drafts mail but leaves sending to a human in the Gmail UI. See the Gmail section above.
 - **Docs writes** (`append`, `insert-text`, `delete-range`, etc.): scaffolded as `NOT_IMPLEMENTED`. The next frontier.
-- **Drive/Slides writes**: still scaffolded as `NOT_IMPLEMENTED` (reads are complete).
+- **Drive writes**: `upload` and `mkdir` are shipped; `create` / `copy` / `move` / `rename` / `delete` are still scaffolded as `NOT_IMPLEMENTED`.
+- **Slides writes**: still scaffolded as `NOT_IMPLEMENTED` (reads are complete).
 - **Testing-mode tokens** still expire every 7 days *if* you haven't published your OAuth app yet. Run `gws-axi auth publish` for the walkthrough — it covers the single-developer Production flow and removes the expiry once you've re-auth'd each account.
 
 ## Contributing
