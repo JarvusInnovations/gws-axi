@@ -79,7 +79,9 @@ This repo uses [specops](https://github.com/JarvusInnovations/specops): **specs 
 - ✅ `auth publish` helper to walk through Testing→Production (eliminates 7-day token expiry)
 - ✅ Calendar reads: `events`, `get`, `calendars`, `search`, `freebusy`
 - ✅ Calendar writes: `create`, `update`, `delete`, `respond`
-- ✅ Docs reads: `read`, `find`, `comments`, `download`, `revisions` (alias of `drive revisions`)
+- ✅ Docs reads: `read`, `find`, `comments`, `download`, `revisions` (alias of `drive revisions`), `diff`
+  - `read` inlines the 5 most recent revisions (`revisions[N]{id,modified,author}`) on every read and funnels help to `revisions`/`download --revision`/`diff` — provenance shown by default (`specs/principles.md#provenance-by-default`), best-effort so a failed revisions fetch never fails the content read.
+  - `diff <fileId> <revA> [revB]` (revB→head) exports both revisions to markdown and diffs locally (no Google diff API); native Docs only, discloses the lossy-markdown-export caveat. Shared revision-export logic lives in `src/commands/docs/revision-content.ts`. Spec: `specs/commands/docs-diff.md`; `docs read` spec: `specs/commands/docs-read.md`.
 - ✅ Gmail reads: `search`, `read` (incl. `--headers` full RFC 2822 header set + `--raw` source), `labels`, `download`
 - ✅ Gmail writes: `draft`, `modify`, `batch-modify`, `label-create/update/delete`, `filter-list/create/delete`
   - ❌ `send` is intentionally OUT OF SCOPE — short-circuits with `NOT_SUPPORTED` redirecting to `draft`. No Gmail scope grants drafting+label edits while withholding send, so the boundary is a code/product decision, not a scope (the token is send-capable). Don't "implement" send.
