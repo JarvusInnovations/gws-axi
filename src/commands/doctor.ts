@@ -162,9 +162,7 @@ async function checkRuntime(serviceFilter?: string): Promise<RuntimeRow[]> {
   return rows;
 }
 
-export async function doctorCommand(
-  args: string[],
-): Promise<Record<string, unknown>> {
+export async function doctorCommand(args: string[]): Promise<Record<string, unknown>> {
   const summaryMode = args.includes("--summary");
   const checkIdx = args.indexOf("--check");
   const checkTarget = checkIdx >= 0 ? args[checkIdx + 1] : undefined;
@@ -182,9 +180,7 @@ export async function doctorCommand(
   const prereqs = !tier || tier === "prerequisites" ? checkPrerequisites() : [];
   const setupRows = !tier || tier === "setup" ? checkSetup() : [];
   const runtimeRows =
-    !tier || tier === "runtime"
-      ? await checkRuntime(tier === "runtime" ? name : undefined)
-      : [];
+    !tier || tier === "runtime" ? await checkRuntime(tier === "runtime" ? name : undefined) : [];
 
   // Compute auth_health rows up front so they roll into the failing/warning
   // tally alongside the other tiers.
@@ -202,10 +198,7 @@ export async function doctorCommand(
           }
           return {
             check: email,
-            status: (h.permanence === "permanent" ? "ok" : "warn") as
-              | "ok"
-              | "warn"
-              | "fail",
+            status: (h.permanence === "permanent" ? "ok" : "warn") as "ok" | "warn" | "fail",
             detail: h.permanence_detail,
           };
         })
@@ -274,9 +267,7 @@ export async function doctorCommand(
   const tokenFailures = runtimeRows.filter(
     (r) => r.status === "fail" && /401|revoked|refresh/i.test(r.detail),
   );
-  const scopeFailures = runtimeRows.filter(
-    (r) => r.status === "fail" && /scope/i.test(r.detail),
-  );
+  const scopeFailures = runtimeRows.filter((r) => r.status === "fail" && /scope/i.test(r.detail));
   if (setupFailing) {
     help.push("Run `gws-axi auth setup` to advance incomplete setup steps");
   }

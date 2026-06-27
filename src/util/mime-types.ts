@@ -77,8 +77,7 @@ const GOOGLE_SLIDES = "application/vnd.google-apps.presentation";
  */
 const CONVERSION_TARGETS: Record<string, string> = {
   // → Google Doc
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-    GOOGLE_DOC,
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": GOOGLE_DOC,
   "application/msword": GOOGLE_DOC,
   "application/rtf": GOOGLE_DOC,
   "text/rtf": GOOGLE_DOC,
@@ -86,14 +85,12 @@ const CONVERSION_TARGETS: Record<string, string> = {
   "text/markdown": GOOGLE_DOC,
   "text/html": GOOGLE_DOC,
   // → Google Sheet
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
-    GOOGLE_SHEET,
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": GOOGLE_SHEET,
   "application/vnd.ms-excel": GOOGLE_SHEET,
   "text/csv": GOOGLE_SHEET,
   "text/tab-separated-values": GOOGLE_SHEET,
   // → Google Slides
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation":
-    GOOGLE_SLIDES,
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": GOOGLE_SLIDES,
   "application/vnd.ms-powerpoint": GOOGLE_SLIDES,
 };
 

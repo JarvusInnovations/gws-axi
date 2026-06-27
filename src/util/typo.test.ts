@@ -35,15 +35,11 @@ describe("findLikelyTypo", () => {
   });
 
   it("flags a one-character typo", () => {
-    expect(findLikelyTypo("themightychris@gmai.com", known)).toBe(
-      "themightychris@gmail.com",
-    );
+    expect(findLikelyTypo("themightychris@gmai.com", known)).toBe("themightychris@gmail.com");
   });
 
   it("flags a two-character typo within the threshold", () => {
-    expect(findLikelyTypo("themightychrs@gmail.com", known)).toBe(
-      "themightychris@gmail.com",
-    );
+    expect(findLikelyTypo("themightychrs@gmail.com", known)).toBe("themightychris@gmail.com");
   });
 
   it("ignores matches beyond the default threshold", () => {

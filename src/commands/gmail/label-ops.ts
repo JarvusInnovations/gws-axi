@@ -46,7 +46,10 @@ notes:
   messages. System labels cannot be deleted.
 `;
 
-function parseNameFlag(args: string[]): { name: string | undefined; positional: string | undefined } {
+function parseNameFlag(args: string[]): {
+  name: string | undefined;
+  positional: string | undefined;
+} {
   let name: string | undefined;
   let positional: string | undefined;
   for (let i = 0; i < args.length; i++) {
@@ -75,10 +78,7 @@ function findLabel(
   );
 }
 
-export async function gmailLabelCreateCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function gmailLabelCreateCommand(account: string, args: string[]): Promise<string> {
   const { name } = parseNameFlag(args);
   if (!name) {
     throw new AxiError("--name is required", "VALIDATION_ERROR", [
@@ -134,10 +134,7 @@ export async function gmailLabelCreateCommand(
   );
 }
 
-export async function gmailLabelUpdateCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function gmailLabelUpdateCommand(account: string, args: string[]): Promise<string> {
   const { name, positional } = parseNameFlag(args);
   if (!positional) {
     throw new AxiError("Missing label id/name argument", "VALIDATION_ERROR", [
@@ -159,11 +156,9 @@ export async function gmailLabelUpdateCommand(
     ]);
   }
   if (target.type === "system") {
-    throw new AxiError(
-      `Cannot rename system label '${target.name}'`,
-      "OPERATION_NOT_SUPPORTED",
-      ["Only user-created labels can be renamed"],
-    );
+    throw new AxiError(`Cannot rename system label '${target.name}'`, "OPERATION_NOT_SUPPORTED", [
+      "Only user-created labels can be renamed",
+    ]);
   }
 
   let updated: gmail_v1.Schema$Label;
@@ -192,10 +187,7 @@ export async function gmailLabelUpdateCommand(
   });
 }
 
-export async function gmailLabelDeleteCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function gmailLabelDeleteCommand(account: string, args: string[]): Promise<string> {
   const { positional } = parseNameFlag(args);
   if (!positional) {
     throw new AxiError("Missing label id/name argument", "VALIDATION_ERROR", [
@@ -217,11 +209,9 @@ export async function gmailLabelDeleteCommand(
     });
   }
   if (target.type === "system") {
-    throw new AxiError(
-      `Cannot delete system label '${target.name}'`,
-      "OPERATION_NOT_SUPPORTED",
-      ["Only user-created labels can be deleted"],
-    );
+    throw new AxiError(`Cannot delete system label '${target.name}'`, "OPERATION_NOT_SUPPORTED", [
+      "Only user-created labels can be deleted",
+    ]);
   }
 
   try {

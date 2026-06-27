@@ -3,13 +3,7 @@ import { dirname } from "node:path";
 import { AxiError } from "axi-sdk-js";
 import type { gmail_v1 } from "googleapis";
 import { gmailClient, translateGoogleError } from "../../google/client.js";
-import {
-  field,
-  joinBlocks,
-  renderHelp,
-  renderList,
-  renderObject,
-} from "../../output/index.js";
+import { field, joinBlocks, renderHelp, renderList, renderObject } from "../../output/index.js";
 import { resolveOutputPath } from "../../util/paths.js";
 import { parseMessage, type ParsedMessage } from "./mime.js";
 
@@ -109,24 +103,16 @@ export function parseFlags(args: string[]): ParsedFlags {
     }
   }
   if (!id) {
-    throw new AxiError(
-      "Missing thread or message ID argument",
-      "VALIDATION_ERROR",
-      [
-        "Usage: gws-axi gmail read <id>",
-        "Get an ID from `gws-axi gmail search`",
-      ],
-    );
+    throw new AxiError("Missing thread or message ID argument", "VALIDATION_ERROR", [
+      "Usage: gws-axi gmail read <id>",
+      "Get an ID from `gws-axi gmail search`",
+    ]);
   }
   if (raw && headers) {
-    throw new AxiError(
-      "--raw and --headers cannot be combined",
-      "VALIDATION_ERROR",
-      [
-        "Use --headers for a structured header list plus the parsed body",
-        "Use --raw for the complete undecoded RFC 2822 source",
-      ],
-    );
+    throw new AxiError("--raw and --headers cannot be combined", "VALIDATION_ERROR", [
+      "Use --headers for a structured header list plus the parsed body",
+      "Use --raw for the complete undecoded RFC 2822 source",
+    ]);
   }
   if (out) full = true;
   return { id, full, out, messageOnly, headers, raw };
@@ -174,14 +160,10 @@ async function resolveThread(
       operation: "gmail.messages.get",
     });
     if (translated.code === "NOT_FOUND") {
-      throw new AxiError(
-        `No thread or message found with ID '${id}'`,
-        "THREAD_NOT_FOUND",
-        [
-          `Get a valid ID from \`gws-axi gmail search\``,
-          `IDs are 16-character hex strings; double-check for typos`,
-        ],
-      );
+      throw new AxiError(`No thread or message found with ID '${id}'`, "THREAD_NOT_FOUND", [
+        `Get a valid ID from \`gws-axi gmail search\``,
+        `IDs are 16-character hex strings; double-check for typos`,
+      ]);
     }
     throw translated;
   }
@@ -229,10 +211,7 @@ interface MessageRow {
   inline_image_count: number;
 }
 
-function buildMessageRow(
-  msg: gmail_v1.Schema$Message,
-  index: number,
-): MessageRow {
+function buildMessageRow(msg: gmail_v1.Schema$Message, index: number): MessageRow {
   const pm = parseMessage(msg);
   const unread = (msg.labelIds ?? []).includes("UNREAD");
   return {
@@ -271,9 +250,7 @@ function applyTruncation(rows: MessageRow[]): {
   // Computed floor so we never overshoot; fine since budget is advisory.
   let shown = 0;
   for (const row of rows) {
-    const share = Math.floor(
-      (row.body_total_chars / total_chars) * SIZE_THRESHOLD,
-    );
+    const share = Math.floor((row.body_total_chars / total_chars) * SIZE_THRESHOLD);
     if (row.body_total_chars > share) {
       row.body = `${row.body.slice(0, Math.max(0, share - 1))}…`;
       row.body_truncated = true;
@@ -302,15 +279,11 @@ async function renderSingleMessage(
       operation: "gmail.messages.get",
     });
     if (translated.code === "NOT_FOUND") {
-      throw new AxiError(
-        `Message '${flags.id}' not found`,
-        "MESSAGE_NOT_FOUND",
-        [
-          `--message-only requires a message ID (not a thread ID)`,
-          `Drop --message-only to read the parent thread if the ID is a thread-id`,
-          `Get valid message IDs from \`gws-axi gmail read <thread-id>\` output`,
-        ],
-      );
+      throw new AxiError(`Message '${flags.id}' not found`, "MESSAGE_NOT_FOUND", [
+        `--message-only requires a message ID (not a thread ID)`,
+        `Drop --message-only to read the parent thread if the ID is a thread-id`,
+        `Get valid message IDs from \`gws-axi gmail read <thread-id>\` output`,
+      ]);
     }
     throw translated;
   }
@@ -333,10 +306,7 @@ async function renderSingleMessage(
     await mkdir(dirname(outPath), { recursive: true });
     await writeFile(
       outPath,
-      renderAsMarkdownConversation(
-        { id: msg.threadId ?? "" } as gmail_v1.Schema$Thread,
-        [row],
-      ),
+      renderAsMarkdownConversation({ id: msg.threadId ?? "" } as gmail_v1.Schema$Thread, [row]),
     );
     blocks.push(
       renderObject({
@@ -364,9 +334,7 @@ async function renderSingleMessage(
           ? { body_truncated: true, body_total_chars: row.body_total_chars }
           : {}),
         attachments: row.attachments,
-        ...(row.inline_image_count > 0
-          ? { inline_image_count: row.inline_image_count }
-          : {}),
+        ...(row.inline_image_count > 0 ? { inline_image_count: row.inline_image_count } : {}),
       },
     }),
   );
@@ -389,10 +357,7 @@ async function renderSingleMessage(
   return joinBlocks(...blocks);
 }
 
-function renderAsMarkdownConversation(
-  thread: gmail_v1.Schema$Thread,
-  rows: MessageRow[],
-): string {
+function renderAsMarkdownConversation(thread: gmail_v1.Schema$Thread, rows: MessageRow[]): string {
   const lines: string[] = [];
   // Thread header
   const subject = rows[0]?.subject ?? "(no subject)";
@@ -462,11 +427,7 @@ async function resolveMessageId(
     const msgs = res.data.messages ?? [];
     const last = msgs[msgs.length - 1];
     if (!last?.id) {
-      throw new AxiError(
-        `Thread ${flags.id} has no messages`,
-        "THREAD_NOT_FOUND",
-        [],
-      );
+      throw new AxiError(`Thread ${flags.id} has no messages`, "THREAD_NOT_FOUND", []);
     }
     return { messageId: last.id, resolvedViaThread: flags.id };
   } catch (err) {
@@ -476,14 +437,10 @@ async function resolveMessageId(
       operation: "gmail.threads.get",
     });
     if (translated.code === "NOT_FOUND") {
-      throw new AxiError(
-        `No thread or message found with ID '${flags.id}'`,
-        "MESSAGE_NOT_FOUND",
-        [
-          "Get a valid ID from `gws-axi gmail search`",
-          "IDs are 16-character hex strings; double-check for typos",
-        ],
-      );
+      throw new AxiError(`No thread or message found with ID '${flags.id}'`, "MESSAGE_NOT_FOUND", [
+        "Get a valid ID from `gws-axi gmail search`",
+        "IDs are 16-character hex strings; double-check for typos",
+      ]);
     }
     throw translated;
   }
@@ -494,11 +451,7 @@ async function renderHeadersMode(
   account: string,
   flags: ParsedFlags,
 ): Promise<string> {
-  const { messageId, resolvedViaThread } = await resolveMessageId(
-    api,
-    account,
-    flags,
-  );
+  const { messageId, resolvedViaThread } = await resolveMessageId(api, account, flags);
   let msg: gmail_v1.Schema$Message;
   try {
     const res = await api.users.messages.get({
@@ -531,13 +484,7 @@ async function renderHeadersMode(
       },
     }),
   );
-  blocks.push(
-    renderList(
-      "headers",
-      headerRows,
-      [field("name"), field("value")],
-    ),
-  );
+  blocks.push(renderList("headers", headerRows, [field("name"), field("value")]));
   // Parsed body too, so the agent gets provenance + readable content at once.
   blocks.push(
     renderObject({
@@ -572,11 +519,7 @@ async function renderRawMode(
   account: string,
   flags: ParsedFlags,
 ): Promise<string> {
-  const { messageId, resolvedViaThread } = await resolveMessageId(
-    api,
-    account,
-    flags,
-  );
+  const { messageId, resolvedViaThread } = await resolveMessageId(api, account, flags);
   let msg: gmail_v1.Schema$Message;
   try {
     const res = await api.users.messages.get({
@@ -592,9 +535,7 @@ async function renderRawMode(
     });
   }
 
-  const source = msg.raw
-    ? Buffer.from(msg.raw, "base64url").toString("utf8")
-    : "";
+  const source = msg.raw ? Buffer.from(msg.raw, "base64url").toString("utf8") : "";
 
   const blocks: string[] = [];
   blocks.push(renderObject({ account }));
@@ -640,10 +581,7 @@ async function renderRawMode(
   return joinBlocks(...blocks);
 }
 
-export async function gmailReadCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function gmailReadCommand(account: string, args: string[]): Promise<string> {
   const flags = parseFlags(args);
   const api = await gmailClient(account);
 
@@ -658,11 +596,7 @@ export async function gmailReadCommand(
     return renderSingleMessage(api, account, flags);
   }
 
-  const { thread, resolved_via_message } = await resolveThread(
-    api,
-    account,
-    flags.id,
-  );
+  const { thread, resolved_via_message } = await resolveThread(api, account, flags.id);
 
   const messages = thread.messages ?? [];
   const rows = messages.map((m, i) => buildMessageRow(m, i));
@@ -741,9 +675,7 @@ export async function gmailReadCommand(
         unread: r.unread,
         body_source: r.body_source,
         body: r.body,
-        ...(r.body_truncated
-          ? { body_truncated: true, body_total_chars: r.body_total_chars }
-          : {}),
+        ...(r.body_truncated ? { body_truncated: true, body_total_chars: r.body_total_chars } : {}),
         attachments: r.attachments,
       })),
     }),

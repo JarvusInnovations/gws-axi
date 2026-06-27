@@ -7,9 +7,7 @@ function b64(content: string, encoding: BufferEncoding = "utf8"): string {
   return Buffer.from(content, encoding).toString("base64url");
 }
 
-function headers(
-  pairs: Array<[string, string]>,
-): gmail_v1.Schema$MessagePartHeader[] {
+function headers(pairs: Array<[string, string]>): gmail_v1.Schema$MessagePartHeader[] {
   return pairs.map(([name, value]) => ({ name, value }));
 }
 
@@ -72,7 +70,10 @@ function message(
 describe("parseMessage — bodies", () => {
   it("decodes a single text/plain body from base64url", () => {
     const msg = message(
-      [["From", "a@example.com"], ["Subject", "Plain"]],
+      [
+        ["From", "a@example.com"],
+        ["Subject", "Plain"],
+      ],
       textPart("text/plain", "Hello, world!"),
     );
     const parsed = parseMessage(msg);
@@ -171,8 +172,8 @@ describe("parseMessage — attachments vs inline", () => {
     const msg = message(
       [["Subject", "With logo"]],
       multipart("multipart/related", [
-        textPart("text/html", "<p>Hi <img src=\"cid:logo\"/></p>"),
-        attachmentPart("image/png", "logo.png", 1024, "inline; filename=\"logo.png\""),
+        textPart("text/html", '<p>Hi <img src="cid:logo"/></p>'),
+        attachmentPart("image/png", "logo.png", 1024, 'inline; filename="logo.png"'),
       ]),
     );
     const parsed = parseMessage(msg);
@@ -188,10 +189,7 @@ describe("parseMessage — attachments vs inline", () => {
     ]);
     const msg = message(
       [["Subject", "Embedded"]],
-      multipart("multipart/related", [
-        textPart("text/html", "<p>hi</p>"),
-        part,
-      ]),
+      multipart("multipart/related", [textPart("text/html", "<p>hi</p>"), part]),
     );
     const parsed = parseMessage(msg);
     expect(parsed.attachments).toHaveLength(0);
@@ -207,16 +205,10 @@ describe("parseMessage — attachments vs inline", () => {
       27530,
       'attachment; filename="Response.docx"',
     );
-    part.headers = [
-      ...(part.headers ?? []),
-      { name: "Content-ID", value: "<f_movy511a0>" },
-    ];
+    part.headers = [...(part.headers ?? []), { name: "Content-ID", value: "<f_movy511a0>" }];
     const msg = message(
       [["Subject", "With doc"]],
-      multipart("multipart/mixed", [
-        textPart("text/plain", "See attached"),
-        part,
-      ]),
+      multipart("multipart/mixed", [textPart("text/plain", "See attached"), part]),
     );
     const parsed = parseMessage(msg);
     expect(parsed.attachments).toHaveLength(1);
@@ -244,7 +236,10 @@ describe("parseMessage — attachments vs inline", () => {
 describe("parseMessage — headers", () => {
   it("stores headers with case-insensitive keys", () => {
     const msg = message(
-      [["From", "alice@example.com"], ["SUBJECT", "Hello"]],
+      [
+        ["From", "alice@example.com"],
+        ["SUBJECT", "Hello"],
+      ],
       textPart("text/plain", "body"),
     );
     const parsed = parseMessage(msg);

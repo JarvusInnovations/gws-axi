@@ -1,11 +1,6 @@
 import type { drive_v3 } from "googleapis";
 import { driveClient, translateGoogleError } from "../../google/client.js";
-import {
-  field,
-  renderListResponse,
-  truncated,
-  type FieldDef,
-} from "../../output/index.js";
+import { field, renderListResponse, truncated, type FieldDef } from "../../output/index.js";
 
 export const SEARCH_HELP = `usage: gws-axi drive search [flags]
 flags[5]:
@@ -82,8 +77,7 @@ function buildQuery(flags: ParsedFlags): string {
     parts.push(`fullText contains "${safe}"`);
   } else {
     // Sensible default — no --query specified, show recently-modified.
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 3600 * 1000)
-      .toISOString();
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
     parts.push(`modifiedTime > '${thirtyDaysAgo}'`);
   }
   if (flags.mime) {
@@ -103,10 +97,7 @@ function schema(): FieldDef[] {
   ];
 }
 
-export async function driveSearchCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function driveSearchCommand(account: string, args: string[]): Promise<string> {
   const flags = parseFlags(args);
   const api = await driveClient(account);
   const q = buildQuery(flags);
@@ -117,8 +108,7 @@ export async function driveSearchCommand(
       q,
       pageSize: flags.limit,
       pageToken: flags.page,
-      fields:
-        "nextPageToken, files(id,name,mimeType,size,modifiedTime,owners(emailAddress))",
+      fields: "nextPageToken, files(id,name,mimeType,size,modifiedTime,owners(emailAddress))",
       orderBy: "modifiedTime desc",
       supportsAllDrives: true,
       includeItemsFromAllDrives: true,
@@ -153,9 +143,7 @@ export async function driveSearchCommand(
 
   const suggestions: string[] = [];
   if (items.length > 0) {
-    suggestions.push(
-      `Run \`gws-axi drive get <id>\` on any file for full metadata`,
-    );
+    suggestions.push(`Run \`gws-axi drive get <id>\` on any file for full metadata`);
     suggestions.push(
       `Run \`gws-axi docs read <id>\` (for Docs) or \`docs download <id>\` (for other files) to read contents`,
     );

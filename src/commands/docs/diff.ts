@@ -5,10 +5,7 @@ import { createTwoFilesPatch, structuredPatch } from "diff";
 import { driveClient, translateGoogleError } from "../../google/client.js";
 import { joinBlocks, renderHelp, renderObject } from "../../output/index.js";
 import { resolveOutputPath } from "../../util/paths.js";
-import {
-  fetchNativeRevisionExport,
-  listRecentRevisions,
-} from "./revision-content.js";
+import { fetchNativeRevisionExport, listRecentRevisions } from "./revision-content.js";
 
 export const DIFF_HELP = `usage: gws-axi docs diff <fileId> <revA> [revB] [flags]
 args[3]:
@@ -67,14 +64,10 @@ export function parseFlags(args: string[]): ParsedFlags {
   }
   const [fileId, revA, revB] = positionals;
   if (!fileId || !revA) {
-    throw new AxiError(
-      "docs diff needs a fileId and at least one revision",
-      "VALIDATION_ERROR",
-      [
-        "Usage: gws-axi docs diff <fileId> <revA> [revB]",
-        "List revision ids with `gws-axi docs revisions <fileId>`",
-      ],
-    );
+    throw new AxiError("docs diff needs a fileId and at least one revision", "VALIDATION_ERROR", [
+      "Usage: gws-axi docs diff <fileId> <revA> [revB]",
+      "List revision ids with `gws-axi docs revisions <fileId>`",
+    ]);
   }
   // --out writes the full diff; truncation only protects an inline response.
   if (out) full = true;
@@ -118,10 +111,7 @@ export function computeDiff(
   };
 }
 
-export async function docsDiffCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function docsDiffCommand(account: string, args: string[]): Promise<string> {
   const flags = parseFlags(args);
   const api = await driveClient(account);
 
@@ -171,11 +161,9 @@ export async function docsDiffCommand(
   if (!revB) {
     const head = await listRecentRevisions(api, flags.fileId, 1);
     if (head.length === 0) {
-      throw new AxiError(
-        `No revisions found for '${flags.fileId}'`,
-        "REVISION_NOT_FOUND",
-        [`List revisions with \`gws-axi docs revisions ${flags.fileId}\``],
-      );
+      throw new AxiError(`No revisions found for '${flags.fileId}'`, "REVISION_NOT_FOUND", [
+        `List revisions with \`gws-axi docs revisions ${flags.fileId}\``,
+      ]);
     }
     revB = head[0].id;
   }
@@ -194,12 +182,14 @@ export async function docsDiffCommand(
   // never reordered chronologically.
   const labelA = `r${flags.revA}`;
   const labelB = `r${revB}`;
-  const {
-    unified,
-    linesAdded,
-    linesRemoved,
-    changed,
-  } = computeDiff(labelA, labelB, textA, textB, exportA.modified, exportB.modified);
+  const { unified, linesAdded, linesRemoved, changed } = computeDiff(
+    labelA,
+    labelB,
+    textA,
+    textB,
+    exportA.modified,
+    exportB.modified,
+  );
 
   const blocks: string[] = [];
   blocks.push(renderObject({ account }));
@@ -253,13 +243,9 @@ export async function docsDiffCommand(
     } else {
       const cap = flags.full ? Number.POSITIVE_INFINITY : DEFAULT_TRUNCATE_CHARS;
       const truncated = total > cap;
-      blocks.push(
-        renderObject({ diff: truncated ? `${unified.slice(0, cap)}…` : unified }),
-      );
+      blocks.push(renderObject({ diff: truncated ? `${unified.slice(0, cap)}…` : unified }));
       if (truncated) {
-        blocks.push(
-          renderObject({ diff_truncated: true, diff_total_chars: total }),
-        );
+        blocks.push(renderObject({ diff_truncated: true, diff_total_chars: total }));
         suggestions.push(
           `Run \`gws-axi docs diff ${flags.fileId} ${flags.revA} ${revB} --out <path>\` to save the full diff, or --full to expand inline`,
         );
@@ -274,9 +260,7 @@ export async function docsDiffCommand(
   suggestions.push(
     `Fetch a side's full content: \`gws-axi docs download ${flags.fileId} --revision ${flags.revA}\` (or --revision ${revB})`,
   );
-  suggestions.push(
-    `List all revisions: \`gws-axi docs revisions ${flags.fileId}\``,
-  );
+  suggestions.push(`List all revisions: \`gws-axi docs revisions ${flags.fileId}\``);
   suggestions.push(
     "Diff compares markdown exports (lossy) — formatting-only changes may be invisible, and native revision history is a sparse sample",
   );

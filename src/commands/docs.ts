@@ -5,10 +5,7 @@ import { docsDiffCommand, DIFF_HELP } from "./docs/diff.js";
 import { docsDownloadCommand, DOWNLOAD_HELP } from "./docs/download.js";
 import { docsFindCommand, FIND_HELP } from "./docs/find.js";
 import { docsReadCommand, READ_HELP } from "./docs/read.js";
-import {
-  driveRevisionsCommand,
-  REVISIONS_HELP,
-} from "./drive/revisions.js";
+import { driveRevisionsCommand, REVISIONS_HELP } from "./drive/revisions.js";
 
 interface DocsSubcommand {
   name: string;
@@ -135,11 +132,9 @@ export async function docsCommand(args: string[]): Promise<string> {
   const sub = args[0];
   const def = SUB_BY_NAME[sub];
   if (!def) {
-    throw new AxiError(
-      `Unknown docs subcommand: ${sub}`,
-      "VALIDATION_ERROR",
-      [`Run \`gws-axi docs --help\` to see available subcommands`],
-    );
+    throw new AxiError(`Unknown docs subcommand: ${sub}`, "VALIDATION_ERROR", [
+      `Run \`gws-axi docs --help\` to see available subcommands`,
+    ]);
   }
 
   const rest = args.slice(1);
@@ -154,14 +149,10 @@ export async function docsCommand(args: string[]): Promise<string> {
   });
 
   if (!def.handler) {
-    throw new AxiError(
-      `gws-axi docs ${sub} is not yet implemented`,
-      "NOT_IMPLEMENTED",
-      [
-        `Account resolution succeeded: would run as ${resolution.account}`,
-        `See \`gws-axi docs ${sub} --help\` for the planned surface`,
-      ],
-    );
+    throw new AxiError(`gws-axi docs ${sub} is not yet implemented`, "NOT_IMPLEMENTED", [
+      `Account resolution succeeded: would run as ${resolution.account}`,
+      `See \`gws-axi docs ${sub} --help\` for the planned surface`,
+    ]);
   }
 
   return def.handler(resolution.account, remaining);

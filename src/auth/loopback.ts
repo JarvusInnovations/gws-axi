@@ -1,11 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import {
-  createServer,
-  type IncomingMessage,
-  type Server,
-  type ServerResponse,
-} from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { AddressInfo } from "node:net";
 import { dirname } from "node:path";
 import { URL } from "node:url";
@@ -85,11 +80,7 @@ function readCredentials(): InstalledCreds | null {
 }
 
 function base64url(input: Buffer): string {
-  return input
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
+  return input.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 function pkcePair(): { verifier: string; challenge: string } {
@@ -98,11 +89,7 @@ function pkcePair(): { verifier: string; challenge: string } {
   return { verifier, challenge };
 }
 
-function writeAccountFiles(
-  email: string,
-  tokens: StoredTokens,
-  profile: StoredProfile,
-): void {
+function writeAccountFiles(email: string, tokens: StoredTokens, profile: StoredProfile): void {
   const tokensP = tokensPathForAccount(email);
   const profileP = profilePathForAccount(email);
   mkdirSync(dirname(tokensP), { recursive: true });
@@ -197,16 +184,10 @@ interface CallbackHandle {
    * — sending a "success" page before we know the write succeeded was
    * misleading users into thinking re-auth had completed when it hadn't.
    */
-  finalize: (result:
-    | { ok: true }
-    | { ok: false; error: string }
-  ) => void;
+  finalize: (result: { ok: true } | { ok: false; error: string }) => void;
 }
 
-async function waitForCallback(
-  server: Server,
-  expectedState: string,
-): Promise<CallbackHandle> {
+async function waitForCallback(server: Server, expectedState: string): Promise<CallbackHandle> {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       reject(new Error("Timed out waiting for OAuth callback after 5 minutes"));
@@ -245,10 +226,7 @@ async function waitForCallback(
       // Don't respond yet — hold the connection so the browser page can
       // reflect the actual exchange/write outcome. The caller calls
       // finalize() after attempting the rest of the flow.
-      const finalize = (result:
-        | { ok: true }
-        | { ok: false; error: string }
-      ): void => {
+      const finalize = (result: { ok: true } | { ok: false; error: string }): void => {
         res.statusCode = 200;
         res.setHeader("content-type", "text/html; charset=utf-8");
         if (result.ok) {
@@ -276,8 +254,9 @@ function successPage(): string {
 }
 
 function errorPage(message: string): string {
-  const escaped = message.replace(/[<>&]/g, (c) =>
-    ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c] ?? c,
+  const escaped = message.replace(
+    /[<>&]/g,
+    (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c] ?? c,
   );
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>gws-axi — error</title>
@@ -371,10 +350,7 @@ export async function preparePendingAuth(
       url: authUrl,
       account: options.expectedAccount,
       warnings: {
-        unverifiedApp: predictUnverifiedAppWarning(
-          options.expectedAccount,
-          !!setupState.published,
-        ),
+        unverifiedApp: predictUnverifiedAppWarning(options.expectedAccount, !!setupState.published),
       },
     },
   });
@@ -418,9 +394,7 @@ export async function awaitPendingAuth(): Promise<StepOutcome> {
       title: "Pending authentication expired",
       error: "The prepared OAuth flow expired — prepare a new one",
       code: "PENDING_EXPIRED",
-      instructions: [
-        "Re-run `gws-axi auth login --account <email>` to prepare a fresh flow",
-      ],
+      instructions: ["Re-run `gws-axi auth login --account <email>` to prepare a fresh flow"],
     };
   }
 
@@ -597,18 +571,17 @@ export async function awaitPendingAuth(): Promise<StepOutcome> {
  * instructions to the user/agent as a StepOutcome. Does NOT block — just
  * wraps preparePendingAuth into the StepOutcome shape.
  */
-export async function advanceTokensObtained(
-  options: PrepareOptions = {},
-): Promise<StepOutcome> {
+export async function advanceTokensObtained(options: PrepareOptions = {}): Promise<StepOutcome> {
   const step = "tokens_obtained" as const;
   const prepared = await preparePendingAuth(options);
   if ("error" in prepared) {
     return {
       step,
       advanced: false,
-      title: prepared.code === "PRECONDITION_FAILED"
-        ? "OAuth credentials not yet saved"
-        : "OAuth prepare failed",
+      title:
+        prepared.code === "PRECONDITION_FAILED"
+          ? "OAuth credentials not yet saved"
+          : "OAuth prepare failed",
       error: prepared.error,
       code: prepared.code,
       instructions: ["Re-run: `gws-axi auth setup --credentials-json <path>`"],

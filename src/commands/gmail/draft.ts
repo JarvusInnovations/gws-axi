@@ -97,30 +97,23 @@ function parseFlags(args: string[]): ParsedFlags {
 
 function resolveBody(flags: ParsedFlags): string {
   if (flags.body !== undefined && flags.bodyFile !== undefined) {
-    throw new AxiError(
-      "--body and --body-file are mutually exclusive",
-      "VALIDATION_ERROR",
-      ["Pass the body inline with --body OR from a file with --body-file, not both"],
-    );
+    throw new AxiError("--body and --body-file are mutually exclusive", "VALIDATION_ERROR", [
+      "Pass the body inline with --body OR from a file with --body-file, not both",
+    ]);
   }
   if (flags.bodyFile !== undefined) {
     try {
       return readFileSync(flags.bodyFile, "utf8");
     } catch {
-      throw new AxiError(
-        `Cannot read --body-file: ${flags.bodyFile}`,
-        "VALIDATION_ERROR",
-        ["Check the path exists and is readable"],
-      );
+      throw new AxiError(`Cannot read --body-file: ${flags.bodyFile}`, "VALIDATION_ERROR", [
+        "Check the path exists and is readable",
+      ]);
     }
   }
   return flags.body ?? "";
 }
 
-export async function gmailDraftCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function gmailDraftCommand(account: string, args: string[]): Promise<string> {
   const flags = parseFlags(args);
   if (flags.to.length === 0) {
     throw new AxiError("--to is required", "VALIDATION_ERROR", [

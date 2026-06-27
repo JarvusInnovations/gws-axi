@@ -1,10 +1,6 @@
 import { copyFileSync, existsSync, readFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import {
-  credentialsPath,
-  type SetupState,
-  type SetupStepKey,
-} from "../config.js";
+import { credentialsPath, type SetupState, type SetupStepKey } from "../config.js";
 import { markStepDone, updateStepMetadata } from "./state.js";
 import {
   createProject,
@@ -47,9 +43,7 @@ export function consoleUrl(path: string, projectId?: string): string {
 }
 
 // STEP 1 — gcp_project ─────────────────────────────────────────────
-export async function advanceGcpProject(
-  flags: SetupFlags,
-): Promise<StepOutcome> {
+export async function advanceGcpProject(flags: SetupFlags): Promise<StepOutcome> {
   const step: SetupStepKey = "gcp_project";
 
   if (flags.projectId) {
@@ -255,9 +249,7 @@ export async function advanceOauthClient(
 }
 
 // STEP 4 — credentials_saved ───────────────────────────────────────
-export async function advanceCredentialsSaved(
-  flags: SetupFlags,
-): Promise<StepOutcome> {
+export async function advanceCredentialsSaved(flags: SetupFlags): Promise<StepOutcome> {
   const step: SetupStepKey = "credentials_saved";
 
   if (!flags.credentialsJson) {

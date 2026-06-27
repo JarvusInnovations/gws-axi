@@ -38,9 +38,7 @@ describe("gmail read parseFlags", () => {
   });
 
   it("rejects --raw and --headers together with VALIDATION_ERROR", () => {
-    expect(() => parseFlags(["abc", "--raw", "--headers"])).toThrowError(
-      AxiError,
-    );
+    expect(() => parseFlags(["abc", "--raw", "--headers"])).toThrowError(AxiError);
     try {
       parseFlags(["abc", "--raw", "--headers"]);
     } catch (err) {

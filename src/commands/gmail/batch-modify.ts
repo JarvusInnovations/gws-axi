@@ -2,11 +2,7 @@ import { AxiError } from "axi-sdk-js";
 import type { gmail_v1 } from "googleapis";
 import { gmailClient, translateGoogleError } from "../../google/client.js";
 import { joinBlocks, renderHelp, renderObject } from "../../output/index.js";
-import {
-  fetchLabels,
-  labelNamesFor,
-  resolveLabelIds,
-} from "./labels-shared.js";
+import { fetchLabels, labelNamesFor, resolveLabelIds } from "./labels-shared.js";
 
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 1000; // messages.batchModify accepts up to 1000 ids per call.
@@ -119,10 +115,7 @@ async function collectMessageIds(
   return { ids: ids.slice(0, limit), more: Boolean(pageToken) };
 }
 
-export async function gmailBatchModifyCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function gmailBatchModifyCommand(account: string, args: string[]): Promise<string> {
   const flags = parseFlags(args);
   if (!flags.query) {
     throw new AxiError("--query is required", "VALIDATION_ERROR", [
@@ -194,9 +187,7 @@ export async function gmailBatchModifyCommand(
       `More messages match than --limit ${flags.limit} — re-run the same command to modify the next batch`,
     );
   }
-  suggestions.push(
-    `Verify with \`gws-axi gmail search --query ${JSON.stringify(flags.query)}\``,
-  );
+  suggestions.push(`Verify with \`gws-axi gmail search --query ${JSON.stringify(flags.query)}\``);
 
   return joinBlocks(renderObject(result), renderHelp(suggestions));
 }

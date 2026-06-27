@@ -1,10 +1,5 @@
 import { AxiError } from "axi-sdk-js";
-import {
-  getDefaultAccount,
-  hasAccount,
-  listAccounts,
-  normalizeEmail,
-} from "../config.js";
+import { getDefaultAccount, hasAccount, listAccounts, normalizeEmail } from "../config.js";
 
 export interface ResolveAccountOptions {
   mutation: boolean;
@@ -25,14 +20,10 @@ export function resolveAccount(
   const accounts = listAccounts();
 
   if (accounts.length === 0) {
-    throw new AxiError(
-      "No accounts authenticated",
-      "NO_ACCOUNTS",
-      [
-        "Run `gws-axi auth setup` to configure OAuth and authenticate an account",
-        "Run `gws-axi auth login` if setup is already complete",
-      ],
-    );
+    throw new AxiError("No accounts authenticated", "NO_ACCOUNTS", [
+      "Run `gws-axi auth setup` to configure OAuth and authenticate an account",
+      "Run `gws-axi auth login` if setup is already complete",
+    ]);
   }
 
   const defaultAccount = getDefaultAccount();
@@ -40,15 +31,11 @@ export function resolveAccount(
   if (requestedAccount) {
     const normalized = normalizeEmail(requestedAccount);
     if (!hasAccount(normalized)) {
-      throw new AxiError(
-        `Account ${normalized} is not authenticated`,
-        "ACCOUNT_NOT_FOUND",
-        [
-          `Authenticated accounts: ${accounts.join(", ")}`,
-          `Run \`gws-axi auth login --account ${normalized}\` to add it`,
-          "Run `gws-axi auth accounts` to see all authenticated accounts",
-        ],
-      );
+      throw new AxiError(`Account ${normalized} is not authenticated`, "ACCOUNT_NOT_FOUND", [
+        `Authenticated accounts: ${accounts.join(", ")}`,
+        `Run \`gws-axi auth login --account ${normalized}\` to add it`,
+        "Run `gws-axi auth accounts` to see all authenticated accounts",
+      ]);
     }
     return {
       account: normalized,
@@ -81,15 +68,11 @@ export function resolveAccount(
   }
 
   if (!defaultAccount) {
-    throw new AxiError(
-      "No default account set",
-      "NO_DEFAULT_ACCOUNT",
-      [
-        `Authenticated accounts: ${accounts.join(", ")}`,
-        `Run \`gws-axi auth use <email>\` to set a default`,
-        "Or pass --account <email> to this command",
-      ],
-    );
+    throw new AxiError("No default account set", "NO_DEFAULT_ACCOUNT", [
+      `Authenticated accounts: ${accounts.join(", ")}`,
+      `Run \`gws-axi auth use <email>\` to set a default`,
+      "Or pass --account <email> to this command",
+    ]);
   }
 
   return {
@@ -100,9 +83,7 @@ export function resolveAccount(
   };
 }
 
-export function accountHeaderFields(
-  resolution: AccountResolution,
-): Record<string, unknown> {
+export function accountHeaderFields(resolution: AccountResolution): Record<string, unknown> {
   const fields: Record<string, unknown> = { account: resolution.account };
   if (resolution.totalAccounts > 1 && !resolution.explicit) {
     fields.account_source = "default";

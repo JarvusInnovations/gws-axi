@@ -2,11 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { AxiError } from "axi-sdk-js";
 import type { docs_v1 } from "googleapis";
-import {
-  docsClient,
-  driveClient,
-  translateGoogleError,
-} from "../../google/client.js";
+import { docsClient, driveClient, translateGoogleError } from "../../google/client.js";
 import {
   field,
   joinBlocks,
@@ -16,10 +12,7 @@ import {
   type FieldDef,
 } from "../../output/index.js";
 import { renderBodyAsMarkdown } from "./markdown.js";
-import {
-  listRecentRevisions,
-  type RecentRevision,
-} from "./revision-content.js";
+import { listRecentRevisions, type RecentRevision } from "./revision-content.js";
 import { resolveOutputPath } from "../../util/paths.js";
 
 export const READ_HELP = `usage: gws-axi docs read <documentId> [flags]
@@ -97,14 +90,10 @@ function parseFlags(args: string[]): ParsedFlags {
     }
   }
   if (!documentId) {
-    throw new AxiError(
-      "Missing documentId argument",
-      "VALIDATION_ERROR",
-      [
-        "Usage: gws-axi docs read <documentId>",
-        "The documentId is the portion of the URL after /d/ and before /edit",
-      ],
-    );
+    throw new AxiError("Missing documentId argument", "VALIDATION_ERROR", [
+      "Usage: gws-axi docs read <documentId>",
+      "The documentId is the portion of the URL after /d/ and before /edit",
+    ]);
   }
   // --out implies --full: truncation only exists to protect the agent's
   // context window on an inline response; when writing to disk there's no
@@ -148,10 +137,7 @@ function tabSchema(activeId: string): FieldDef[] {
   ];
 }
 
-export async function docsReadCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function docsReadCommand(account: string, args: string[]): Promise<string> {
   const flags = parseFlags(args);
   const api = await docsClient(account);
 
@@ -263,22 +249,18 @@ export async function docsReadCommand(
   let revisionsFailed = false;
   try {
     const drive = await driveClient(account);
-    recentRevisions = await listRecentRevisions(
-      drive,
-      flags.documentId,
-      RECENT_REVISIONS_LIMIT,
-    );
+    recentRevisions = await listRecentRevisions(drive, flags.documentId, RECENT_REVISIONS_LIMIT);
   } catch {
     revisionsFailed = true;
   }
 
   if (recentRevisions.length > 0) {
     blocks.push(
-      renderList(
-        "revisions",
-        recentRevisions as unknown as Array<Record<string, unknown>>,
-        [field("id"), field("modified"), field("author")],
-      ),
+      renderList("revisions", recentRevisions as unknown as Array<Record<string, unknown>>, [
+        field("id"),
+        field("modified"),
+        field("author"),
+      ]),
     );
   } else if (revisionsFailed) {
     blocks.push(
@@ -309,9 +291,7 @@ export async function docsReadCommand(
     } else {
       const cap = flags.full ? Number.POSITIVE_INFINITY : DEFAULT_TRUNCATE_CHARS;
       const truncated = total > cap;
-      const content = truncated
-        ? `${rendered.markdown.slice(0, cap)}…`
-        : rendered.markdown;
+      const content = truncated ? `${rendered.markdown.slice(0, cap)}…` : rendered.markdown;
 
       blocks.push(renderObject({ content }));
       if (truncated) {
@@ -342,9 +322,7 @@ export async function docsReadCommand(
     suggestions.push(
       `Run \`gws-axi docs find ${flags.documentId}${tabSuffix} --query <text>\` to locate text within`,
     );
-    suggestions.push(
-      `Run \`gws-axi docs comments ${flags.documentId}\` to see review comments`,
-    );
+    suggestions.push(`Run \`gws-axi docs comments ${flags.documentId}\` to see review comments`);
   } else if (flat.length > 1) {
     // Multi-tab, no --tab — steer the agent to pick one.
     suggestions.push(
@@ -355,9 +333,7 @@ export async function docsReadCommand(
   // Version-history funnel — docs read is the discovery entry point for a
   // document's revisions (principles.md#contextual-help-suggestions). Always
   // shown; interpolates real revision ids when the listing was available.
-  suggestions.push(
-    `View full version history: \`gws-axi docs revisions ${flags.documentId}\``,
-  );
+  suggestions.push(`View full version history: \`gws-axi docs revisions ${flags.documentId}\``);
   if (recentRevisions.length > 0) {
     const newest = recentRevisions[0].id;
     const older = recentRevisions[1]?.id ?? newest;

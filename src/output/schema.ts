@@ -32,11 +32,7 @@ export function lower(name: string): FieldDef {
   };
 }
 
-export function pluck(
-  parent: string,
-  child: string,
-  alias?: string,
-): FieldDef {
+export function pluck(parent: string, child: string, alias?: string): FieldDef {
   return {
     name: alias ?? `${parent}_${child}`,
     extract: (item) => {
@@ -66,10 +62,7 @@ export function mapEnum(
  * Compute a field from the whole item. Use for derived values (e.g.
  * "5/8 attendees confirmed", "tomorrow 2pm").
  */
-export function computed(
-  name: string,
-  fn: (item: Record<string, unknown>) => unknown,
-): FieldDef {
+export function computed(name: string, fn: (item: Record<string, unknown>) => unknown): FieldDef {
   return { name, extract: fn };
 }
 

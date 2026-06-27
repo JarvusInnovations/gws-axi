@@ -1,11 +1,7 @@
 import { AxiError } from "axi-sdk-js";
 import type { slides_v1 } from "googleapis";
 import { slidesClient, translateGoogleError } from "../../google/client.js";
-import {
-  joinBlocks,
-  renderHelp,
-  renderObject,
-} from "../../output/index.js";
+import { joinBlocks, renderHelp, renderObject } from "../../output/index.js";
 import { extractSlideContent, isSlidePage } from "./text.js";
 
 export const PAGE_HELP = `usage: gws-axi slides page <presentation-id> <page-id> [flags]
@@ -38,22 +34,15 @@ function parseFlags(args: string[]): ParsedFlags {
     if (!arg.startsWith("--")) positional.push(arg);
   }
   if (positional.length < 2) {
-    throw new AxiError(
-      "Missing required arguments",
-      "VALIDATION_ERROR",
-      [
-        "Usage: gws-axi slides page <presentation-id> <page-id>",
-        "Get the page-id from `gws-axi slides get <presentation-id>` output",
-      ],
-    );
+    throw new AxiError("Missing required arguments", "VALIDATION_ERROR", [
+      "Usage: gws-axi slides page <presentation-id> <page-id>",
+      "Get the page-id from `gws-axi slides get <presentation-id>` output",
+    ]);
   }
   return { presentationId: positional[0], pageId: positional[1] };
 }
 
-export async function slidesPageCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function slidesPageCommand(account: string, args: string[]): Promise<string> {
   const flags = parseFlags(args);
   const api = await slidesClient(account);
 
@@ -130,9 +119,7 @@ export async function slidesPageCommand(
       `Next slide: \`gws-axi slides page ${flags.presentationId} ${next.objectId}\` (slide ${targetIndex + 2}/${slidePages.length})`,
     );
   }
-  suggestions.push(
-    `Full deck: \`gws-axi slides summarize ${flags.presentationId}\``,
-  );
+  suggestions.push(`Full deck: \`gws-axi slides summarize ${flags.presentationId}\``);
   blocks.push(renderHelp(suggestions));
   return joinBlocks(...blocks);
 }

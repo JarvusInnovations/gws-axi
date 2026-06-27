@@ -18,13 +18,23 @@ export async function setupCommand(args: string[]): Promise<string> {
   }
 
   const errors: string[] = [];
-  installSessionStartHooks({ marker: "gws-axi", timeoutSeconds: 10, onError: (m) => errors.push(m) });
+  installSessionStartHooks({
+    marker: "gws-axi",
+    timeoutSeconds: 10,
+    onError: (m) => errors.push(m),
+  });
   if (errors.length > 0) {
     throw new AxiError("Hook installation reported problems", "HOOK_INSTALL_FAILED", errors);
   }
 
   return joinBlocks(
-    renderObject({ hooks: { status: "installed", integrations: "Claude Code, Codex, OpenCode", marker: "gws-axi" } }),
+    renderObject({
+      hooks: {
+        status: "installed",
+        integrations: "Claude Code, Codex, OpenCode",
+        marker: "gws-axi",
+      },
+    }),
     renderHelp(["Restart your agent session to receive gws-axi ambient context"]),
   );
 }

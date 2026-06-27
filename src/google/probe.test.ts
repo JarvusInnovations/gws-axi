@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  ADDITIONAL_SCOPE_INFO,
-  BASE_SCOPES,
-  SERVICE_SCOPES,
-} from "../auth/scopes.js";
+import { ADDITIONAL_SCOPE_INFO, BASE_SCOPES, SERVICE_SCOPES } from "../auth/scopes.js";
 import { probeAdditionalScopes, type ProbeContext } from "./probe.js";
 import type { StoredTokens } from "./tokens.js";
 
@@ -32,11 +28,7 @@ describe("probeAdditionalScopes", () => {
   it("marks a granted additional scope ok", () => {
     const granted = ADDITIONAL_SCOPE_INFO[0];
     const results = probeAdditionalScopes(
-      ctxWithScopes([
-        ...BASE_SCOPES,
-        ...Object.values(SERVICE_SCOPES),
-        granted.scope,
-      ]),
+      ctxWithScopes([...BASE_SCOPES, ...Object.values(SERVICE_SCOPES), granted.scope]),
     );
     const row = results.find((r) => r.detail.includes(granted.capability));
     expect(row?.status).toBe("ok");

@@ -29,9 +29,9 @@ describe("drive mkdir parseFlags", () => {
 
 describe("drive mkdir command validation", () => {
   it("throws VALIDATION_ERROR when the name is missing", async () => {
-    await expect(driveMkdirCommand("a@b.com", ["--parent", "1AbC"])).rejects.toMatchObject(
-      { code: "VALIDATION_ERROR" },
-    );
+    await expect(driveMkdirCommand("a@b.com", ["--parent", "1AbC"])).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+    });
   });
 
   it("rejects with an AxiError (not a raw throw) on missing name", async () => {

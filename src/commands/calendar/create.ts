@@ -52,11 +52,9 @@ function parseDurationMs(value: string): number {
   const re = /^(?:(\d+)h)?(?:(\d+)(?:m|min)?)?$/i;
   const m = value.trim().match(re);
   if (!m || (!m[1] && !m[2])) {
-    throw new AxiError(
-      `Cannot parse duration: ${value}`,
-      "VALIDATION_ERROR",
-      ["Use forms like 1h, 30m, 90m, or 1h30m"],
-    );
+    throw new AxiError(`Cannot parse duration: ${value}`, "VALIDATION_ERROR", [
+      "Use forms like 1h, 30m, 90m, or 1h30m",
+    ]);
   }
   const hours = parseInt(m[1] ?? "0", 10);
   const minutes = parseInt(m[2] ?? "0", 10);
@@ -111,7 +109,10 @@ function parseFlags(args: string[]): ParsedFlags {
         i++;
         break;
       case "--attendees":
-        flags.attendees = next.split(",").map((s) => s.trim()).filter(Boolean);
+        flags.attendees = next
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
         i++;
         break;
       case "--timezone":
@@ -126,11 +127,9 @@ function parseFlags(args: string[]): ParsedFlags {
         if (next === "all" || next === "externalOnly" || next === "none") {
           flags.sendUpdates = next;
         } else {
-          throw new AxiError(
-            `Invalid --send-updates value: ${next}`,
-            "VALIDATION_ERROR",
-            ["Valid values: none, all, externalOnly"],
-          );
+          throw new AxiError(`Invalid --send-updates value: ${next}`, "VALIDATION_ERROR", [
+            "Valid values: none, all, externalOnly",
+          ]);
         }
         i++;
         break;
@@ -180,21 +179,17 @@ function buildEventBody(flags: ParsedFlags): calendar_v3.Schema$Event {
     // All-day events use the date field; Google expects exclusive end date,
     // so default end = start + 1 day if neither --end nor --duration given.
     if (!/^\d{4}-\d{2}-\d{2}$/.test(flags.start)) {
-      throw new AxiError(
-        "--all-day requires --start in YYYY-MM-DD form",
-        "VALIDATION_ERROR",
-        [`Got: ${flags.start}`],
-      );
+      throw new AxiError("--all-day requires --start in YYYY-MM-DD form", "VALIDATION_ERROR", [
+        `Got: ${flags.start}`,
+      ]);
     }
     body.start = { date: flags.start };
     let endDate: string;
     if (flags.end) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(flags.end)) {
-        throw new AxiError(
-          "--all-day requires --end in YYYY-MM-DD form",
-          "VALIDATION_ERROR",
-          [`Got: ${flags.end}`],
-        );
+        throw new AxiError("--all-day requires --end in YYYY-MM-DD form", "VALIDATION_ERROR", [
+          `Got: ${flags.end}`,
+        ]);
       }
       endDate = flags.end;
     } else {
@@ -228,10 +223,7 @@ function buildEventBody(flags: ParsedFlags): calendar_v3.Schema$Event {
   return body;
 }
 
-export async function calendarCreateCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function calendarCreateCommand(account: string, args: string[]): Promise<string> {
   const flags = parseFlags(args);
   const body = buildEventBody(flags);
   const api = await calendarClient(account);

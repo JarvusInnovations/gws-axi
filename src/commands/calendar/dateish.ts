@@ -19,11 +19,9 @@ import { AxiError } from "axi-sdk-js";
  */
 export function parseDateishFlag(value: string): string {
   if (!value) {
-    throw new AxiError(
-      "Missing date/time value",
-      "VALIDATION_ERROR",
-      ["Use ISO format: 2026-04-20T14:00 or just 2026-04-20"],
-    );
+    throw new AxiError("Missing date/time value", "VALIDATION_ERROR", [
+      "Use ISO format: 2026-04-20T14:00 or just 2026-04-20",
+    ]);
   }
 
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
@@ -32,26 +30,20 @@ export function parseDateishFlag(value: string): string {
     const [y, m, d] = value.split("-").map((part) => Number(part));
     const local = new Date(y, m - 1, d, 0, 0, 0, 0);
     if (Number.isNaN(local.getTime())) {
-      throw new AxiError(
-        `Cannot parse date: ${value}`,
-        "VALIDATION_ERROR",
-        ["Use YYYY-MM-DD (e.g. 2026-04-20)"],
-      );
+      throw new AxiError(`Cannot parse date: ${value}`, "VALIDATION_ERROR", [
+        "Use YYYY-MM-DD (e.g. 2026-04-20)",
+      ]);
     }
     return local.toISOString();
   }
 
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
-    throw new AxiError(
-      `Cannot parse date/time: ${value}`,
-      "VALIDATION_ERROR",
-      [
-        "Use ISO 8601 format: 2026-04-20T14:00:00-04:00",
-        "Local time: 2026-04-20T14:00 (no offset — interpreted as local)",
-        "Date-only: 2026-04-20 (midnight local)",
-      ],
-    );
+    throw new AxiError(`Cannot parse date/time: ${value}`, "VALIDATION_ERROR", [
+      "Use ISO 8601 format: 2026-04-20T14:00:00-04:00",
+      "Local time: 2026-04-20T14:00 (no offset — interpreted as local)",
+      "Date-only: 2026-04-20 (midnight local)",
+    ]);
   }
   return parsed.toISOString();
 }

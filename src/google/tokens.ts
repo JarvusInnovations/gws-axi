@@ -42,11 +42,9 @@ export function readTokens(email: string): StoredTokens | null {
 }
 
 function writeTokens(email: string, tokens: StoredTokens): void {
-  writeFileSync(
-    tokensPathForAccount(email),
-    `${JSON.stringify(tokens, null, 2)}\n`,
-    { mode: 0o600 },
-  );
+  writeFileSync(tokensPathForAccount(email), `${JSON.stringify(tokens, null, 2)}\n`, {
+    mode: 0o600,
+  });
 }
 
 function readCredentials(): InstalledCreds {
@@ -57,15 +55,11 @@ function readCredentials(): InstalledCreds {
       ["Run `gws-axi auth setup --credentials-json <path>`"],
     );
   }
-  const parsed = JSON.parse(
-    readFileSync(credentialsPath(), "utf-8"),
-  ) as CredentialsFile;
+  const parsed = JSON.parse(readFileSync(credentialsPath(), "utf-8")) as CredentialsFile;
   if (!parsed.installed?.client_id || !parsed.installed?.client_secret) {
-    throw new AxiError(
-      "credentials.json is not a Desktop OAuth client",
-      "INVALID_CREDENTIALS",
-      ["Re-run `gws-axi auth setup --credentials-json <path>` with a Desktop client JSON"],
-    );
+    throw new AxiError("credentials.json is not a Desktop OAuth client", "INVALID_CREDENTIALS", [
+      "Re-run `gws-axi auth setup --credentials-json <path>` with a Desktop client JSON",
+    ]);
   }
   return parsed.installed;
 }
@@ -82,11 +76,9 @@ function isExpired(tokens: StoredTokens): boolean {
 export async function refreshAccessToken(email: string): Promise<StoredTokens> {
   const tokens = readTokens(email);
   if (!tokens) {
-    throw new AxiError(
-      `No stored tokens for ${email}`,
-      "TOKENS_MISSING",
-      [`Run \`gws-axi auth login --account ${email}\` to authenticate`],
-    );
+    throw new AxiError(`No stored tokens for ${email}`, "TOKENS_MISSING", [
+      `Run \`gws-axi auth login --account ${email}\` to authenticate`,
+    ]);
   }
   if (!tokens.refresh_token) {
     throw new AxiError(
@@ -147,11 +139,9 @@ export async function refreshAccessToken(email: string): Promise<StoredTokens> {
 export async function getValidAccessToken(email: string): Promise<StoredTokens> {
   const tokens = readTokens(email);
   if (!tokens) {
-    throw new AxiError(
-      `No stored tokens for ${email}`,
-      "TOKENS_MISSING",
-      [`Run \`gws-axi auth login --account ${email}\` to authenticate`],
-    );
+    throw new AxiError(`No stored tokens for ${email}`, "TOKENS_MISSING", [
+      `Run \`gws-axi auth login --account ${email}\` to authenticate`,
+    ]);
   }
   if (!isExpired(tokens)) return tokens;
   return refreshAccessToken(email);

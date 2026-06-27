@@ -68,11 +68,9 @@ function parseFlags(args: string[]): ParsedFlags {
     }
   }
   if (!documentId) {
-    throw new AxiError(
-      "Missing documentId argument",
-      "VALIDATION_ERROR",
-      ["Usage: gws-axi docs comments <documentId>"],
-    );
+    throw new AxiError("Missing documentId argument", "VALIDATION_ERROR", [
+      "Usage: gws-axi docs comments <documentId>",
+    ]);
   }
   return { documentId, includeResolved, full, limit };
 }
@@ -113,10 +111,7 @@ function replySchema(truncateAt: number): FieldDef[] {
   ];
 }
 
-export async function docsCommentsCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function docsCommentsCommand(account: string, args: string[]): Promise<string> {
   const flags = parseFlags(args);
   const api = await driveClient(account);
 
@@ -151,9 +146,7 @@ export async function docsCommentsCommand(
   }
 
   const raw = data.comments ?? [];
-  const filtered = flags.includeResolved
-    ? raw
-    : raw.filter((c) => !c.resolved);
+  const filtered = flags.includeResolved ? raw : raw.filter((c) => !c.resolved);
 
   const truncateAt = flags.full ? Number.POSITIVE_INFINITY : BODY_TRUNCATE;
 

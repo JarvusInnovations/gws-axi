@@ -1,10 +1,5 @@
 import { calendarClient, translateGoogleError } from "../../google/client.js";
-import {
-  field,
-  mapEnum,
-  renderListResponse,
-  truncated,
-} from "../../output/index.js";
+import { field, mapEnum, renderListResponse, truncated } from "../../output/index.js";
 
 export const CALENDARS_HELP = `usage: gws-axi calendar calendars [flags]
 flags[2]:
@@ -34,17 +29,17 @@ function parseFlags(args: string[]): ParsedFlags {
     const arg = args[i];
     const next = args[i + 1];
     if (arg === "--fields" && next) {
-      flags.extraFields = next.split(",").map((s) => s.trim()).filter(Boolean);
+      flags.extraFields = next
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
       i++;
     }
   }
   return flags;
 }
 
-export async function calendarCalendarsCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function calendarCalendarsCommand(account: string, args: string[]): Promise<string> {
   const flags = parseFlags(args);
   const api = await calendarClient(account);
 
@@ -78,8 +73,7 @@ export async function calendarCalendarsCommand(
     ),
     {
       name: "primary",
-      extract: (item: Record<string, unknown>) =>
-        item.primary === true ? "✓" : "",
+      extract: (item: Record<string, unknown>) => (item.primary === true ? "✓" : ""),
     },
   ];
   for (const extra of flags.extraFields) {
@@ -97,18 +91,12 @@ export async function calendarCalendarsCommand(
     }
   }
 
-  const owned = items.filter(
-    (c) => c.accessRole === "owner" || c.primary === true,
-  ).length;
+  const owned = items.filter((c) => c.accessRole === "owner" || c.primary === true).length;
   const suggestions: string[] = [];
   if (items.length > 0) {
-    suggestions.push(
-      `Query a specific calendar: \`gws-axi calendar events --calendar <id>\``,
-    );
+    suggestions.push(`Query a specific calendar: \`gws-axi calendar events --calendar <id>\``);
     if (flags.extraFields.length === 0) {
-      suggestions.push(
-        `Add \`--fields timezone,description\` for more details`,
-      );
+      suggestions.push(`Add \`--fields timezone,description\` for more details`);
     }
   }
 

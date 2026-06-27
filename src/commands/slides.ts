@@ -2,10 +2,7 @@ import { AxiError } from "axi-sdk-js";
 import { resolveAccount } from "../google/account.js";
 import { GET_HELP, slidesGetCommand } from "./slides/get.js";
 import { PAGE_HELP, slidesPageCommand } from "./slides/page.js";
-import {
-  SUMMARIZE_HELP,
-  slidesSummarizeCommand,
-} from "./slides/summarize.js";
+import { SUMMARIZE_HELP, slidesSummarizeCommand } from "./slides/summarize.js";
 
 interface SlidesSubcommand {
   name: string;
@@ -95,11 +92,9 @@ export async function slidesCommand(args: string[]): Promise<string> {
   const sub = args[0];
   const def = SUB_BY_NAME[sub];
   if (!def) {
-    throw new AxiError(
-      `Unknown slides subcommand: ${sub}`,
-      "VALIDATION_ERROR",
-      [`Run \`gws-axi slides --help\` to see available subcommands`],
-    );
+    throw new AxiError(`Unknown slides subcommand: ${sub}`, "VALIDATION_ERROR", [
+      `Run \`gws-axi slides --help\` to see available subcommands`,
+    ]);
   }
 
   const rest = args.slice(1);
@@ -114,14 +109,10 @@ export async function slidesCommand(args: string[]): Promise<string> {
   });
 
   if (!def.handler) {
-    throw new AxiError(
-      `gws-axi slides ${sub} is not yet implemented`,
-      "NOT_IMPLEMENTED",
-      [
-        `Account resolution succeeded: would run as ${resolution.account}`,
-        `See \`gws-axi slides ${sub} --help\` for the planned surface`,
-      ],
-    );
+    throw new AxiError(`gws-axi slides ${sub} is not yet implemented`, "NOT_IMPLEMENTED", [
+      `Account resolution succeeded: would run as ${resolution.account}`,
+      `See \`gws-axi slides ${sub} --help\` for the planned surface`,
+    ]);
   }
 
   return def.handler(resolution.account, remaining);

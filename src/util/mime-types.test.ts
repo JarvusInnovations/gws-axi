@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  DEFAULT_MIME_TYPE,
-  detectMimeType,
-  googleConversionTarget,
-} from "./mime-types.js";
+import { DEFAULT_MIME_TYPE, detectMimeType, googleConversionTarget } from "./mime-types.js";
 
 describe("detectMimeType", () => {
   it("maps common office and document extensions", () => {
@@ -46,22 +42,14 @@ describe("googleConversionTarget", () => {
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       ),
     ).toBe("application/vnd.google-apps.document");
-    expect(googleConversionTarget("text/plain")).toBe(
-      "application/vnd.google-apps.document",
-    );
-    expect(googleConversionTarget("text/markdown")).toBe(
-      "application/vnd.google-apps.document",
-    );
+    expect(googleConversionTarget("text/plain")).toBe("application/vnd.google-apps.document");
+    expect(googleConversionTarget("text/markdown")).toBe("application/vnd.google-apps.document");
   });
 
   it("maps spreadsheet and delimited sources to Google Sheet", () => {
-    expect(googleConversionTarget("text/csv")).toBe(
-      "application/vnd.google-apps.spreadsheet",
-    );
+    expect(googleConversionTarget("text/csv")).toBe("application/vnd.google-apps.spreadsheet");
     expect(
-      googleConversionTarget(
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      ),
+      googleConversionTarget("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
     ).toBe("application/vnd.google-apps.spreadsheet");
   });
 
@@ -72,9 +60,7 @@ describe("googleConversionTarget", () => {
   });
 
   it("is case-insensitive on the source mime", () => {
-    expect(googleConversionTarget("TEXT/CSV")).toBe(
-      "application/vnd.google-apps.spreadsheet",
-    );
+    expect(googleConversionTarget("TEXT/CSV")).toBe("application/vnd.google-apps.spreadsheet");
   });
 
   it("returns null for unsupported source types", () => {

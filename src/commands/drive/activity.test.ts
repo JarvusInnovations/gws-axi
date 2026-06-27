@@ -53,18 +53,10 @@ describe("buildFilter", () => {
   });
 
   it("combines time bounds and action cases with AND", () => {
-    const f = parseFlags([
-      "x",
-      "--since",
-      "2026-01-01",
-      "--action",
-      "permission_change,delete",
-    ]);
+    const f = parseFlags(["x", "--since", "2026-01-01", "--action", "permission_change,delete"]);
     const filter = buildFilter(f);
     expect(filter).toContain('time >= "');
-    expect(filter).toContain(
-      "detail.action_detail_case:(PERMISSION_CHANGE DELETE)",
-    );
+    expect(filter).toContain("detail.action_detail_case:(PERMISSION_CHANGE DELETE)");
     expect(filter).toContain(" AND ");
   });
 });
@@ -93,9 +85,7 @@ describe("activity field extraction", () => {
 
   it("reports anonymous/deleted actors with a stable label", () => {
     expect(primaryActor({ actors: [{ anonymous: {} }] })).toBe("anonymous");
-    expect(
-      primaryActor({ actors: [{ user: { deletedUser: {} } }] }),
-    ).toBe("deleted-user");
+    expect(primaryActor({ actors: [{ user: { deletedUser: {} } }] })).toBe("deleted-user");
   });
 
   it("renders driveItem title with id when both present", () => {

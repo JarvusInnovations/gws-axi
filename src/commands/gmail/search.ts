@@ -1,15 +1,6 @@
 import type { gmail_v1 } from "googleapis";
-import {
-  gmailClient,
-  translateGoogleError,
-  withRateLimitRetry,
-} from "../../google/client.js";
-import {
-  field,
-  renderListResponse,
-  truncated,
-  type FieldDef,
-} from "../../output/index.js";
+import { gmailClient, translateGoogleError, withRateLimitRetry } from "../../google/client.js";
+import { field, renderListResponse, truncated, type FieldDef } from "../../output/index.js";
 import { isSystemLabel, resolveLabelId } from "./labels-shared.js";
 
 export const SEARCH_HELP = `usage: gws-axi gmail search [flags]
@@ -102,10 +93,7 @@ function effectiveQuery(flags: ParsedFlags): string {
   return "";
 }
 
-function getHeader(
-  headers: gmail_v1.Schema$MessagePartHeader[] | undefined,
-  name: string,
-): string {
+function getHeader(headers: gmail_v1.Schema$MessagePartHeader[] | undefined, name: string): string {
   if (!headers) return "";
   const lower = name.toLowerCase();
   for (const h of headers) {
@@ -132,15 +120,13 @@ async function fetchThreadSummary(
   labelNames: Map<string, string>,
 ): Promise<ThreadRow | null> {
   try {
-    const res = await withRateLimitRetry(
-      { account, operation: "gmail.threads.get" },
-      () =>
-        api.users.threads.get({
-          userId: "me",
-          id,
-          format: "metadata",
-          metadataHeaders: ["Subject", "From", "Date"],
-        }),
+    const res = await withRateLimitRetry({ account, operation: "gmail.threads.get" }, () =>
+      api.users.threads.get({
+        userId: "me",
+        id,
+        format: "metadata",
+        metadataHeaders: ["Subject", "From", "Date"],
+      }),
     );
     const thread = res.data;
     const messages = thread.messages ?? [];
@@ -196,26 +182,17 @@ async function fetchAllThreadSummaries(
   ids: string[],
   labelNames: Map<string, string>,
 ): Promise<ThreadRow[]> {
-  const results: Array<ThreadRow | null> = Array.from(
-    { length: ids.length },
-    () => null,
-  );
+  const results: Array<ThreadRow | null> = Array.from({ length: ids.length }, () => null);
   let nextIdx = 0;
   async function worker(): Promise<void> {
     while (true) {
       const idx = nextIdx++;
       if (idx >= ids.length) return;
-      results[idx] = await fetchThreadSummary(
-        api,
-        account,
-        ids[idx],
-        labelNames,
-      );
+      results[idx] = await fetchThreadSummary(api, account, ids[idx], labelNames);
     }
   }
-  const workers = Array.from(
-    { length: Math.min(THREAD_GET_CONCURRENCY, ids.length) },
-    () => worker(),
+  const workers = Array.from({ length: Math.min(THREAD_GET_CONCURRENCY, ids.length) }, () =>
+    worker(),
   );
   await Promise.all(workers);
   return results.filter((r): r is ThreadRow => r !== null);
@@ -252,10 +229,7 @@ function schema(): FieldDef[] {
   ];
 }
 
-export async function gmailSearchCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function gmailSearchCommand(account: string, args: string[]): Promise<string> {
   const flags = parseFlags(args);
   const api = await gmailClient(account);
   const query = effectiveQuery(flags);
@@ -333,15 +307,11 @@ export async function gmailSearchCommand(
       // Echo the full next-page command with the token filled in so the
       // agent can copy-paste or parse the exact invocation.
       const invocation = rebuildSearchInvocation(flags, threadsListed.nextPageToken);
-      suggestions.push(
-        `More matches available — paginate with \`${invocation}\``,
-      );
+      suggestions.push(`More matches available — paginate with \`${invocation}\``);
     }
   } else {
     if (flags.query || flags.inLabel) {
-      suggestions.push(
-        `No matches — broaden --query or drop --in to widen the search`,
-      );
+      suggestions.push(`No matches — broaden --query or drop --in to widen the search`);
     } else {
       suggestions.push(
         `Inbox is empty (or --query didn't match). Try \`gws-axi gmail search --query is:unread\` or check \`gws-axi gmail labels\``,

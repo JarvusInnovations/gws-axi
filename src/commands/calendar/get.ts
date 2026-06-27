@@ -1,13 +1,7 @@
 import { AxiError } from "axi-sdk-js";
 import type { calendar_v3 } from "googleapis";
 import { calendarClient, translateGoogleError } from "../../google/client.js";
-import {
-  field,
-  joinBlocks,
-  renderHelp,
-  renderList,
-  renderObject,
-} from "../../output/index.js";
+import { field, joinBlocks, renderHelp, renderList, renderObject } from "../../output/index.js";
 import { formatEventTime } from "./dateish.js";
 
 export const GET_HELP = `usage: gws-axi calendar get <event-id> [flags]
@@ -53,19 +47,18 @@ function parseFlags(args: string[]): { eventId: string; flags: ParsedFlags } {
     }
   }
   if (!eventId) {
-    throw new AxiError(
-      "Missing event ID argument",
-      "VALIDATION_ERROR",
-      [
-        "Usage: gws-axi calendar get <event-id>",
-        "Get an ID from `gws-axi calendar events`",
-      ],
-    );
+    throw new AxiError("Missing event ID argument", "VALIDATION_ERROR", [
+      "Usage: gws-axi calendar get <event-id>",
+      "Get an ID from `gws-axi calendar events`",
+    ]);
   }
   return { eventId, flags };
 }
 
-function truncate(value: string | undefined, max: number): { value: string; truncated: boolean; total: number } {
+function truncate(
+  value: string | undefined,
+  max: number,
+): { value: string; truncated: boolean; total: number } {
   if (!value) return { value: "", truncated: false, total: 0 };
   if (value.length <= max) return { value, truncated: false, total: value.length };
   return {
@@ -75,10 +68,7 @@ function truncate(value: string | undefined, max: number): { value: string; trun
   };
 }
 
-export async function calendarGetCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function calendarGetCommand(account: string, args: string[]): Promise<string> {
   const { eventId, flags } = parseFlags(args);
   const api = await calendarClient(account);
 
@@ -151,11 +141,7 @@ export async function calendarGetCommand(
   // the transcript / summary.
   const attachments = event.attachments ?? [];
   if (attachments.length > 0) {
-    const attachmentSchema = [
-      field("title"),
-      field("mime_type"),
-      field("file_id"),
-    ];
+    const attachmentSchema = [field("title"), field("mime_type"), field("file_id")];
     const rows = attachments.map((a) => ({
       title: a.title ?? "",
       mime_type: a.mimeType ?? "",
@@ -209,17 +195,13 @@ export async function calendarGetCommand(
     );
   }
   if (descResult.truncated || attendees.length > 20) {
-    suggestions.push(
-      `Run with --full to see complete description and all attendees`,
-    );
+    suggestions.push(`Run with --full to see complete description and all attendees`);
   }
   if (event.htmlLink) {
     suggestions.push(`Open in browser: ${event.htmlLink}`);
   }
   if (attachments.length > 0) {
-    const docs = attachments.filter(
-      (a) => a.mimeType === "application/vnd.google-apps.document",
-    );
+    const docs = attachments.filter((a) => a.mimeType === "application/vnd.google-apps.document");
     if (docs.length > 0) {
       // Gemini Notes are Google Docs; read directly with docs read.
       const first = docs[0];
@@ -227,9 +209,7 @@ export async function calendarGetCommand(
         `${docs.length} Google Doc${docs.length === 1 ? "" : "s"} attached (likely meeting notes / agendas) — read with \`gws-axi docs read ${first.fileId}\`${docs.length > 1 ? ` (or any other file_id from the attachments list)` : ""}`,
       );
     }
-    const others = attachments.filter(
-      (a) => a.mimeType !== "application/vnd.google-apps.document",
-    );
+    const others = attachments.filter((a) => a.mimeType !== "application/vnd.google-apps.document");
     if (others.length > 0) {
       suggestions.push(
         `${others.length} non-Doc attachment${others.length === 1 ? "" : "s"} — fetch with \`gws-axi docs download <file-id> [--out <path>]\``,

@@ -32,11 +32,7 @@ export async function resolveOutputPath(
   const sanitized = sanitizeFileName(baseName);
   if (!provided) return resolve(process.cwd(), sanitized);
   const absolute = resolve(process.cwd(), provided);
-  if (
-    provided.endsWith("/") ||
-    provided.endsWith("\\") ||
-    (await isDirectory(absolute))
-  ) {
+  if (provided.endsWith("/") || provided.endsWith("\\") || (await isDirectory(absolute))) {
     return join(absolute, sanitized);
   }
   return absolute;

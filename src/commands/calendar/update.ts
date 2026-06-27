@@ -52,15 +52,11 @@ function parseDurationMs(value: string): number {
   const re = /^(?:(\d+)h)?(?:(\d+)(?:m|min)?)?$/i;
   const m = value.trim().match(re);
   if (!m || (!m[1] && !m[2])) {
-    throw new AxiError(
-      `Cannot parse duration: ${value}`,
-      "VALIDATION_ERROR",
-      ["Use forms like 1h, 30m, 90m, or 1h30m"],
-    );
+    throw new AxiError(`Cannot parse duration: ${value}`, "VALIDATION_ERROR", [
+      "Use forms like 1h, 30m, 90m, or 1h30m",
+    ]);
   }
-  return (
-    (parseInt(m[1] ?? "0", 10) * 60 + parseInt(m[2] ?? "0", 10)) * 60 * 1000
-  );
+  return (parseInt(m[1] ?? "0", 10) * 60 + parseInt(m[2] ?? "0", 10)) * 60 * 1000;
 }
 
 function parseFlags(args: string[]): ParsedFlags {
@@ -77,38 +73,69 @@ function parseFlags(args: string[]): ParsedFlags {
     const arg = args[i];
     const next = args[i + 1];
     switch (arg) {
-      case "--summary": flags.summary = next; i++; break;
-      case "--start": flags.start = next; i++; break;
-      case "--end": flags.end = next; i++; break;
-      case "--duration": flags.duration = next; i++; break;
-      case "--description": flags.description = next; i++; break;
-      case "--location": flags.location = next; i++; break;
+      case "--summary":
+        flags.summary = next;
+        i++;
+        break;
+      case "--start":
+        flags.start = next;
+        i++;
+        break;
+      case "--end":
+        flags.end = next;
+        i++;
+        break;
+      case "--duration":
+        flags.duration = next;
+        i++;
+        break;
+      case "--description":
+        flags.description = next;
+        i++;
+        break;
+      case "--location":
+        flags.location = next;
+        i++;
+        break;
       case "--add-attendees":
-        flags.addAttendees = next.split(",").map((s) => s.trim()).filter(Boolean);
+        flags.addAttendees = next
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
         i++;
         break;
       case "--remove-attendees":
-        flags.removeAttendees = next.split(",").map((s) => s.trim()).filter(Boolean);
+        flags.removeAttendees = next
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
         i++;
         break;
       case "--replace-attendees":
-        flags.replaceAttendees = next.split(",").map((s) => s.trim()).filter(Boolean);
+        flags.replaceAttendees = next
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
         i++;
         break;
-      case "--timezone": flags.timezone = next; i++; break;
+      case "--timezone":
+        flags.timezone = next;
+        i++;
+        break;
       case "--send-updates":
         if (next === "all" || next === "externalOnly" || next === "none") {
           flags.sendUpdates = next;
         } else {
-          throw new AxiError(
-            `Invalid --send-updates value: ${next}`,
-            "VALIDATION_ERROR",
-            ["Valid values: none, all, externalOnly"],
-          );
+          throw new AxiError(`Invalid --send-updates value: ${next}`, "VALIDATION_ERROR", [
+            "Valid values: none, all, externalOnly",
+          ]);
         }
         i++;
         break;
-      case "--calendar": flags.calendar = next; i++; break;
+      case "--calendar":
+        flags.calendar = next;
+        i++;
+        break;
       default:
         if (!arg.startsWith("--") && eventId === undefined) {
           eventId = arg;
@@ -117,14 +144,10 @@ function parseFlags(args: string[]): ParsedFlags {
   }
 
   if (!eventId) {
-    throw new AxiError(
-      "Missing event ID argument",
-      "VALIDATION_ERROR",
-      [
-        "Usage: gws-axi calendar update <event-id> [flags]",
-        "Get an ID from `gws-axi calendar events`",
-      ],
-    );
+    throw new AxiError("Missing event ID argument", "VALIDATION_ERROR", [
+      "Usage: gws-axi calendar update <event-id> [flags]",
+      "Get an ID from `gws-axi calendar events`",
+    ]);
   }
 
   return { ...flags, eventId } as ParsedFlags;
@@ -220,10 +243,7 @@ function buildPatchBody(
   return body;
 }
 
-export async function calendarUpdateCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function calendarUpdateCommand(account: string, args: string[]): Promise<string> {
   const flags = parseFlags(args);
 
   // Sanity check: the user passed at least one mutating flag.
@@ -238,15 +258,11 @@ export async function calendarUpdateCommand(
     flags.removeAttendees.length > 0 ||
     flags.replaceAttendees !== undefined;
   if (!hasChanges) {
-    throw new AxiError(
-      "No update flags provided — nothing to change",
-      "VALIDATION_ERROR",
-      [
-        "Pass at least one of --summary, --start, --end, --duration,",
-        "--description, --location, --add-attendees, --remove-attendees,",
-        "or --replace-attendees",
-      ],
-    );
+    throw new AxiError("No update flags provided — nothing to change", "VALIDATION_ERROR", [
+      "Pass at least one of --summary, --start, --end, --duration,",
+      "--description, --location, --add-attendees, --remove-attendees,",
+      "or --replace-attendees",
+    ]);
   }
 
   const api = await calendarClient(account);
@@ -269,9 +285,7 @@ export async function calendarUpdateCommand(
       throw new AxiError(
         `Event '${flags.eventId}' not found in calendar '${flags.calendar}'`,
         "EVENT_NOT_FOUND",
-        [
-          `Verify the ID with \`gws-axi calendar events --calendar ${flags.calendar}\``,
-        ],
+        [`Verify the ID with \`gws-axi calendar events --calendar ${flags.calendar}\``],
       );
     }
     throw translated;

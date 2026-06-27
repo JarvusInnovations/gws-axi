@@ -115,10 +115,7 @@ describe("drive upload validateFlags", () => {
   });
 
   it("rejects stdin/--content without a --name", () => {
-    for (const src of [
-      { stdin: true },
-      { content: "# Hi" },
-    ] as const) {
+    for (const src of [{ stdin: true }, { content: "# Hi" }] as const) {
       try {
         validateFlags({ ...base, localPath: undefined, ...src });
         throw new Error("should have thrown");
@@ -139,8 +136,6 @@ describe("drive upload validateFlags", () => {
   });
 
   it("allows --convert combined with --update (target-type check happens at runtime)", () => {
-    expect(() =>
-      validateFlags({ ...base, convert: true, update: "1XyZ" }),
-    ).not.toThrow();
+    expect(() => validateFlags({ ...base, convert: true, update: "1XyZ" })).not.toThrow();
   });
 });

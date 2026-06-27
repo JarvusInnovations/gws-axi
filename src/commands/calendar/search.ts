@@ -89,7 +89,10 @@ function parseFlags(args: string[]): ParsedFlags {
         i++;
         break;
       case "--calendars":
-        flags.calendarFilter = next.split(",").map((s) => s.trim()).filter(Boolean);
+        flags.calendarFilter = next
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
         i++;
         break;
       case "--limit":
@@ -97,7 +100,10 @@ function parseFlags(args: string[]): ParsedFlags {
         i++;
         break;
       case "--fields":
-        flags.extraFields = next.split(",").map((s) => s.trim()).filter(Boolean);
+        flags.extraFields = next
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
         i++;
         break;
       case "--no-dedupe":
@@ -119,18 +125,14 @@ function baseSchema(): FieldDef[] {
     {
       name: "start",
       extract: (item) => {
-        const s = item.start as
-          | { dateTime?: string; date?: string }
-          | undefined;
+        const s = item.start as { dateTime?: string; date?: string } | undefined;
         return s?.dateTime ?? s?.date ?? "";
       },
     },
     {
       name: "end",
       extract: (item) => {
-        const e = item.end as
-          | { dateTime?: string; date?: string }
-          | undefined;
+        const e = item.end as { dateTime?: string; date?: string } | undefined;
         return e?.dateTime ?? e?.date ?? "";
       },
     },
@@ -148,10 +150,7 @@ function baseSchema(): FieldDef[] {
   ];
 }
 
-function schemaWithExtras(
-  extras: string[],
-  showSeenCount: boolean,
-): FieldDef[] {
+function schemaWithExtras(extras: string[], showSeenCount: boolean): FieldDef[] {
   const base = baseSchema();
   // Rename "_calendar" column to "calendar" for display — leading underscore
   // was just to avoid clashing with any Google-API field named "calendar"
@@ -214,20 +213,13 @@ function schemaWithExtras(
   return base;
 }
 
-export async function calendarSearchCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function calendarSearchCommand(account: string, args: string[]): Promise<string> {
   const flags = parseFlags(args);
   if (!flags.query) {
-    throw new AxiError(
-      "--query is required",
-      "VALIDATION_ERROR",
-      [
-        "Example: gws-axi calendar search --query 'standup'",
-        "For a time-range listing without search, use `gws-axi calendar events`",
-      ],
-    );
+    throw new AxiError("--query is required", "VALIDATION_ERROR", [
+      "Example: gws-axi calendar search --query 'standup'",
+      "For a time-range listing without search, use `gws-axi calendar events`",
+    ]);
   }
 
   const api = await calendarClient(account);
@@ -257,9 +249,7 @@ export async function calendarSearchCommand(
       const nonPrimary = all.filter((c) => c.primary !== true);
       const selected = flags.includeShared ? [...primaryOnly, ...nonPrimary] : primaryOnly;
       if (!flags.includeShared) skippedSharedCount = nonPrimary.length;
-      calendarIds = selected
-        .map((c) => c.id)
-        .filter((id): id is string => typeof id === "string");
+      calendarIds = selected.map((c) => c.id).filter((id): id is string => typeof id === "string");
     } catch (err) {
       throw translateGoogleError(err, {
         account,
@@ -269,11 +259,9 @@ export async function calendarSearchCommand(
   }
 
   if (calendarIds.length === 0) {
-    throw new AxiError(
-      "No calendars to search",
-      "NO_CALENDARS",
-      [`Run \`gws-axi calendar calendars --account ${account}\` to diagnose`],
-    );
+    throw new AxiError("No calendars to search", "NO_CALENDARS", [
+      `Run \`gws-axi calendar calendars --account ${account}\` to diagnose`,
+    ]);
   }
 
   interface CalendarResult {
@@ -301,8 +289,7 @@ export async function calendarSearchCommand(
         return {
           calendarId,
           items: [],
-          error:
-            err instanceof Error ? err.message.slice(0, 120) : String(err).slice(0, 120),
+          error: err instanceof Error ? err.message.slice(0, 120) : String(err).slice(0, 120),
         };
       }
     }),
@@ -356,9 +343,7 @@ export async function calendarSearchCommand(
 
   const erroredCalendars = results.filter((r) => r.error);
   const succeededCount = results.length - erroredCalendars.length;
-  const anyCalendarHitLimit = results.some(
-    (r) => r.items.length >= flags.limit,
-  );
+  const anyCalendarHitLimit = results.some((r) => r.items.length >= flags.limit);
 
   const header: Record<string, unknown> = {
     account,
@@ -395,14 +380,10 @@ export async function calendarSearchCommand(
       "Run `gws-axi calendar get <id> --calendar <calendar>` for full event details",
     );
     if (anyDuplicates && !flags.extraFields.includes("seen_on")) {
-      suggestions.push(
-        "Add `--fields seen_on` to see the full calendar list for shared events",
-      );
+      suggestions.push("Add `--fields seen_on` to see the full calendar list for shared events");
     }
     if (flags.extraFields.length === 0) {
-      suggestions.push(
-        "Add `--fields attendees,location,organizer` to enrich the output",
-      );
+      suggestions.push("Add `--fields attendees,location,organizer` to enrich the output");
     }
     if (anyCalendarHitLimit) {
       suggestions.push(
