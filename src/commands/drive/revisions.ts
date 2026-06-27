@@ -1,13 +1,7 @@
 import { AxiError } from "axi-sdk-js";
 import type { drive_v3 } from "googleapis";
 import { driveClient, translateGoogleError } from "../../google/client.js";
-import {
-  field,
-  joinBlocks,
-  renderHelp,
-  renderList,
-  renderObject,
-} from "../../output/index.js";
+import { field, joinBlocks, renderHelp, renderList, renderObject } from "../../output/index.js";
 
 export const REVISIONS_HELP = `usage: gws-axi drive revisions <fileId> [flags]
 args[1]:
@@ -78,9 +72,9 @@ export function isNative(mimeType: string): boolean {
 }
 
 /** Sort revisions newest-first by modifiedTime (API order is undocumented). */
-export function sortRevisionsNewestFirst<
-  T extends { modifiedTime?: string | null },
->(revisions: T[]): T[] {
+export function sortRevisionsNewestFirst<T extends { modifiedTime?: string | null }>(
+  revisions: T[],
+): T[] {
   return [...revisions].sort((a, b) => {
     const ta = Date.parse(a.modifiedTime ?? "") || 0;
     const tb = Date.parse(b.modifiedTime ?? "") || 0;
@@ -98,10 +92,7 @@ interface RevisionRow {
   published: boolean | "";
 }
 
-export async function driveRevisionsCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function driveRevisionsCommand(account: string, args: string[]): Promise<string> {
   const flags = parseFlags(args);
   const api = await driveClient(account);
 
@@ -203,13 +194,7 @@ export async function driveRevisionsCommand(
   if (rows.length === 0) {
     blocks.push(renderObject({ revisions: "0 revisions found" }));
   } else {
-    blocks.push(
-      renderList(
-        "revisions",
-        rows as unknown as Array<Record<string, unknown>>,
-        schema,
-      ),
-    );
+    blocks.push(renderList("revisions", rows as unknown as Array<Record<string, unknown>>, schema));
   }
 
   // Completeness disclosure for native files (API may omit older revisions).

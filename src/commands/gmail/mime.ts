@@ -75,10 +75,7 @@ export function parseMessage(msg: gmail_v1.Schema$Message): ParsedMessage {
   return { headers, body, attachments, inline_image_count: stats.inline_image_count };
 }
 
-function partHeader(
-  part: gmail_v1.Schema$MessagePart,
-  name: string,
-): string | undefined {
+function partHeader(part: gmail_v1.Schema$MessagePart, name: string): string | undefined {
   const lower = name.toLowerCase();
   for (const h of part.headers ?? []) {
     if (h.name?.toLowerCase() === lower) return h.value ?? undefined;
@@ -188,10 +185,7 @@ function parseCharset(contentType: string | undefined): BufferEncoding {
  * commas (e.g., "Doe, John" <j@example.com>) are handled correctly — a
  * naive split on `,` would produce four bogus addresses.
  */
-export function parseAddresses(
-  headers: Map<string, string>,
-  name: string,
-): ParsedAddress[] {
+export function parseAddresses(headers: Map<string, string>, name: string): ParsedAddress[] {
   const raw = headers.get(name.toLowerCase());
   if (!raw) return [];
   return addressparser(raw).map((a) => ({

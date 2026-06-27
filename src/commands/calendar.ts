@@ -79,11 +79,9 @@ export async function calendarCommand(args: string[]): Promise<string> {
   const sub = args[0];
   const def = SUB_BY_NAME[sub];
   if (!def) {
-    throw new AxiError(
-      `Unknown calendar subcommand: ${sub}`,
-      "VALIDATION_ERROR",
-      [`Run \`gws-axi calendar --help\` to see available subcommands`],
-    );
+    throw new AxiError(`Unknown calendar subcommand: ${sub}`, "VALIDATION_ERROR", [
+      `Run \`gws-axi calendar --help\` to see available subcommands`,
+    ]);
   }
 
   const rest = args.slice(1);
@@ -98,14 +96,10 @@ export async function calendarCommand(args: string[]): Promise<string> {
   });
 
   if (!def.handler) {
-    throw new AxiError(
-      `gws-axi calendar ${sub} is not yet implemented`,
-      "NOT_IMPLEMENTED",
-      [
-        `Account resolution succeeded: would run as ${resolution.account}`,
-        `See docs/design.md for the planned command surface`,
-      ],
-    );
+    throw new AxiError(`gws-axi calendar ${sub} is not yet implemented`, "NOT_IMPLEMENTED", [
+      `Account resolution succeeded: would run as ${resolution.account}`,
+      `See docs/design.md for the planned command surface`,
+    ]);
   }
 
   return def.handler(resolution.account, remaining);

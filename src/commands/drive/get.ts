@@ -29,11 +29,9 @@ function parseFlags(args: string[]): ParsedFlags {
     }
   }
   if (!fileId) {
-    throw new AxiError(
-      "Missing file ID argument",
-      "VALIDATION_ERROR",
-      ["Usage: gws-axi drive get <file-id>"],
-    );
+    throw new AxiError("Missing file ID argument", "VALIDATION_ERROR", [
+      "Usage: gws-axi drive get <file-id>",
+    ]);
   }
   return { fileId };
 }
@@ -41,10 +39,7 @@ function parseFlags(args: string[]): ParsedFlags {
 const GET_FIELDS =
   "id,name,mimeType,size,createdTime,modifiedTime,owners(emailAddress,displayName),parents,description,trashed,starred,shared,webViewLink,iconLink,sha256Checksum,fileExtension";
 
-export async function driveGetCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function driveGetCommand(account: string, args: string[]): Promise<string> {
   const flags = parseFlags(args);
   const api = await driveClient(account);
 
@@ -109,24 +104,16 @@ export async function driveGetCommand(
       `Run \`gws-axi drive ls ${file.id} --recursive\` to walk this folder's contents`,
     );
   } else if (file.mimeType === "application/vnd.google-apps.document") {
-    suggestions.push(
-      `Run \`gws-axi docs read ${file.id}\` to read this Doc as markdown`,
-    );
-    suggestions.push(
-      `Run \`gws-axi docs comments ${file.id}\` to see review comments`,
-    );
+    suggestions.push(`Run \`gws-axi docs read ${file.id}\` to read this Doc as markdown`);
+    suggestions.push(`Run \`gws-axi docs comments ${file.id}\` to see review comments`);
   } else if (isNative) {
     suggestions.push(
       `Native Google file — run \`gws-axi docs download ${file.id} --as <mime>\` to export (e.g. application/pdf, text/csv)`,
     );
   } else {
-    suggestions.push(
-      `Run \`gws-axi docs download ${file.id} --out <path>\` to fetch the raw file`,
-    );
+    suggestions.push(`Run \`gws-axi docs download ${file.id} --out <path>\` to fetch the raw file`);
   }
-  suggestions.push(
-    `Run \`gws-axi drive permissions ${file.id}\` to see who has access`,
-  );
+  suggestions.push(`Run \`gws-axi drive permissions ${file.id}\` to see who has access`);
   if (file.webViewLink) {
     suggestions.push(`Open in browser: ${file.webViewLink}`);
   }

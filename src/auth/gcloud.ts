@@ -35,10 +35,7 @@ function runGcloud(args: string[]): GcloudOutcome<string> {
         message: "gcloud CLI is not installed",
       };
     }
-    const stderr =
-      typeof e.stderr === "string"
-        ? e.stderr
-        : (e.stderr?.toString("utf-8") ?? "");
+    const stderr = typeof e.stderr === "string" ? e.stderr : (e.stderr?.toString("utf-8") ?? "");
     if (/you do not currently have an active account|please run.*auth login/i.test(stderr)) {
       return {
         ok: false,
@@ -49,7 +46,11 @@ function runGcloud(args: string[]): GcloudOutcome<string> {
     return {
       ok: false,
       code: "COMMAND_FAILED",
-      message: stderr.split("\n").filter((l) => l.trim()).slice(-1)[0] ?? "gcloud command failed",
+      message:
+        stderr
+          .split("\n")
+          .filter((l) => l.trim())
+          .slice(-1)[0] ?? "gcloud command failed",
     };
   }
 }
@@ -66,12 +67,7 @@ export function isGcloudInstalled(): boolean {
 }
 
 export function gcloudAccount(): GcloudOutcome<string> {
-  const result = runGcloud([
-    "auth",
-    "list",
-    "--filter=status:ACTIVE",
-    "--format=value(account)",
-  ]);
+  const result = runGcloud(["auth", "list", "--filter=status:ACTIVE", "--format=value(account)"]);
   if (!result.ok) return result;
   const account = result.value.trim();
   if (!account) {
@@ -85,12 +81,7 @@ export function gcloudAccount(): GcloudOutcome<string> {
 }
 
 export function listProjects(): GcloudOutcome<GcloudProject[]> {
-  const result = runGcloud([
-    "projects",
-    "list",
-    "--format=json",
-    "--limit=100",
-  ]);
+  const result = runGcloud(["projects", "list", "--format=json", "--limit=100"]);
   if (!result.ok) return result;
   try {
     const parsed = JSON.parse(result.value) as Array<{
@@ -135,23 +126,13 @@ export function createProject(
   }
 }
 
-export function enableApis(
-  projectId: string,
-  apis: string[],
-): GcloudOutcome<true> {
-  const result = runGcloud([
-    "services",
-    "enable",
-    ...apis,
-    `--project=${projectId}`,
-  ]);
+export function enableApis(projectId: string, apis: string[]): GcloudOutcome<true> {
+  const result = runGcloud(["services", "enable", ...apis, `--project=${projectId}`]);
   if (!result.ok) return result;
   return { ok: true, value: true };
 }
 
-export function listEnabledApis(
-  projectId: string,
-): GcloudOutcome<string[]> {
+export function listEnabledApis(projectId: string): GcloudOutcome<string[]> {
   const result = runGcloud([
     "services",
     "list",
@@ -162,6 +143,9 @@ export function listEnabledApis(
   if (!result.ok) return result;
   return {
     ok: true,
-    value: result.value.split("\n").map((l) => l.trim()).filter(Boolean),
+    value: result.value
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean),
   };
 }

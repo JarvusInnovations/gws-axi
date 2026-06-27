@@ -28,10 +28,7 @@ const STEP_LABELS: Record<SetupStepKey, string> = {
   tokens_obtained: "Run OAuth loopback flow to obtain tokens",
 };
 
-function linksForStep(
-  key: SetupStepKey,
-  projectId: string | undefined,
-): StepLink[] {
+function linksForStep(key: SetupStepKey, projectId: string | undefined): StepLink[] {
   switch (key) {
     case "gcp_project":
       return [
@@ -114,21 +111,20 @@ function readAccountRows(): AccountRow[] {
       isDefault: email === defaultAccount,
     };
     try {
-      const profile = JSON.parse(
-        readFileSync(profilePathForAccount(email), "utf-8"),
-      ) as { name?: string };
+      const profile = JSON.parse(readFileSync(profilePathForAccount(email), "utf-8")) as {
+        name?: string;
+      };
       row.name = profile.name;
     } catch {
       // no profile yet
     }
     try {
-      const tokens = JSON.parse(
-        readFileSync(tokensPathForAccount(email), "utf-8"),
-      ) as { obtained_at?: string; scope?: string };
+      const tokens = JSON.parse(readFileSync(tokensPathForAccount(email), "utf-8")) as {
+        obtained_at?: string;
+        scope?: string;
+      };
       row.obtainedAt = tokens.obtained_at;
-      row.scopeCount = tokens.scope
-        ? tokens.scope.split(" ").filter(Boolean).length
-        : 0;
+      row.scopeCount = tokens.scope ? tokens.scope.split(" ").filter(Boolean).length : 0;
     } catch {
       // no tokens file
     }
@@ -141,9 +137,7 @@ export function writeSetupHtml(options: SetupHtmlOptions = {}): string {
   const projectId = state.steps.gcp_project.project_id as string | undefined;
 
   const nextKey = SETUP_STEP_ORDER.find((k) => !state.steps[k].done);
-  const progress = SETUP_STEP_ORDER.filter(
-    (k) => state.steps[k].done,
-  ).length;
+  const progress = SETUP_STEP_ORDER.filter((k) => state.steps[k].done).length;
   const initialSetupDone = nextKey === undefined;
   const accounts = readAccountRows();
 
@@ -153,10 +147,7 @@ export function writeSetupHtml(options: SetupHtmlOptions = {}): string {
     const status = step.done ? "✓ done" : isNext ? "→ next" : "… pending";
     const statusClass = step.done ? "done" : isNext ? "next" : "pending";
     const links = linksForStep(key, projectId)
-      .map(
-        (l) =>
-          `<a href="${l.url}" target="_blank" rel="noopener">${l.label}</a>`,
-      )
+      .map((l) => `<a href="${l.url}" target="_blank" rel="noopener">${l.label}</a>`)
       .join(" · ");
     return `<tr class="${statusClass}">
       <td class="num">${idx + 1}</td>
@@ -170,21 +161,22 @@ export function writeSetupHtml(options: SetupHtmlOptions = {}): string {
   const nowLabel = now.toLocaleTimeString();
 
   const warnings = options.pendingAuth?.warnings;
-  const unverifiedBlock = warnings?.unverifiedApp === "always"
-    ? `<p class="warn-block">
+  const unverifiedBlock =
+    warnings?.unverifiedApp === "always"
+      ? `<p class="warn-block">
   <strong>⚠️ A "Google hasn't verified this app" screen will appear.</strong>
   To proceed, click <strong>Advanced</strong> (small link below the warning),
   then <strong>Go to &lt;app name&gt; (unsafe)</strong>. This is normal for
   unverified personal-use OAuth apps and does not indicate any actual risk.
 </p>`
-    : warnings?.unverifiedApp === "maybe"
-      ? `<p class="warn-block-soft">
+      : warnings?.unverifiedApp === "maybe"
+        ? `<p class="warn-block-soft">
   If a "Google hasn't verified this app" screen appears, click
   <strong>Advanced</strong> then <strong>Go to &lt;app name&gt; (unsafe)</strong>.
   Workspace admins may have trusted this app already, in which case you
   won't see the warning.
 </p>`
-      : "";
+        : "";
 
   const pendingAuthBlock = options.pendingAuth
     ? `<div class="pending-auth">
@@ -209,7 +201,7 @@ ${accounts
         <td>${a.name ?? "<em>—</em>"}</td>
         <td>${a.scopeCount}</td>
         <td>${a.obtainedAt ? new Date(a.obtainedAt).toLocaleString() : "<em>pending</em>"}</td>
-        <td>${a.isDefault ? "<span class=\"default-badge\">default</span>" : ""}</td>
+        <td>${a.isDefault ? '<span class="default-badge">default</span>' : ""}</td>
       </tr>`,
   )
   .join("\n")}
@@ -301,8 +293,9 @@ ${pendingAuthBlock}
 </div>
 ${accountsBlock}
 ${addAnotherBlock}
-${initialSetupDone
-  ? `<details class="steps"><summary>Show initial setup steps (all complete)</summary>
+${
+  initialSetupDone
+    ? `<details class="steps"><summary>Show initial setup steps (all complete)</summary>
 <table>
 <thead><tr><th>#</th><th>Status</th><th>Step</th><th>Console links</th></tr></thead>
 <tbody>
@@ -310,12 +303,13 @@ ${rows}
 </tbody>
 </table>
 </details>`
-  : `<table>
+    : `<table>
 <thead><tr><th>#</th><th>Status</th><th>Step</th><th>Console links</th></tr></thead>
 <tbody>
 ${rows}
 </tbody>
-</table>`}
+</table>`
+}
 <footer>
   ${footerText}
 </footer>

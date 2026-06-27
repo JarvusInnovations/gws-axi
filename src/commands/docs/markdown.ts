@@ -30,7 +30,10 @@ export function renderBodyAsMarkdown(
     parts.push(renderStructuralElement(element, ctx));
   }
   return {
-    markdown: parts.join("").replace(/\n{3,}/g, "\n\n").trim(),
+    markdown: parts
+      .join("")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim(),
     image_count: ctx.imageCount,
   };
 }
@@ -53,9 +56,7 @@ function renderStructuralElement(el: StructuralElement, ctx: RenderCtx): string 
 }
 
 function renderParagraph(para: Paragraph, ctx: RenderCtx): string {
-  const inline = (para.elements ?? [])
-    .map((pe) => renderParagraphElement(pe, ctx))
-    .join("");
+  const inline = (para.elements ?? []).map((pe) => renderParagraphElement(pe, ctx)).join("");
   const text = inline.replace(/\n+$/, "");
 
   const style = para.paragraphStyle?.namedStyleType ?? "NORMAL_TEXT";

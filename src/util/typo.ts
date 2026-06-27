@@ -7,8 +7,8 @@ export function editDistance(a: string, b: string): number {
   if (a === b) return 0;
   if (!a.length) return b.length;
   if (!b.length) return a.length;
-  const prev: number[] = new Array(b.length + 1);
-  const curr: number[] = new Array(b.length + 1);
+  const prev: number[] = Array.from({ length: b.length + 1 }, () => 0);
+  const curr: number[] = Array.from({ length: b.length + 1 }, () => 0);
   for (let j = 0; j <= b.length; j++) prev[j] = j;
   for (let i = 1; i <= a.length; i++) {
     curr[0] = i;

@@ -1,8 +1,4 @@
-import {
-  ADDITIONAL_SCOPE_INFO,
-  SERVICE_SCOPES,
-  type ServiceName,
-} from "../auth/scopes.js";
+import { ADDITIONAL_SCOPE_INFO, SERVICE_SCOPES, type ServiceName } from "../auth/scopes.js";
 import { getValidAccessToken, type StoredTokens } from "./tokens.js";
 
 export interface ProbeResult {
@@ -40,13 +36,8 @@ async function gfetch(
   return { status: res.status, body, text };
 }
 
-function classifyError(
-  service: ServiceName,
-  status: number,
-  body: unknown,
-): ProbeResult {
-  const err = (body as { error?: { message?: string; status?: string } } | null)
-    ?.error;
+function classifyError(service: ServiceName, status: number, body: unknown): ProbeResult {
+  const err = (body as { error?: { message?: string; status?: string } } | null)?.error;
   const message = err?.message ?? "";
   if (status === 401) {
     return {
@@ -173,10 +164,7 @@ async function probeDrive(ctx: ProbeContext): Promise<ProbeResult> {
  * document ID. Rely on scope presence + whether drive.about.get worked.
  * Caller should run probeDrive first and pass its status.
  */
-function probeDocs(
-  ctx: ProbeContext,
-  driveOk: boolean,
-): ProbeResult {
+function probeDocs(ctx: ProbeContext, driveOk: boolean): ProbeResult {
   const service: ServiceName = "docs";
   if (!hasScope(ctx.tokens, SERVICE_SCOPES.docs)) {
     return { service, status: "fail", detail: "scope not granted" };
@@ -195,10 +183,7 @@ function probeDocs(
  * Slides: same situation as docs — no cheap generic endpoint. Check scope
  * presence and rely on the drive probe as a proxy for auth health.
  */
-function probeSlides(
-  ctx: ProbeContext,
-  driveOk: boolean,
-): ProbeResult {
+function probeSlides(ctx: ProbeContext, driveOk: boolean): ProbeResult {
   const service: ServiceName = "slides";
   if (!hasScope(ctx.tokens, SERVICE_SCOPES.slides)) {
     return { service, status: "fail", detail: "scope not granted" };
@@ -252,13 +237,11 @@ export async function probeAccount(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     // token refresh failed — every service fails for this account
-    return (["gmail", "calendar", "docs", "drive", "slides"] as ServiceName[]).map(
-      (service) => ({
-        service,
-        status: "fail" as const,
-        detail: message,
-      }),
-    );
+    return (["gmail", "calendar", "docs", "drive", "slides"] as ServiceName[]).map((service) => ({
+      service,
+      status: "fail" as const,
+      detail: message,
+    }));
   }
 
   const ctx: ProbeContext = {
@@ -278,14 +261,7 @@ export async function probeAccount(
   const docs = probeDocs(ctx, driveOk);
   const slides = probeSlides(ctx, driveOk);
 
-  return [
-    gmail,
-    calendar,
-    docs,
-    drive,
-    slides,
-    ...probeAdditionalScopes(ctx),
-  ];
+  return [gmail, calendar, docs, drive, slides, ...probeAdditionalScopes(ctx)];
 }
 
 function errorResult(service: ServiceName, err: unknown): ProbeResult {

@@ -3,15 +3,9 @@ import { resolveAccount } from "../google/account.js";
 import { docsDownloadCommand } from "./docs/download.js";
 import { driveGetCommand, GET_HELP } from "./drive/get.js";
 import { driveLsCommand, LS_HELP } from "./drive/ls.js";
-import {
-  drivePermissionsCommand,
-  PERMISSIONS_HELP,
-} from "./drive/permissions.js";
+import { drivePermissionsCommand, PERMISSIONS_HELP } from "./drive/permissions.js";
 import { driveActivityCommand, ACTIVITY_HELP } from "./drive/activity.js";
-import {
-  driveRevisionsCommand,
-  REVISIONS_HELP,
-} from "./drive/revisions.js";
+import { driveRevisionsCommand, REVISIONS_HELP } from "./drive/revisions.js";
 import { driveSearchCommand, SEARCH_HELP } from "./drive/search.js";
 import { driveUploadCommand, UPLOAD_HELP } from "./drive/upload.js";
 import { driveMkdirCommand, MKDIR_HELP } from "./drive/mkdir.js";
@@ -172,11 +166,9 @@ export async function driveCommand(args: string[]): Promise<string> {
   const sub = args[0];
   const def = SUB_BY_NAME[sub];
   if (!def) {
-    throw new AxiError(
-      `Unknown drive subcommand: ${sub}`,
-      "VALIDATION_ERROR",
-      [`Run \`gws-axi drive --help\` to see available subcommands`],
-    );
+    throw new AxiError(`Unknown drive subcommand: ${sub}`, "VALIDATION_ERROR", [
+      `Run \`gws-axi drive --help\` to see available subcommands`,
+    ]);
   }
 
   const rest = args.slice(1);
@@ -191,14 +183,10 @@ export async function driveCommand(args: string[]): Promise<string> {
   });
 
   if (!def.handler) {
-    throw new AxiError(
-      `gws-axi drive ${sub} is not yet implemented`,
-      "NOT_IMPLEMENTED",
-      [
-        `Account resolution succeeded: would run as ${resolution.account}`,
-        `See \`gws-axi drive ${sub} --help\` for the planned surface`,
-      ],
-    );
+    throw new AxiError(`gws-axi drive ${sub} is not yet implemented`, "NOT_IMPLEMENTED", [
+      `Account resolution succeeded: would run as ${resolution.account}`,
+      `See \`gws-axi drive ${sub} --help\` for the planned surface`,
+    ]);
   }
 
   return def.handler(resolution.account, remaining);

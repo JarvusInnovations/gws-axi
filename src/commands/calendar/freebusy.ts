@@ -72,10 +72,7 @@ interface BusyRow {
   end: string;
 }
 
-export async function calendarFreebusyCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function calendarFreebusyCommand(account: string, args: string[]): Promise<string> {
   const flags = parseFlags(args);
   const api = await calendarClient(account);
 
@@ -158,16 +155,12 @@ export async function calendarFreebusyCommand(
   // Always render per-calendar coverage so agents can confirm each requested
   // calendar was actually reached. Distinguishes "free" from "errored".
   blocks.push(
-    renderList(
-      "coverage",
-      coverage as unknown as Array<Record<string, unknown>>,
-      [
-        { name: "calendar", extract: (r) => r.calendar },
-        { name: "status", extract: (r) => r.status },
-        { name: "busy_blocks", extract: (r) => r.busy_blocks },
-        { name: "detail", extract: (r) => r.detail },
-      ],
-    ),
+    renderList("coverage", coverage as unknown as Array<Record<string, unknown>>, [
+      { name: "calendar", extract: (r) => r.calendar },
+      { name: "status", extract: (r) => r.status },
+      { name: "busy_blocks", extract: (r) => r.busy_blocks },
+      { name: "detail", extract: (r) => r.detail },
+    ]),
   );
 
   if (rows.length === 0) {
@@ -198,9 +191,7 @@ export async function calendarFreebusyCommand(
     );
   }
   if (rows.length === 0 && erroredCount === 0) {
-    suggestions.push(
-      `Widen the time range with --from/--to to verify availability at other times`,
-    );
+    suggestions.push(`Widen the time range with --from/--to to verify availability at other times`);
   }
   if (erroredCount > 0) {
     suggestions.push(

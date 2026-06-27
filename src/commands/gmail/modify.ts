@@ -1,12 +1,7 @@
 import { AxiError } from "axi-sdk-js";
-import type { gmail_v1 } from "googleapis";
 import { gmailClient, translateGoogleError } from "../../google/client.js";
 import { joinBlocks, renderHelp, renderObject } from "../../output/index.js";
-import {
-  fetchLabels,
-  labelNamesFor,
-  resolveLabelIds,
-} from "./labels-shared.js";
+import { fetchLabels, labelNamesFor, resolveLabelIds } from "./labels-shared.js";
 
 export const MODIFY_HELP = `usage: gws-axi gmail modify <message-id> [--add-label <name>...] [--remove-label <name>...] [flags]
 args[1]:
@@ -76,10 +71,7 @@ function parseFlags(args: string[]): ParsedFlags {
   return flags;
 }
 
-export async function gmailModifyCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function gmailModifyCommand(account: string, args: string[]): Promise<string> {
   const flags = parseFlags(args);
   if (!flags.id) {
     throw new AxiError("Missing message ID argument", "VALIDATION_ERROR", [
@@ -146,8 +138,6 @@ export async function gmailModifyCommand(
 
   return joinBlocks(
     renderObject(result),
-    renderHelp([
-      `Verify with \`gws-axi gmail read ${flags.id}\``,
-    ]),
+    renderHelp([`Verify with \`gws-axi gmail read ${flags.id}\``]),
   );
 }

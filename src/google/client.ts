@@ -1,5 +1,12 @@
 import { AxiError } from "axi-sdk-js";
-import { google, type calendar_v3, type docs_v1, type drive_v3, type gmail_v1, type slides_v1 } from "googleapis";
+import {
+  google,
+  type calendar_v3,
+  type docs_v1,
+  type drive_v3,
+  type gmail_v1,
+  type slides_v1,
+} from "googleapis";
 import { OAuth2Client } from "google-auth-library";
 import { readSetupState } from "../config.js";
 import { getValidAccessToken } from "./tokens.js";
@@ -75,7 +82,7 @@ interface ExtractedError {
 function extractError(err: unknown): ExtractedError {
   const e = err as GoogleApiErrorShape;
   const apiError = e.response?.data?.error;
-  const code = apiError?.code ?? e.code ?? (e.response?.status ?? 0);
+  const code = apiError?.code ?? e.code ?? e.response?.status ?? 0;
   const message =
     apiError?.message ?? e.message ?? (err instanceof Error ? err.message : String(err));
   const reason = apiError?.errors?.[0]?.reason ?? e.errors?.[0]?.reason;
@@ -121,9 +128,7 @@ export function translateGoogleError(
       return new AxiError(
         `Insufficient scope for ${operation} — this account needs to re-consent`,
         "SCOPE_MISSING",
-        [
-          `Run \`gws-axi auth login --account ${account}\` to re-consent to the full scope set`,
-        ],
+        [`Run \`gws-axi auth login --account ${account}\` to re-consent to the full scope set`],
       );
     }
     if (
@@ -133,16 +138,10 @@ export function translateGoogleError(
       return new AxiError(
         `API not enabled in the GCP project backing this OAuth client`,
         "API_NOT_ENABLED",
-        [
-          "Re-run `gws-axi auth setup` — the step 2 API-enable flow will fix this",
-        ],
+        ["Re-run `gws-axi auth setup` — the step 2 API-enable flow will fix this"],
       );
     }
-    return new AxiError(
-      `Forbidden: ${message}`,
-      "FORBIDDEN",
-      reason ? [`Reason: ${reason}`] : [],
-    );
+    return new AxiError(`Forbidden: ${message}`, "FORBIDDEN", reason ? [`Reason: ${reason}`] : []);
   }
 
   if (code === 404 || status === "NOT_FOUND") {
@@ -158,11 +157,9 @@ export function translateGoogleError(
   }
 
   if (code === 429 || status === "RESOURCE_EXHAUSTED") {
-    return new AxiError(
-      `Rate limit exceeded for ${operation}`,
-      "RATE_LIMITED",
-      ["Retry after a short wait"],
-    );
+    return new AxiError(`Rate limit exceeded for ${operation}`, "RATE_LIMITED", [
+      "Retry after a short wait",
+    ]);
   }
 
   if (code >= 500) {

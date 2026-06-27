@@ -27,12 +27,7 @@ notes:
 `;
 
 type ResponseStatus = "accepted" | "tentative" | "declined" | "needsAction";
-const VALID_RESPONSES: ResponseStatus[] = [
-  "accepted",
-  "tentative",
-  "declined",
-  "needsAction",
-];
+const VALID_RESPONSES: ResponseStatus[] = ["accepted", "tentative", "declined", "needsAction"];
 
 interface ParsedFlags {
   eventId: string;
@@ -55,11 +50,9 @@ function parseFlags(args: string[]): ParsedFlags {
     switch (arg) {
       case "--response":
         if (!VALID_RESPONSES.includes(next as ResponseStatus)) {
-          throw new AxiError(
-            `Invalid --response value: ${next}`,
-            "VALIDATION_ERROR",
-            [`Valid values: ${VALID_RESPONSES.join(", ")}`],
-          );
+          throw new AxiError(`Invalid --response value: ${next}`, "VALIDATION_ERROR", [
+            `Valid values: ${VALID_RESPONSES.join(", ")}`,
+          ]);
         }
         response = next as ResponseStatus;
         i++;
@@ -76,11 +69,9 @@ function parseFlags(args: string[]): ParsedFlags {
         if (next === "all" || next === "externalOnly" || next === "none") {
           sendUpdates = next;
         } else {
-          throw new AxiError(
-            `Invalid --send-updates value: ${next}`,
-            "VALIDATION_ERROR",
-            ["Valid values: none, all, externalOnly"],
-          );
+          throw new AxiError(`Invalid --send-updates value: ${next}`, "VALIDATION_ERROR", [
+            "Valid values: none, all, externalOnly",
+          ]);
         }
         i++;
         break;
@@ -92,26 +83,19 @@ function parseFlags(args: string[]): ParsedFlags {
   }
 
   if (!eventId) {
-    throw new AxiError(
-      "Missing event ID argument",
-      "VALIDATION_ERROR",
-      ["Usage: gws-axi calendar respond <event-id> --response <status>"],
-    );
+    throw new AxiError("Missing event ID argument", "VALIDATION_ERROR", [
+      "Usage: gws-axi calendar respond <event-id> --response <status>",
+    ]);
   }
   if (!response) {
-    throw new AxiError(
-      "--response is required",
-      "VALIDATION_ERROR",
-      [`Valid values: ${VALID_RESPONSES.join(", ")}`],
-    );
+    throw new AxiError("--response is required", "VALIDATION_ERROR", [
+      `Valid values: ${VALID_RESPONSES.join(", ")}`,
+    ]);
   }
   return { eventId, response, comment, calendar, sendUpdates };
 }
 
-export async function calendarRespondCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function calendarRespondCommand(account: string, args: string[]): Promise<string> {
   const flags = parseFlags(args);
   const api = await calendarClient(account);
 
@@ -133,9 +117,7 @@ export async function calendarRespondCommand(
       throw new AxiError(
         `Event '${flags.eventId}' not found in calendar '${flags.calendar}'`,
         "EVENT_NOT_FOUND",
-        [
-          `Verify the ID with \`gws-axi calendar events --calendar ${flags.calendar}\``,
-        ],
+        [`Verify the ID with \`gws-axi calendar events --calendar ${flags.calendar}\``],
       );
     }
     throw translated;
@@ -146,9 +128,7 @@ export async function calendarRespondCommand(
     throw new AxiError(
       `Event '${flags.eventId}' has no attendees — you can't RSVP to it`,
       "NOT_AN_INVITEE",
-      [
-        "If this is your own single-person event, use `calendar update` to change it directly",
-      ],
+      ["If this is your own single-person event, use `calendar update` to change it directly"],
     );
   }
 
@@ -200,8 +180,6 @@ export async function calendarRespondCommand(
     previous_response: previousResponse,
     new_response: flags.response,
     send_updates: flags.sendUpdates,
-    help: [
-      `Run \`gws-axi calendar get ${flags.eventId} --calendar ${flags.calendar}\` to verify`,
-    ],
+    help: [`Run \`gws-axi calendar get ${flags.eventId} --calendar ${flags.calendar}\` to verify`],
   });
 }

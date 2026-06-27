@@ -3,17 +3,9 @@ import { dirname } from "node:path";
 import { AxiError } from "axi-sdk-js";
 import type { slides_v1 } from "googleapis";
 import { slidesClient, translateGoogleError } from "../../google/client.js";
-import {
-  joinBlocks,
-  renderHelp,
-  renderObject,
-} from "../../output/index.js";
+import { joinBlocks, renderHelp, renderObject } from "../../output/index.js";
 import { resolveOutputPath } from "../../util/paths.js";
-import {
-  extractSlideContent,
-  isSlidePage,
-  type SlideContent,
-} from "./text.js";
+import { extractSlideContent, isSlidePage, type SlideContent } from "./text.js";
 
 export const SUMMARIZE_HELP = `usage: gws-axi slides summarize <presentation-id> [flags]
 args[1]:
@@ -66,11 +58,9 @@ function parseFlags(args: string[]): ParsedFlags {
     }
   }
   if (!presentationId) {
-    throw new AxiError(
-      "Missing presentationId argument",
-      "VALIDATION_ERROR",
-      ["Usage: gws-axi slides summarize <presentation-id>"],
-    );
+    throw new AxiError("Missing presentationId argument", "VALIDATION_ERROR", [
+      "Usage: gws-axi slides summarize <presentation-id>",
+    ]);
   }
   if (out) full = true;
   return { presentationId, full, out };
@@ -107,10 +97,7 @@ function renderDeckAsMarkdown(
   return lines.join("\n");
 }
 
-export async function slidesSummarizeCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function slidesSummarizeCommand(account: string, args: string[]): Promise<string> {
   const flags = parseFlags(args);
   const api = await slidesClient(account);
 

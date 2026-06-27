@@ -1,9 +1,6 @@
 import { AxiError } from "axi-sdk-js";
 import type { drive_v3 } from "googleapis";
-import {
-  oauthClientForAccount,
-  translateGoogleError,
-} from "../../google/client.js";
+import { oauthClientForAccount, translateGoogleError } from "../../google/client.js";
 import { sortRevisionsNewestFirst } from "../drive/revisions.js";
 
 /**
@@ -93,9 +90,7 @@ export async function fetchNativeRevisionExport(
       throw new AxiError(
         `Revision '${revisionId}' not found on file '${fileId}'`,
         "REVISION_NOT_FOUND",
-        [
-          `List valid revisions with \`gws-axi drive revisions ${fileId}\``,
-        ],
+        [`List valid revisions with \`gws-axi drive revisions ${fileId}\``],
       );
     }
     throw translated;
@@ -110,8 +105,7 @@ export async function fetchNativeRevisionExport(
   // isn't available is an error the caller must resolve.
   if (!url && !as) {
     const fallback = links["text/plain"] ?? Object.values(links)[0];
-    const fallbackMime =
-      Object.keys(links).find((k) => links[k] === fallback) ?? "";
+    const fallbackMime = Object.keys(links).find((k) => links[k] === fallback) ?? "";
     if (fallback) {
       chosen = fallbackMime;
       url = fallback;
@@ -138,9 +132,7 @@ export async function fetchNativeRevisionExport(
     throw new AxiError(
       `Failed to export revision ${revisionId} as ${chosen} (HTTP ${resp.status})`,
       "REVISION_CONTENT_UNAVAILABLE",
-      [
-        `List valid revisions with \`gws-axi drive revisions ${fileId}\``,
-      ],
+      [`List valid revisions with \`gws-axi drive revisions ${fileId}\``],
     );
   }
   return {

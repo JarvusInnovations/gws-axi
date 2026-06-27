@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AxiError } from "axi-sdk-js";
-import {
-  isNative,
-  parseFlags,
-  sortRevisionsNewestFirst,
-} from "./revisions.js";
+import { isNative, parseFlags, sortRevisionsNewestFirst } from "./revisions.js";
 
 describe("drive revisions parseFlags", () => {
   it("parses a bare fileId with defaults", () => {

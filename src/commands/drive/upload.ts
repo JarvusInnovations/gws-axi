@@ -6,10 +6,7 @@ import { AxiError } from "axi-sdk-js";
 import type { drive_v3 } from "googleapis";
 import { driveClient, translateGoogleError } from "../../google/client.js";
 import { joinBlocks, renderHelp, renderObject } from "../../output/index.js";
-import {
-  detectMimeType,
-  googleConversionTarget,
-} from "../../util/mime-types.js";
+import { detectMimeType, googleConversionTarget } from "../../util/mime-types.js";
 
 export const UPLOAD_HELP = `usage: gws-axi drive upload <source> [flags]
 args[1]:
@@ -129,14 +126,10 @@ export function validateFlags(flags: ParsedFlags): void {
     ]);
   }
   if (sourceCount > 1) {
-    throw new AxiError(
-      "Provide exactly one content source",
-      "VALIDATION_ERROR",
-      [
-        "A local path, `-` (stdin), and --content are mutually exclusive",
-        "Pick one source",
-      ],
-    );
+    throw new AxiError("Provide exactly one content source", "VALIDATION_ERROR", [
+      "A local path, `-` (stdin), and --content are mutually exclusive",
+      "Pick one source",
+    ]);
   }
   // stdin / --content have no filename to infer a name (or mime) from.
   if ((flags.stdin || flags.content !== undefined) && !flags.name) {
@@ -150,24 +143,17 @@ export function validateFlags(flags: ParsedFlags): void {
     );
   }
   if (flags.update && flags.parent) {
-    throw new AxiError(
-      "--parent cannot be combined with --update",
-      "VALIDATION_ERROR",
-      [
-        "--update replaces a file's content in place; moving folders is not supported here",
-        "Drop --parent, or upload as a new file (omit --update) to place it in a folder",
-      ],
-    );
+    throw new AxiError("--parent cannot be combined with --update", "VALIDATION_ERROR", [
+      "--update replaces a file's content in place; moving folders is not supported here",
+      "Drop --parent, or upload as a new file (omit --update) to place it in a folder",
+    ]);
   }
   // --convert + --update is allowed, but only against a target that's already
   // the matching native type. That check needs the target's mimeType (a
   // files.get), so it lives in the command, not in this pure validator.
 }
 
-export async function driveUploadCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function driveUploadCommand(account: string, args: string[]): Promise<string> {
   const flags = parseFlags(args);
   validateFlags(flags);
 
@@ -192,11 +178,9 @@ export async function driveUploadCommand(
     try {
       fileStat = await stat(absolutePath);
     } catch {
-      throw new AxiError(
-        `Local file not found: ${flags.localPath}`,
-        "LOCAL_FILE_NOT_FOUND",
-        ["Check the path; it must be a readable file on this machine"],
-      );
+      throw new AxiError(`Local file not found: ${flags.localPath}`, "LOCAL_FILE_NOT_FOUND", [
+        "Check the path; it must be a readable file on this machine",
+      ]);
     }
     if (fileStat.isDirectory()) {
       throw new AxiError(
@@ -341,9 +325,7 @@ export async function driveUploadCommand(
   if (file.webViewLink) details.web_view_link = file.webViewLink;
 
   const blocks: string[] = [];
-  blocks.push(
-    renderObject({ action: updating ? "updated" : "created", account }),
-  );
+  blocks.push(renderObject({ action: updating ? "updated" : "created", account }));
   blocks.push(renderObject({ file: details }));
 
   const suggestions: string[] = [];
@@ -356,14 +338,10 @@ export async function driveUploadCommand(
       `Native Google file — run \`gws-axi docs download ${id} --as <mime>\` to export it`,
     );
   } else {
-    suggestions.push(
-      `Run \`gws-axi docs download ${id} --out <path>\` to fetch the bytes back`,
-    );
+    suggestions.push(`Run \`gws-axi docs download ${id} --out <path>\` to fetch the bytes back`);
   }
   suggestions.push(`Run \`gws-axi drive get ${id}\` for full metadata`);
-  suggestions.push(
-    `Run \`gws-axi drive permissions ${id}\` to see / change who has access`,
-  );
+  suggestions.push(`Run \`gws-axi drive permissions ${id}\` to see / change who has access`);
   if (!updating) {
     suggestions.push(
       `Re-running creates another copy — pass \`--update ${id}\` to replace this file's content instead`,

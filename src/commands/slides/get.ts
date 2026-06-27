@@ -40,11 +40,9 @@ function parseFlags(args: string[]): ParsedFlags {
     }
   }
   if (!presentationId) {
-    throw new AxiError(
-      "Missing presentationId argument",
-      "VALIDATION_ERROR",
-      ["Usage: gws-axi slides get <presentation-id>"],
-    );
+    throw new AxiError("Missing presentationId argument", "VALIDATION_ERROR", [
+      "Usage: gws-axi slides get <presentation-id>",
+    ]);
   }
   return { presentationId };
 }
@@ -53,10 +51,7 @@ function slideRowSchema(): FieldDef[] {
   return [field("index"), field("page_id"), field("title")];
 }
 
-export async function slidesGetCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function slidesGetCommand(account: string, args: string[]): Promise<string> {
   const flags = parseFlags(args);
   const api = await slidesClient(account);
 
@@ -102,9 +97,7 @@ export async function slidesGetCommand(
         id: presentation.presentationId ?? flags.presentationId,
         title: presentation.title ?? "",
         slide_count: slides.length,
-        ...(presentation.revisionId
-          ? { revision_id: presentation.revisionId }
-          : {}),
+        ...(presentation.revisionId ? { revision_id: presentation.revisionId } : {}),
       },
     }),
   );
