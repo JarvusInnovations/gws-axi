@@ -29,7 +29,7 @@ export function parseRecipients(value: string): string[] {
  * on the wire.
  */
 function encodeHeaderValue(value: string): string {
-  if (/^[\x00-\x7F]*$/.test(value)) return value;
+  if ([...value].every((ch) => (ch.codePointAt(0) ?? 0) <= 0x7f)) return value;
   return `=?UTF-8?B?${Buffer.from(value, "utf8").toString("base64")}?=`;
 }
 

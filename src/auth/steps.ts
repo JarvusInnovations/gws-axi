@@ -2,7 +2,6 @@ import { copyFileSync, existsSync, readFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import {
   credentialsPath,
-  readSetupState,
   type SetupState,
   type SetupStepKey,
 } from "../config.js";

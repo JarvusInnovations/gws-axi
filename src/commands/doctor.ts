@@ -271,7 +271,6 @@ export async function doctorCommand(
 
   const help: string[] = [];
   const setupFailing = setupRows.some((r) => r.status === "fail");
-  const runtimeFailing = runtimeRows.some((r) => r.status === "fail");
   const tokenFailures = runtimeRows.filter(
     (r) => r.status === "fail" && /401|revoked|refresh/i.test(r.detail),
   );

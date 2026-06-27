@@ -17,7 +17,6 @@ import {
   readSetupState,
   setDefaultAccount,
   tokensPathForAccount,
-  getDefaultAccount,
 } from "../config.js";
 import { markStepDone } from "./state.js";
 import { predictUnverifiedAppWarning } from "./health.js";

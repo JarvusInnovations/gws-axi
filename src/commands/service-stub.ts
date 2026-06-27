@@ -1,8 +1,5 @@
 import { AxiError } from "axi-sdk-js";
-import {
-  accountHeaderFields,
-  resolveAccount,
-} from "../google/account.js";
+import { resolveAccount } from "../google/account.js";
 
 export interface ServiceSubcommand {
   name: string;

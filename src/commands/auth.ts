@@ -35,7 +35,6 @@ import {
   awaitPendingAuth,
   preparePendingAuth,
 } from "../auth/loopback.js";
-import { readPendingAuth } from "../auth/pending.js";
 import { setupHtmlPath, writeSetupHtml } from "../auth/setup-html.js";
 import {
   predictUnverifiedAppWarning,

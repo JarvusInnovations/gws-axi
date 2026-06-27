@@ -196,7 +196,10 @@ async function fetchAllThreadSummaries(
   ids: string[],
   labelNames: Map<string, string>,
 ): Promise<ThreadRow[]> {
-  const results: Array<ThreadRow | null> = new Array(ids.length).fill(null);
+  const results: Array<ThreadRow | null> = Array.from(
+    { length: ids.length },
+    () => null,
+  );
   let nextIdx = 0;
   async function worker(): Promise<void> {
     while (true) {

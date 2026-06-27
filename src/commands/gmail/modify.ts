@@ -1,5 +1,4 @@
 import { AxiError } from "axi-sdk-js";
-import type { gmail_v1 } from "googleapis";
 import { gmailClient, translateGoogleError } from "../../google/client.js";
 import { joinBlocks, renderHelp, renderObject } from "../../output/index.js";
 import {
