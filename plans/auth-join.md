@@ -1,10 +1,10 @@
 ---
-status: in-progress
+status: done
 depends: []
 specs:
   - specs/commands/auth-join.md
 issues: []
-pr:
+pr: 35
 ---
 
 # Plan: auth join — onboard onto a shared OAuth client
@@ -77,8 +77,20 @@ server-side probing of APIs or publish status, multi-client management.
 
 ## Notes
 
-(Closeout.)
+- Shipped in PR #35.
+- `parseDesktopCredentials()` landed in `src/auth/steps.ts` and now backs three
+  call sites (join, `credentials_saved`, the `oauth_client` auto-confirm) — the
+  inline duplicate in `runSetup` was removed.
+- Settled `--published` as opt-in per the local principle "Publish status is
+  asserted, not detected" — join can't see server-side publish state, so it never
+  guesses. The distributor bakes `--published` into the paste-command.
+- Verified live with the built binary: join from a `~/Downloads`-style path →
+  `status: joined`, 6/7 steps `via: "team-join"`, credentials copied into the
+  config dir, `auth status` → `incomplete (6/7) next_step: tokens_obtained`.
+- Team onboarding note drafted at `.scratch/team-onboarding-note.md` (vault
+  artifact, intentionally not committed).
 
 ## Follow-ups
 
-(Closeout.)
+- **None.** Server-side probing of APIs / publish status is deliberately out of
+  scope (join marks the shared steps by assertion, not detection).
