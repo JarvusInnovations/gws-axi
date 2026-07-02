@@ -14,7 +14,7 @@ Read coverage is complete across all six services; write coverage is rolling out
 | **Gmail** | ✅ search · read · labels · download | ✅ triage · draft · labels · filters &nbsp;·&nbsp; ✋ `send` out of scope |
 | **Docs** | ✅ read · find · comments · download · revisions · diff | 🚧 append · insert-text · delete-range |
 | **Drive** | ✅ ls · get · search · permissions · download · revisions · activity | 🟡 upload · mkdir &nbsp;·&nbsp; 🚧 create · copy · move · rename · delete |
-| **Slides** | ✅ get · page · summarize | 🚧 create · update |
+| **Slides** | ✅ get · page · summarize · comments | 🚧 create · update |
 | **Sheets** | ✅ read · comments | 🚧 update · append · clear · create · add-tab |
 
 <sub>✅ shipped · 🟡 partial · 🚧 planned · ✋ out of scope by design</sub>
@@ -242,7 +242,10 @@ gws-axi drive upload ./edited.md --convert --update <docId> --account you@exampl
 gws-axi slides get <presentationId>               # deck metadata + slide list
 gws-axi slides page <presentationId> <slideId>    # one slide's content
 gws-axi slides summarize <presentationId>         # all slides condensed to text per slide
+gws-axi slides comments <presentationId>          # review comments (Drive comments)
 ```
+
+<sub>Embedded hyperlinks in slide text resolve inline as markdown `[text](url)` (with `links_resolved: N` in the header); images/videos are counted, not inlined.</sub>
 
 ### Sheets
 
