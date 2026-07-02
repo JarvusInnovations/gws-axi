@@ -1,8 +1,34 @@
 import { AxiError } from "axi-sdk-js";
 import { resolveAccount } from "../google/account.js";
+import { docsCommentsCommand } from "./docs/comments.js";
 import { GET_HELP, slidesGetCommand } from "./slides/get.js";
 import { PAGE_HELP, slidesPageCommand } from "./slides/page.js";
 import { SUMMARIZE_HELP, slidesSummarizeCommand } from "./slides/summarize.js";
+
+// Slides comments are Drive comments — the same file-agnostic API `docs
+// comments` / `sheets comments` use. Alias the shared handler with a
+// presentation-worded resource label + not-found code.
+const COMMENTS_HELP = `usage: gws-axi slides comments <presentation-id> [--include-resolved] [flags]
+args[1]:
+  <presentation-id>    The Slides presentation ID (the portion of the URL after /d/)
+flags[2]:
+  --include-resolved   Include resolved comment threads (hidden by default)
+  --account <email>    Account override when 2+ are configured
+examples:
+  gws-axi slides comments 1AbC...
+output:
+  A \`comments[N]{id,author,created,resolved,quoted_content,body,reply_count}\`
+  table plus a \`replies[N]{comment,author,created,body}\` block.
+notes:
+  Slides comments are Drive comments (file-type-agnostic); this is the same
+  data as \`gws-axi docs comments\` / \`gws-axi sheets comments\`.
+`;
+
+const slidesCommentsCommand = (account: string, args: string[]): Promise<string> =>
+  docsCommentsCommand(account, args, {
+    resource: "presentation",
+    notFoundCode: "PRESENTATION_NOT_FOUND",
+  });
 
 interface SlidesSubcommand {
   name: string;
@@ -35,6 +61,7 @@ const SUBCOMMANDS: SlidesSubcommand[] = [
     help: SUMMARIZE_HELP,
     handler: slidesSummarizeCommand,
   },
+  { name: "comments", mutation: false, help: COMMENTS_HELP, handler: slidesCommentsCommand },
   { name: "create", mutation: true, help: CREATE_HELP },
   { name: "update", mutation: true, help: UPDATE_HELP },
 ];
@@ -78,10 +105,12 @@ subcommand help:
   gws-axi slides get --help        for metadata + slide list
   gws-axi slides page --help       for a single slide's content
   gws-axi slides summarize --help  for the whole deck as markdown
+  gws-axi slides comments --help   for review comments (Drive comments)
 examples:
   gws-axi slides get 1AbC...
   gws-axi slides summarize 1AbC...
   gws-axi slides page 1AbC... gd87cbcb3a4_0_42
+  gws-axi slides comments 1AbC...
 `;
 
 export async function slidesCommand(args: string[]): Promise<string> {

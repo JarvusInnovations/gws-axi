@@ -18,9 +18,10 @@ output:
   body is a single text block joining every shape's/table's visible
   text on the slide in document order.
 notes:
-  For the full deck use \`slides summarize\`. \`page\` is for one-slide
-  reads when the agent already knows which slide it wants (e.g., from
-  prior context or a slide-by-slide walk).
+  Embedded hyperlinks in the body resolve inline as markdown \`[text](url)\`
+  (links_resolved: N in the header). For the full deck use
+  \`slides summarize\`. \`page\` is for one-slide reads when the agent
+  already knows which slide it wants (e.g., a slide-by-slide walk).
 `;
 
 interface ParsedFlags {
@@ -97,6 +98,7 @@ export async function slidesPageCommand(account: string, args: string[]): Promis
         ...(content.image_count > 0 ? { image_count: content.image_count } : {}),
         ...(content.table_count > 0 ? { table_count: content.table_count } : {}),
         ...(content.has_video ? { has_video: true } : {}),
+        ...(content.link_count > 0 ? { links_resolved: content.link_count } : {}),
       },
     }),
   );
@@ -111,6 +113,11 @@ export async function slidesPageCommand(account: string, args: string[]): Promis
   if (content.image_count > 0 || content.has_video) {
     suggestions.push(
       `This slide has visual content (${content.image_count > 0 ? `${content.image_count} image${content.image_count === 1 ? "" : "s"}` : ""}${content.image_count > 0 && content.has_video ? ", " : ""}${content.has_video ? "a video" : ""}) — only text content is rendered here`,
+    );
+  }
+  if (content.link_count > 0) {
+    suggestions.push(
+      `${content.link_count} embedded link${content.link_count === 1 ? "" : "s"} resolved inline as markdown \`[text](url)\` in the body`,
     );
   }
   if (targetIndex < slidePages.length - 1) {
