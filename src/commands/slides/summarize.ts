@@ -26,6 +26,10 @@ output:
   section per slide with body + speaker notes) — or a \`saved\` path
   when --out is set. Same truncation pattern as \`docs read\`: default
   8000-char cap with --full / --out as escape hatches.
+notes:
+  Embedded hyperlinks are resolved inline as markdown \`[text](url)\`
+  (links_resolved: N in the header). For review comments use
+  \`gws-axi slides comments <id>\`.
 `;
 
 const DEFAULT_TRUNCATE_CHARS = 8000;
@@ -129,6 +133,7 @@ export async function slidesSummarizeCommand(account: string, args: string[]): P
   const slides = slidePages.map((s, i) => extractSlideContent(s, i));
   const markdown = renderDeckAsMarkdown(presentation, slides);
   const total = markdown.length;
+  const totalLinks = slides.reduce((a, s) => a + s.link_count, 0);
 
   const blocks: string[] = [];
   blocks.push(renderObject({ account }));
@@ -138,6 +143,7 @@ export async function slidesSummarizeCommand(account: string, args: string[]): P
         id: presentation.presentationId ?? flags.presentationId,
         title: presentation.title ?? "",
         slide_count: slides.length,
+        ...(totalLinks > 0 ? { links_resolved: totalLinks } : {}),
       },
     }),
   );
@@ -181,6 +187,12 @@ export async function slidesSummarizeCommand(account: string, args: string[]): P
       `${totalTables} table${totalTables === 1 ? "" : "s"} rendered as pipe-delimited rows (best-effort — Slides tables are layout-heavy)`,
     );
   }
+  if (totalLinks > 0) {
+    suggestions.push(
+      `${totalLinks} embedded link${totalLinks === 1 ? "" : "s"} resolved inline as markdown \`[text](url)\``,
+    );
+  }
+  suggestions.push(`Review comments: \`gws-axi slides comments ${flags.presentationId}\``);
   if (!flags.out && total > DEFAULT_TRUNCATE_CHARS && !flags.full) {
     suggestions.push(
       `Run \`gws-axi slides summarize ${flags.presentationId} --out <path>\` to save the complete deck, or --full to expand inline`,
