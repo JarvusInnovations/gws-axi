@@ -98,9 +98,10 @@ export function defaultSetupState(): SetupState {
   return {
     version: SETUP_VERSION,
     auth_mode: "byo",
-    steps: Object.fromEntries(
-      SETUP_STEP_ORDER.map((key) => [key, { done: false }]),
-    ) as Record<SetupStepKey, SetupStep>,
+    steps: Object.fromEntries(SETUP_STEP_ORDER.map((key) => [key, { done: false }])) as Record<
+      SetupStepKey,
+      SetupStep
+    >,
   };
 }
 
@@ -173,9 +174,7 @@ export function listAccounts(): string[] {
     return readdirSync(dir)
       .filter((name) => {
         const p = join(dir, name);
-        return (
-          statSync(p).isDirectory() && existsSync(join(p, "tokens.json"))
-        );
+        return statSync(p).isDirectory() && existsSync(join(p, "tokens.json"));
       })
       .map((name) => name.toLowerCase())
       .sort();

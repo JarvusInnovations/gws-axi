@@ -48,10 +48,7 @@ export function parseFlags(args: string[]): ParsedFlags {
   return flags;
 }
 
-export async function driveMkdirCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function driveMkdirCommand(account: string, args: string[]): Promise<string> {
   const flags = parseFlags(args);
 
   if (!flags.name) {

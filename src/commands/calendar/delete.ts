@@ -43,11 +43,9 @@ function parseFlags(args: string[]): ParsedFlags {
         if (next === "all" || next === "externalOnly" || next === "none") {
           sendUpdates = next;
         } else {
-          throw new AxiError(
-            `Invalid --send-updates value: ${next}`,
-            "VALIDATION_ERROR",
-            ["Valid values: none, all, externalOnly"],
-          );
+          throw new AxiError(`Invalid --send-updates value: ${next}`, "VALIDATION_ERROR", [
+            "Valid values: none, all, externalOnly",
+          ]);
         }
         i++;
         break;
@@ -62,23 +60,16 @@ function parseFlags(args: string[]): ParsedFlags {
   }
 
   if (!eventId) {
-    throw new AxiError(
-      "Missing event ID argument",
-      "VALIDATION_ERROR",
-      [
-        "Usage: gws-axi calendar delete <event-id> [flags]",
-        "Get an ID from `gws-axi calendar events`",
-      ],
-    );
+    throw new AxiError("Missing event ID argument", "VALIDATION_ERROR", [
+      "Usage: gws-axi calendar delete <event-id> [flags]",
+      "Get an ID from `gws-axi calendar events`",
+    ]);
   }
 
   return { eventId, calendar, sendUpdates };
 }
 
-export async function calendarDeleteCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function calendarDeleteCommand(account: string, args: string[]): Promise<string> {
   const flags = parseFlags(args);
   const api = await calendarClient(account);
 
@@ -94,9 +85,7 @@ export async function calendarDeleteCommand(
       calendar: flags.calendar,
       event_id: flags.eventId,
       send_updates: flags.sendUpdates,
-      help: [
-        `Run \`gws-axi calendar events --calendar ${flags.calendar}\` to verify`,
-      ],
+      help: [`Run \`gws-axi calendar events --calendar ${flags.calendar}\` to verify`],
     });
   } catch (err) {
     const translated = translateGoogleError(err, {

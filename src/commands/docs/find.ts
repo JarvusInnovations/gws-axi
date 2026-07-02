@@ -77,18 +77,14 @@ function parseFlags(args: string[]): ParsedFlags {
     }
   }
   if (!documentId) {
-    throw new AxiError(
-      "Missing documentId argument",
-      "VALIDATION_ERROR",
-      ["Usage: gws-axi docs find <documentId> --query <text>"],
-    );
+    throw new AxiError("Missing documentId argument", "VALIDATION_ERROR", [
+      "Usage: gws-axi docs find <documentId> --query <text>",
+    ]);
   }
   if (!query) {
-    throw new AxiError(
-      "Missing --query flag",
-      "VALIDATION_ERROR",
-      ["Usage: gws-axi docs find <documentId> --query <text>"],
-    );
+    throw new AxiError("Missing --query flag", "VALIDATION_ERROR", [
+      "Usage: gws-axi docs find <documentId> --query <text>",
+    ]);
   }
   return { documentId, query, tab, limit };
 }
@@ -172,15 +168,11 @@ function buildContext(paragraphText: string, offset: number, queryLength: number
     Math.min(paragraphText.length, offset + queryLength + CONTEXT_RADIUS),
   );
   const leading = offset > CONTEXT_RADIUS ? "…" : "";
-  const trailing =
-    offset + queryLength + CONTEXT_RADIUS < paragraphText.length ? "…" : "";
+  const trailing = offset + queryLength + CONTEXT_RADIUS < paragraphText.length ? "…" : "";
   return `${leading}${before}${hit}${after}${trailing}`.replace(/\s+/g, " ").trim();
 }
 
-export async function docsFindCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function docsFindCommand(account: string, args: string[]): Promise<string> {
   const flags = parseFlags(args);
   const api = await docsClient(account);
 
@@ -255,22 +247,14 @@ export async function docsFindCommand(
     context: buildContext(m.paragraphText, m.offsetInParagraph, flags.query.length),
   }));
 
-  const schema = [
-    field("ref"),
-    field("paragraph"),
-    field("start"),
-    field("end"),
-    field("context"),
-  ];
+  const schema = [field("ref"), field("paragraph"), field("start"), field("end"), field("context")];
 
   const docHeader: Record<string, unknown> = { id: flags.documentId };
   if (targetTabId) docHeader.tab = targetTabId;
 
   const suggestions: string[] = [];
   if (items.length > 0 && items.length >= flags.limit) {
-    suggestions.push(
-      `Hit --limit ${flags.limit} — increase it to see more matches`,
-    );
+    suggestions.push(`Hit --limit ${flags.limit} — increase it to see more matches`);
   }
   if (items.length > 0 && tabs.size > 1) {
     suggestions.push(
@@ -289,9 +273,5 @@ export async function docsFindCommand(
         : `no matches for "${flags.query}" in this document`,
   });
 
-  return joinBlocks(
-    renderObject({ account }),
-    listBlock,
-    renderHelp(suggestions),
-  );
+  return joinBlocks(renderObject({ account }), listBlock, renderHelp(suggestions));
 }

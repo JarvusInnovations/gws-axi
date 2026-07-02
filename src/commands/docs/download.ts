@@ -112,19 +112,14 @@ export function parseFlags(args: string[]): ParsedFlags {
     }
   }
   if (!documentId) {
-    throw new AxiError(
-      "Missing documentId argument",
-      "VALIDATION_ERROR",
-      ["Usage: gws-axi docs download <documentId>"],
-    );
+    throw new AxiError("Missing documentId argument", "VALIDATION_ERROR", [
+      "Usage: gws-axi docs download <documentId>",
+    ]);
   }
   return { documentId, out, as, revision };
 }
 
-export async function docsDownloadCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function docsDownloadCommand(account: string, args: string[]): Promise<string> {
   const flags = parseFlags(args);
   const api = await driveClient(account);
 
@@ -271,9 +266,7 @@ export async function docsDownloadCommand(
   } else if (effectiveMime.startsWith("image/")) {
     suggestions.push(`Image file — open with \`open "${outPath}"\` on macOS`);
   } else {
-    suggestions.push(
-      `Inspect with \`file "${outPath}"\` to identify the format`,
-    );
+    suggestions.push(`Inspect with \`file "${outPath}"\` to identify the format`);
   }
   if (isNative) {
     suggestions.push(
@@ -349,9 +342,7 @@ async function downloadRevision(
         throw new AxiError(
           `Revision '${revisionId}' not found on file '${flags.documentId}'`,
           "REVISION_NOT_FOUND",
-          [
-            `List valid revisions with \`gws-axi drive revisions ${flags.documentId}\``,
-          ],
+          [`List valid revisions with \`gws-axi drive revisions ${flags.documentId}\``],
         );
       }
       throw translated;
@@ -411,9 +402,7 @@ async function downloadRevision(
       `Revision exported as ${effectiveMime} (relevance preview) — use --as <mime> for another format`,
     );
   }
-  suggestions.push(
-    `List all revisions with \`gws-axi drive revisions ${flags.documentId}\``,
-  );
+  suggestions.push(`List all revisions with \`gws-axi drive revisions ${flags.documentId}\``);
   blocks.push(renderHelp(suggestions));
   return joinBlocks(...blocks);
 }

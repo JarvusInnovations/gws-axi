@@ -1,12 +1,6 @@
 import { AxiError } from "axi-sdk-js";
 import { oauthClientForAccount, translateGoogleError } from "../../google/client.js";
-import {
-  field,
-  joinBlocks,
-  renderHelp,
-  renderList,
-  renderObject,
-} from "../../output/index.js";
+import { field, joinBlocks, renderHelp, renderList, renderObject } from "../../output/index.js";
 import { parseDateishFlag } from "../calendar/dateish.js";
 
 export const ACTIVITY_HELP = `usage: gws-axi drive activity <itemId> [flags]
@@ -41,8 +35,7 @@ notes:
 `;
 
 const DEFAULT_LIMIT = 50;
-const ACTIVITY_ENDPOINT =
-  "https://driveactivity.googleapis.com/v2/activity:query";
+const ACTIVITY_ENDPOINT = "https://driveactivity.googleapis.com/v2/activity:query";
 
 // Map our friendly --action tokens to the API's action_detail_case enum.
 const ACTION_FILTER_MAP: Record<string, string> = {
@@ -130,11 +123,9 @@ export function parseFlags(args: string[]): ParsedFlags {
   // Validate action tokens early so a typo doesn't silently match nothing.
   for (const a of actions) {
     if (!ACTION_FILTER_MAP[a]) {
-      throw new AxiError(
-        `Unknown --action type: ${a}`,
-        "VALIDATION_ERROR",
-        [`Valid types: ${Object.keys(ACTION_FILTER_MAP).join(", ")}`],
-      );
+      throw new AxiError(`Unknown --action type: ${a}`, "VALIDATION_ERROR", [
+        `Valid types: ${Object.keys(ACTION_FILTER_MAP).join(", ")}`,
+      ]);
     }
   }
   return { itemId, folder, since, until, actions, limit };
@@ -163,9 +154,7 @@ export function primaryActionLabel(activity: Record<string, unknown>): string {
     }
   }
   // Fall back to the activity-level primaryActionDetail if present.
-  const primary = activity.primaryActionDetail as
-    | Record<string, unknown>
-    | undefined;
+  const primary = activity.primaryActionDetail as Record<string, unknown> | undefined;
   if (primary) {
     for (const key of Object.keys(primary)) {
       if (ACTION_LABELS[key]) return ACTION_LABELS[key];
@@ -233,10 +222,7 @@ interface ActivityRow {
   target: string;
 }
 
-export async function driveActivityCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function driveActivityCommand(account: string, args: string[]): Promise<string> {
   const flags = parseFlags(args);
 
   const requestBody: Record<string, unknown> = flags.folder
@@ -321,9 +307,7 @@ export async function driveActivityCommand(
   if (flags.folder) {
     // Already broad — point at narrowing levers instead of widening.
     if (flags.actions.length === 0) {
-      suggestions.push(
-        "Narrow by action type, e.g. `--action permission_change,delete`",
-      );
+      suggestions.push("Narrow by action type, e.g. `--action permission_change,delete`");
     }
   } else {
     suggestions.push(
@@ -331,9 +315,7 @@ export async function driveActivityCommand(
     );
   }
   if (!flags.since && !flags.until) {
-    suggestions.push(
-      "Bound the window with `--since <date>` / `--until <date>`",
-    );
+    suggestions.push("Bound the window with `--since <date>` / `--until <date>`");
   }
   suggestions.push(
     `Fetch an item surfaced here: \`gws-axi drive get <id>\` or \`gws-axi docs download <id>\``,
@@ -345,10 +327,7 @@ export async function driveActivityCommand(
   return joinBlocks(...blocks);
 }
 
-async function activityError(
-  resp: Response,
-  account: string,
-): Promise<AxiError> {
+async function activityError(resp: Response, account: string): Promise<AxiError> {
   let message = `HTTP ${resp.status}`;
   try {
     const body = (await resp.json()) as {
@@ -380,22 +359,16 @@ async function activityError(
       return new AxiError(
         "The Drive Activity API is not enabled for this project",
         "API_NOT_ENABLED",
-        [
-          "Enable driveactivity.googleapis.com — run `gws-axi auth setup` to re-check/enable APIs",
-        ],
+        ["Enable driveactivity.googleapis.com — run `gws-axi auth setup` to re-check/enable APIs"],
       );
     }
     return new AxiError(`403 forbidden — ${message}`, "PERMISSION_DENIED", []);
   }
   if (resp.status === 404) {
-    return new AxiError(
-      `Item not found, or ${account} has no access to it`,
-      "NOT_FOUND",
-      [
-        "Verify the file/folder ID",
-        `Confirm ${account} can see the item`,
-      ],
-    );
+    return new AxiError(`Item not found, or ${account} has no access to it`, "NOT_FOUND", [
+      "Verify the file/folder ID",
+      `Confirm ${account} can see the item`,
+    ]);
   }
   return new AxiError(`${resp.status} — ${message}`, "API_ERROR", []);
 }

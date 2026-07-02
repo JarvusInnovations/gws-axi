@@ -42,12 +42,42 @@ const SUBCOMMANDS: GmailSubcommand[] = [
   { name: "send", mutation: true, help: SEND_HELP },
   { name: "draft", mutation: true, help: DRAFT_HELP, handler: gmailDraftCommand },
   { name: "modify", mutation: true, help: MODIFY_HELP, handler: gmailModifyCommand },
-  { name: "batch-modify", mutation: true, help: BATCH_MODIFY_HELP, handler: gmailBatchModifyCommand },
-  { name: "label-create", mutation: true, help: LABEL_CREATE_HELP, handler: gmailLabelCreateCommand },
-  { name: "label-update", mutation: true, help: LABEL_UPDATE_HELP, handler: gmailLabelUpdateCommand },
-  { name: "label-delete", mutation: true, help: LABEL_DELETE_HELP, handler: gmailLabelDeleteCommand },
-  { name: "filter-create", mutation: true, help: FILTER_CREATE_HELP, handler: gmailFilterCreateCommand },
-  { name: "filter-delete", mutation: true, help: FILTER_DELETE_HELP, handler: gmailFilterDeleteCommand },
+  {
+    name: "batch-modify",
+    mutation: true,
+    help: BATCH_MODIFY_HELP,
+    handler: gmailBatchModifyCommand,
+  },
+  {
+    name: "label-create",
+    mutation: true,
+    help: LABEL_CREATE_HELP,
+    handler: gmailLabelCreateCommand,
+  },
+  {
+    name: "label-update",
+    mutation: true,
+    help: LABEL_UPDATE_HELP,
+    handler: gmailLabelUpdateCommand,
+  },
+  {
+    name: "label-delete",
+    mutation: true,
+    help: LABEL_DELETE_HELP,
+    handler: gmailLabelDeleteCommand,
+  },
+  {
+    name: "filter-create",
+    mutation: true,
+    help: FILTER_CREATE_HELP,
+    handler: gmailFilterCreateCommand,
+  },
+  {
+    name: "filter-delete",
+    mutation: true,
+    help: FILTER_DELETE_HELP,
+    handler: gmailFilterDeleteCommand,
+  },
 ];
 
 const SUB_BY_NAME: Record<string, GmailSubcommand> = Object.fromEntries(
@@ -111,11 +141,9 @@ export async function gmailCommand(args: string[]): Promise<string> {
   const sub = args[0];
   const def = SUB_BY_NAME[sub];
   if (!def) {
-    throw new AxiError(
-      `Unknown gmail subcommand: ${sub}`,
-      "VALIDATION_ERROR",
-      [`Run \`gws-axi gmail --help\` to see available subcommands`],
-    );
+    throw new AxiError(`Unknown gmail subcommand: ${sub}`, "VALIDATION_ERROR", [
+      `Run \`gws-axi gmail --help\` to see available subcommands`,
+    ]);
   }
 
   const rest = args.slice(1);
@@ -143,14 +171,10 @@ export async function gmailCommand(args: string[]): Promise<string> {
   });
 
   if (!def.handler) {
-    throw new AxiError(
-      `gws-axi gmail ${sub} is not yet implemented`,
-      "NOT_IMPLEMENTED",
-      [
-        `Account resolution succeeded: would run as ${resolution.account}`,
-        `See \`gws-axi gmail ${sub} --help\` for the planned surface`,
-      ],
-    );
+    throw new AxiError(`gws-axi gmail ${sub} is not yet implemented`, "NOT_IMPLEMENTED", [
+      `Account resolution succeeded: would run as ${resolution.account}`,
+      `See \`gws-axi gmail ${sub} --help\` for the planned surface`,
+    ]);
   }
 
   return def.handler(resolution.account, remaining);

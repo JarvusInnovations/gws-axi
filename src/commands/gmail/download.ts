@@ -46,14 +46,10 @@ function parseFlags(args: string[]): ParsedFlags {
     }
   }
   if (positional.length < 2) {
-    throw new AxiError(
-      "Missing required arguments",
-      "VALIDATION_ERROR",
-      [
-        "Usage: gws-axi gmail download <message-id> <attachment-id>",
-        "Get both IDs from `gws-axi gmail read <thread-id>`",
-      ],
-    );
+    throw new AxiError("Missing required arguments", "VALIDATION_ERROR", [
+      "Usage: gws-axi gmail download <message-id> <attachment-id>",
+      "Get both IDs from `gws-axi gmail read <thread-id>`",
+    ]);
   }
   return {
     messageId: positional[0],
@@ -62,10 +58,7 @@ function parseFlags(args: string[]): ParsedFlags {
   };
 }
 
-export async function gmailDownloadCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function gmailDownloadCommand(account: string, args: string[]): Promise<string> {
   const flags = parseFlags(args);
   const api = await gmailClient(account);
 
@@ -121,11 +114,7 @@ export async function gmailDownloadCommand(
     });
     const bySize: Array<{ filename: string; mimeType: string }> = [];
     const walk = (part: gmail_v1.Schema$MessagePart): void => {
-      if (
-        part.filename &&
-        part.body?.attachmentId &&
-        part.body?.size === sizeBytes
-      ) {
+      if (part.filename && part.body?.attachmentId && part.body?.size === sizeBytes) {
         bySize.push({
           filename: part.filename,
           mimeType: part.mimeType ?? "application/octet-stream",
@@ -179,24 +168,17 @@ export async function gmailDownloadCommand(
 
   const suggestions: string[] = [];
   if (mimeType === "application/pdf") {
-    suggestions.push(
-      `PDF saved — \`pdftotext "${basename(outPath)}" -\` to extract text`,
-    );
+    suggestions.push(`PDF saved — \`pdftotext "${basename(outPath)}" -\` to extract text`);
   } else if (mimeType.startsWith("image/")) {
     suggestions.push(`Image saved — \`open "${outPath}"\` to view`);
   } else if (mimeType.startsWith("text/")) {
     suggestions.push(`Text file saved — \`cat "${outPath}"\``);
   } else if (
-    mimeType ===
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
   ) {
-    suggestions.push(
-      `.docx saved — extract with \`pandoc "${basename(outPath)}" -t plain\``,
-    );
+    suggestions.push(`.docx saved — extract with \`pandoc "${basename(outPath)}" -t plain\``);
   } else {
-    suggestions.push(
-      `Inspect with \`file "${outPath}"\` to identify the format`,
-    );
+    suggestions.push(`Inspect with \`file "${outPath}"\` to identify the format`);
   }
   if (filename.startsWith("attachment-")) {
     suggestions.push(

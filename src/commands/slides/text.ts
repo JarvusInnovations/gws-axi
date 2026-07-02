@@ -20,10 +20,7 @@ export interface SlideContent {
  * Images / videos / charts get no inline content — we just count them
  * so agents can tell visual-heavy decks apart from text-heavy ones.
  */
-export function extractSlideContent(
-  slide: slides_v1.Schema$Page,
-  index: number,
-): SlideContent {
+export function extractSlideContent(slide: slides_v1.Schema$Page, index: number): SlideContent {
   const content: SlideContent = {
     index,
     page_id: slide.objectId ?? "",
@@ -40,10 +37,7 @@ export function extractSlideContent(
       const placeholderType = el.shape.placeholder?.type ?? "";
       const text = extractShapeText(el.shape).trim();
       if (!text) continue;
-      if (
-        !content.title &&
-        (placeholderType === "TITLE" || placeholderType === "CENTERED_TITLE")
-      ) {
+      if (!content.title && (placeholderType === "TITLE" || placeholderType === "CENTERED_TITLE")) {
         content.title = text;
       } else {
         content.body.push(text);

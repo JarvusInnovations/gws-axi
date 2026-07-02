@@ -1,12 +1,7 @@
 import { AxiError } from "axi-sdk-js";
 import type { gmail_v1 } from "googleapis";
 import { describe, expect, it } from "vitest";
-import {
-  isSystemLabel,
-  labelNamesFor,
-  resolveLabelId,
-  resolveLabelIds,
-} from "./labels-shared.js";
+import { isSystemLabel, labelNamesFor, resolveLabelId, resolveLabelIds } from "./labels-shared.js";
 
 const LABELS: gmail_v1.Schema$Label[] = [
   { id: "INBOX", name: "INBOX", type: "system" },
@@ -39,10 +34,7 @@ describe("resolveLabelId", () => {
 
 describe("resolveLabelIds", () => {
   it("resolves a list, mixing names and ids", () => {
-    expect(resolveLabelIds(["INBOX", "Receipts"], LABELS)).toEqual([
-      "INBOX",
-      "Label_7",
-    ]);
+    expect(resolveLabelIds(["INBOX", "Receipts"], LABELS)).toEqual(["INBOX", "Label_7"]);
   });
 });
 

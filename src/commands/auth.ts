@@ -1,5 +1,6 @@
-import { existsSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
+import { dirname, resolve } from "node:path";
 import { AxiError } from "axi-sdk-js";
 import {
   credentialsPath,
@@ -27,15 +28,11 @@ import {
   advanceOauthClient,
   advanceTestUserAdded,
   consoleUrl,
+  parseDesktopCredentials,
   type SetupFlags,
   type StepOutcome,
 } from "../auth/steps.js";
-import {
-  advanceTokensObtained,
-  awaitPendingAuth,
-  preparePendingAuth,
-} from "../auth/loopback.js";
-import { readPendingAuth } from "../auth/pending.js";
+import { advanceTokensObtained, awaitPendingAuth, preparePendingAuth } from "../auth/loopback.js";
 import { setupHtmlPath, writeSetupHtml } from "../auth/setup-html.js";
 import {
   predictUnverifiedAppWarning,
@@ -47,8 +44,10 @@ import { getValidAccessToken } from "../google/tokens.js";
 import { findLikelyTypo } from "../util/typo.js";
 
 export const AUTH_HELP = `usage: gws-axi auth <subcommand> [flags]
-subcommands[8]:
+subcommands[9]:
   setup     Progressive agent-guided OAuth setup (run repeatedly until complete)
+  join      Onboard onto a shared OAuth client from a downloaded credentials.json
+            (marks setup steps 1-6 done — for reusing a colleague's client)
   login     Authenticate or re-auth an account (prepares + blocks on callback by default)
   publish   Walk through publishing the consent screen to "In Production"
             (lifts the 7-day Testing-state refresh-token expiry)
@@ -64,6 +63,11 @@ setup flags[6]:
   --credentials-json <path>   Path to downloaded OAuth client JSON (step 4)
   --test-user <email>         Record test user email (step 6 metadata)
   --confirm-step <step>       Mark a manual step done (consent_screen, test_user_added)
+join flags[1]:
+  --published                 Assert the shared client's consent screen is
+                              already published to Production (opt-in — join
+                              can't detect it; sets the local published flag so
+                              login/publish reporting reflects permanent tokens)
 login flags[3]:
   --account <email>           Authenticate or re-auth a specific account
   --no-wait                   Prepare only and return fast (for agent flows
@@ -82,6 +86,8 @@ examples:
   gws-axi auth setup
   gws-axi auth setup --create-project gws-axi-chris-9f3a
   gws-axi auth setup --credentials-json ~/Downloads/client_secret_xxx.json
+  gws-axi auth join ~/Downloads/credentials.json          # reuse a shared client
+  gws-axi auth join ~/Downloads/credentials.json --published
   gws-axi auth login --account chris@personal.com           # prepares + blocks (default)
   gws-axi auth login --account chris@personal.com --no-wait # agent prepare-only
   gws-axi auth login --wait                                 # agent block-only
@@ -108,6 +114,7 @@ interface ParsedArgs {
   wait: boolean;
   noWait: boolean;
   confirm: boolean;
+  published: boolean;
   positional: string[];
 }
 
@@ -120,6 +127,7 @@ function parseArgs(args: string[]): ParsedArgs {
   let wait = false;
   let noWait = false;
   let confirm = false;
+  let published = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -166,13 +174,26 @@ function parseArgs(args: string[]): ParsedArgs {
       case "--confirm":
         confirm = true;
         break;
+      case "--published":
+        published = true;
+        break;
       default:
         if (!arg.startsWith("--")) {
           positional.push(arg);
         }
     }
   }
-  return { flags, confirmStep, resetFromKey, account, wait, noWait, confirm, positional };
+  return {
+    flags,
+    confirmStep,
+    resetFromKey,
+    account,
+    wait,
+    noWait,
+    confirm,
+    published,
+    positional,
+  };
 }
 
 function expandHome(path: string | undefined): string | undefined {
@@ -185,11 +206,9 @@ async function runSetup(args: string[]): Promise<Record<string, unknown>> {
 
   if (confirmStep) {
     if (!SETUP_STEP_ORDER.includes(confirmStep)) {
-      throw new AxiError(
-        `Unknown step: ${confirmStep}`,
-        "VALIDATION_ERROR",
-        [`Valid steps: ${SETUP_STEP_ORDER.join(", ")}`],
-      );
+      throw new AxiError(`Unknown step: ${confirmStep}`, "VALIDATION_ERROR", [
+        `Valid steps: ${SETUP_STEP_ORDER.join(", ")}`,
+      ]);
     }
     const extra: Record<string, unknown> = {};
     if (confirmStep === "test_user_added" && flags.testUserEmail) {
@@ -205,22 +224,15 @@ async function runSetup(args: string[]): Promise<Record<string, unknown>> {
   // and having it stall on step 3 because the agent forgot to also pass
   //   `--confirm-step oauth_client`.
   if (flags.credentialsJson && !readSetupState().steps.oauth_client.done) {
-    if (existsSync(flags.credentialsJson)) {
-      try {
-        const parsed = JSON.parse(
-          readFileSync(flags.credentialsJson, "utf-8"),
-        ) as { installed?: { client_id?: string; client_secret?: string } };
-        if (parsed.installed?.client_id && parsed.installed?.client_secret) {
-          markStepDone("oauth_client", {
-            auto_confirmed: true,
-            via: "credentials-json",
-            client_id: parsed.installed.client_id,
-          });
-        }
-      } catch {
-        // fall through; advanceCredentialsSaved will surface the JSON error
-      }
+    const parsed = parseDesktopCredentials(flags.credentialsJson);
+    if (parsed.ok) {
+      markStepDone("oauth_client", {
+        auto_confirmed: true,
+        via: "credentials-json",
+        client_id: parsed.value.client_id,
+      });
     }
+    // On any problem, fall through; advanceCredentialsSaved surfaces the error.
   }
 
   const advanced: Array<{ step: SetupStepKey; detail: string }> = [];
@@ -317,9 +329,7 @@ async function runSetup(args: string[]): Promise<Record<string, unknown>> {
       "Relay the instructions above to the user, then run `gws-axi auth login --wait` in a NEW bash turn to block on the callback (up to 5 minutes).",
     );
   } else {
-    help.push(
-      `Complete step ${nextOutcome.step} and re-run \`gws-axi auth setup\``,
-    );
+    help.push(`Complete step ${nextOutcome.step} and re-run \`gws-axi auth setup\``);
   }
   output.help = help;
 
@@ -330,11 +340,7 @@ function stepHasConsoleButtons(step: SetupStepKey): boolean {
   // Steps where the user needs to click something on setup.html. Anything
   // automatable (gcp_project/apis_enabled with gcloud, tokens_obtained via
   // loopback) or pure-CLI (credentials_saved) doesn't need the setup page.
-  return (
-    step === "oauth_client" ||
-    step === "consent_screen" ||
-    step === "test_user_added"
-  );
+  return step === "oauth_client" || step === "consent_screen" || step === "test_user_added";
 }
 
 function handlerFor(
@@ -375,6 +381,86 @@ function collapseHome(path: string): string {
   return path.startsWith(home) ? `~${path.slice(home.length)}` : path;
 }
 
+async function runJoin(args: string[]): Promise<Record<string, unknown>> {
+  const { positional, published } = parseArgs(args);
+  const rawPath = positional[0];
+  if (!rawPath) {
+    throw new AxiError("Usage: gws-axi auth join <path>", "VALIDATION_ERROR", [
+      "Point it at the shared credentials.json you were given, e.g. `gws-axi auth join ~/Downloads/credentials.json`",
+    ]);
+  }
+
+  const srcPath = expandHome(rawPath) as string;
+  const result = parseDesktopCredentials(srcPath);
+  if (!result.ok) {
+    const instructions: Record<typeof result.code, string[]> = {
+      FILE_NOT_FOUND: [
+        `No file at ${collapseHome(srcPath)} — check the path`,
+        "Save the shared credentials.json, then re-run `gws-axi auth join <path>`",
+      ],
+      INVALID_JSON: ["The file isn't valid JSON — re-download it from whoever shared the client"],
+      WRONG_CLIENT_TYPE: [
+        "The shared file must be a Desktop-app OAuth client (an `installed` client with client_id + client_secret)",
+        "Ask the client owner to re-download the Desktop OAuth client JSON",
+      ],
+    };
+    throw new AxiError(result.message, result.code, instructions[result.code]);
+  }
+
+  const { client_id, project_id } = result.value;
+
+  // Install the credentials in the config dir. Skip the copy when the source
+  // already IS the destination (teammate saved it there first) — copyFileSync
+  // onto itself would error.
+  const destPath = credentialsPath();
+  mkdirSync(dirname(destPath), { recursive: true });
+  if (resolve(srcPath) !== resolve(destPath)) {
+    copyFileSync(srcPath, destPath);
+  }
+
+  // Mark steps 1-6 satisfied-by-the-shared-client. `tokens_obtained` (step 7)
+  // is deliberately left untouched — that's the teammate's own `auth login`.
+  markStepDone("gcp_project", {
+    created_by_us: false,
+    via: "team-join",
+    ...(project_id ? { project_id } : {}),
+  });
+  markStepDone("apis_enabled", { via: "team-join" });
+  markStepDone("oauth_client", { via: "team-join", client_id });
+  markStepDone("credentials_saved", { via: "team-join", client_id, path: destPath });
+  markStepDone("consent_screen", { via: "team-join" });
+  markStepDone("test_user_added", { via: "team-join" });
+
+  if (published) {
+    const state = readSetupState();
+    state.published = { confirmed_at: new Date().toISOString() };
+    writeSetupState(state);
+  }
+
+  writeSetupHtml();
+  const { done, total } = setupProgress(readSetupState());
+
+  const help: string[] = [
+    "Run `gws-axi auth login --account you@example.com` to authenticate your account (use your email)",
+    "Do NOT run `gws-axi auth setup` — this client is already provisioned; join handled steps 1-6",
+  ];
+  if (published) {
+    help.push(
+      "This client is marked published — your refresh token will be permanent (no `auth publish` needed)",
+    );
+  }
+  help.push("Run `gws-axi doctor` after login to verify auth + runtime health");
+
+  return {
+    status: "joined",
+    ...(project_id ? { project_id } : {}),
+    client_id,
+    credentials: collapseHome(destPath),
+    steps_ready: `${done} of ${total} (only your own sign-in remains)`,
+    help,
+  };
+}
+
 async function runLogin(args: string[]): Promise<Record<string, unknown>> {
   const { account, wait, noWait } = parseArgs(args);
 
@@ -404,9 +490,7 @@ async function runLogin(args: string[]): Promise<Record<string, unknown>> {
   return await blockOnCallback();
 }
 
-async function prepareLogin(
-  account: string | undefined,
-): Promise<Record<string, unknown>> {
+async function prepareLogin(account: string | undefined): Promise<Record<string, unknown>> {
   if (!existsSync(credentialsPath())) {
     throw new AxiError(
       "OAuth credentials not saved — complete setup steps 1-4 first",
@@ -449,10 +533,7 @@ async function prepareLogin(
   const htmlPath = collapseHome(prepared.htmlPath);
   const normalizedAccount = account ? normalizeEmail(account) : undefined;
   const setupState = readSetupState();
-  const warningLevel = predictUnverifiedAppWarning(
-    normalizedAccount,
-    !!setupState.published,
-  );
+  const warningLevel = predictUnverifiedAppWarning(normalizedAccount, !!setupState.published);
   const instructions: string[] = [
     `The gws-axi setup page (${htmlPath}) must be open in the browser PROFILE/SESSION where the user is signed into ${normalizedAccount ? `\`${normalizedAccount}\`` : "the target Google account"}. This may be a DIFFERENT browser profile than the one used for initial setup (e.g., personal Chrome profile vs work). If the setup page is open in the wrong profile, tell the user to open ${htmlPath} in the correct profile.`,
     `In that setup page tab, the user waits for the yellow "Authenticate with Google" button to appear (up to 10s auto-refresh), clicks it, signs in${normalizedAccount ? ` as \`${normalizedAccount}\`` : ""}, approves the requested scopes, and sees the success page.`,
@@ -581,21 +662,15 @@ function runUse(args: string[]): Record<string, unknown> {
   const { positional } = parseArgs(args);
   const email = positional[0];
   if (!email) {
-    throw new AxiError(
-      "Usage: gws-axi auth use <email>",
-      "VALIDATION_ERROR",
-      ["Run `gws-axi auth accounts` to see authenticated accounts"],
-    );
+    throw new AxiError("Usage: gws-axi auth use <email>", "VALIDATION_ERROR", [
+      "Run `gws-axi auth accounts` to see authenticated accounts",
+    ]);
   }
   if (!hasAccount(email)) {
-    throw new AxiError(
-      `Account ${email} is not authenticated`,
-      "ACCOUNT_NOT_FOUND",
-      [
-        `Authenticated accounts: ${listAccounts().join(", ") || "(none)"}`,
-        `Run \`gws-axi auth login --account ${email}\` to add it`,
-      ],
-    );
+    throw new AxiError(`Account ${email} is not authenticated`, "ACCOUNT_NOT_FOUND", [
+      `Authenticated accounts: ${listAccounts().join(", ") || "(none)"}`,
+      `Run \`gws-axi auth login --account ${email}\` to add it`,
+    ]);
   }
   setDefaultAccount(email);
   return {
@@ -609,11 +684,9 @@ function runRevoke(args: string[]): Record<string, unknown> {
   const { positional } = parseArgs(args);
   const email = positional[0];
   if (!email) {
-    throw new AxiError(
-      "Usage: gws-axi auth revoke <email>",
-      "VALIDATION_ERROR",
-      ["Run `gws-axi auth accounts` to see authenticated accounts"],
-    );
+    throw new AxiError("Usage: gws-axi auth revoke <email>", "VALIDATION_ERROR", [
+      "Run `gws-axi auth accounts` to see authenticated accounts",
+    ]);
   }
   if (!hasAccount(email)) {
     return {
@@ -684,9 +757,7 @@ function runPublish(args: string[]): Record<string, unknown> {
     writeSetupState(state);
 
     const tokenStatus = summarizeAccountTokens(state.published.confirmed_at);
-    const help: string[] = [
-      `Consent screen for project ${projectId} marked as published`,
-    ];
+    const help: string[] = [`Consent screen for project ${projectId} marked as published`];
     if (tokenStatus.preExisting.length > 0) {
       help.push(
         `Re-auth each account once to issue a permanent refresh token (existing tokens were issued before publish and still inherit the 7-day Testing-state expiry):`,
@@ -710,9 +781,7 @@ function runPublish(args: string[]): Record<string, unknown> {
 
   if (state.published) {
     const tokenStatus = summarizeAccountTokens(state.published.confirmed_at);
-    const help: string[] = [
-      `Project ${projectId} is marked as published in setup state`,
-    ];
+    const help: string[] = [`Project ${projectId} is marked as published in setup state`];
     if (tokenStatus.preExisting.length > 0) {
       help.push(
         `${tokenStatus.preExisting.length} account${tokenStatus.preExisting.length === 1 ? " was" : "s were"} authenticated before publish — those tokens still expire on the 7-day clock until you re-auth:`,
@@ -756,9 +825,7 @@ function runPublish(args: string[]): Record<string, unknown> {
       "The 'unverified app' intermediate screen during OAuth consent will continue to appear (skip via 'Advanced → Go to <app> (unsafe)'). That's the cost of skipping formal verification.",
       "Both your Workspace and personal Gmail accounts go through the same publish action — your consent screen is already 'External' (otherwise the personal Gmail couldn't have authenticated), so flipping Testing → Production benefits both.",
     ],
-    help: [
-      `Run \`gws-axi auth publish --confirm\` after clicking "PUBLISH APP" in the Console`,
-    ],
+    help: [`Run \`gws-axi auth publish --confirm\` after clicking "PUBLISH APP" in the Console`],
   };
 }
 
@@ -795,11 +862,9 @@ function summarizeAccountTokens(publishedAt: string): TokenSummary {
 function runReset(args: string[]): Record<string, unknown> {
   const { resetFromKey } = parseArgs(args);
   if (resetFromKey && !SETUP_STEP_ORDER.includes(resetFromKey)) {
-    throw new AxiError(
-      `Unknown step: ${resetFromKey}`,
-      "VALIDATION_ERROR",
-      [`Valid steps: ${SETUP_STEP_ORDER.join(", ")}`],
-    );
+    throw new AxiError(`Unknown step: ${resetFromKey}`, "VALIDATION_ERROR", [
+      `Valid steps: ${SETUP_STEP_ORDER.join(", ")}`,
+    ]);
   }
   const state = resetFrom(resetFromKey ?? "gcp_project");
   const { done, total } = setupProgress(state);
@@ -810,9 +875,7 @@ function runReset(args: string[]): Record<string, unknown> {
   };
 }
 
-export async function authCommand(
-  args: string[],
-): Promise<string | Record<string, unknown>> {
+export async function authCommand(args: string[]): Promise<string | Record<string, unknown>> {
   const sub = args[0];
   if (!sub) return AUTH_HELP;
 
@@ -820,6 +883,8 @@ export async function authCommand(
   switch (sub) {
     case "setup":
       return runSetup(rest);
+    case "join":
+      return runJoin(rest);
     case "login":
       return runLogin(rest);
     case "publish":
@@ -835,10 +900,8 @@ export async function authCommand(
     case "reset":
       return runReset(rest);
     default:
-      throw new AxiError(
-        `Unknown auth subcommand: ${sub}`,
-        "VALIDATION_ERROR",
-        ["Run `gws-axi auth --help` to see available subcommands"],
-      );
+      throw new AxiError(`Unknown auth subcommand: ${sub}`, "VALIDATION_ERROR", [
+        "Run `gws-axi auth --help` to see available subcommands",
+      ]);
   }
 }

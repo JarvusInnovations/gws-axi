@@ -9,11 +9,7 @@ import {
   renderObject,
   type FieldDef,
 } from "../../output/index.js";
-import {
-  fetchLabels,
-  labelNamesFor,
-  resolveLabelIds,
-} from "./labels-shared.js";
+import { fetchLabels, labelNamesFor, resolveLabelIds } from "./labels-shared.js";
 
 // Gmail filters live behind gmail.settings.basic, which is NOT granted by
 // gmail.modify. Accounts authenticated before that scope was added will get
@@ -98,10 +94,7 @@ function schema(): FieldDef[] {
   return [field("id"), field("criteria"), field("action")];
 }
 
-export async function gmailFilterListCommand(
-  account: string,
-  _args: string[],
-): Promise<string> {
+export async function gmailFilterListCommand(account: string, _args: string[]): Promise<string> {
   const api = await gmailClient(account);
   const labels = await fetchLabels(api, account);
 
@@ -170,14 +163,37 @@ function parseCreateFlags(args: string[]): CreateFlags {
     const arg = args[i];
     const next = args[i + 1];
     switch (arg) {
-      case "--from": flags.from = next; i++; break;
-      case "--to": flags.to = next; i++; break;
-      case "--subject": flags.subject = next; i++; break;
-      case "--query": flags.query = next; i++; break;
-      case "--has-attachment": flags.hasAttachment = true; break;
-      case "--add-label": collect(flags.add, next); i++; break;
-      case "--remove-label": collect(flags.remove, next); i++; break;
-      case "--forward": flags.forward = next; i++; break;
+      case "--from":
+        flags.from = next;
+        i++;
+        break;
+      case "--to":
+        flags.to = next;
+        i++;
+        break;
+      case "--subject":
+        flags.subject = next;
+        i++;
+        break;
+      case "--query":
+        flags.query = next;
+        i++;
+        break;
+      case "--has-attachment":
+        flags.hasAttachment = true;
+        break;
+      case "--add-label":
+        collect(flags.add, next);
+        i++;
+        break;
+      case "--remove-label":
+        collect(flags.remove, next);
+        i++;
+        break;
+      case "--forward":
+        flags.forward = next;
+        i++;
+        break;
     }
   }
   return flags;
@@ -190,10 +206,7 @@ function sameIdSet(a: string[] | null | undefined, b: string[]): boolean {
   return b.every((id) => setA.has(id));
 }
 
-export async function gmailFilterCreateCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function gmailFilterCreateCommand(account: string, args: string[]): Promise<string> {
   const flags = parseCreateFlags(args);
 
   const criteria: gmail_v1.Schema$FilterCriteria = {};
@@ -204,11 +217,9 @@ export async function gmailFilterCreateCommand(
   if (flags.hasAttachment) criteria.hasAttachment = true;
 
   if (Object.keys(criteria).length === 0) {
-    throw new AxiError(
-      "At least one criterion is required",
-      "VALIDATION_ERROR",
-      ["Add e.g. --from <addr>, --subject <text>, or --query <gmail-query>"],
-    );
+    throw new AxiError("At least one criterion is required", "VALIDATION_ERROR", [
+      "Add e.g. --from <addr>, --subject <text>, or --query <gmail-query>",
+    ]);
   }
   if (flags.add.length === 0 && flags.remove.length === 0 && !flags.forward) {
     throw new AxiError("At least one action is required", "VALIDATION_ERROR", [
@@ -294,10 +305,7 @@ export async function gmailFilterCreateCommand(
   );
 }
 
-export async function gmailFilterDeleteCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function gmailFilterDeleteCommand(account: string, args: string[]): Promise<string> {
   const id = args.find((a) => !a.startsWith("--"));
   if (!id) {
     throw new AxiError("Missing filter id argument", "VALIDATION_ERROR", [

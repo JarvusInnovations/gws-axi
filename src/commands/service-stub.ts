@@ -1,8 +1,5 @@
 import { AxiError } from "axi-sdk-js";
-import {
-  accountHeaderFields,
-  resolveAccount,
-} from "../google/account.js";
+import { resolveAccount } from "../google/account.js";
 
 export interface ServiceSubcommand {
   name: string;
@@ -66,11 +63,9 @@ notes:
     const sub = args[0];
     const def = subcommands.find((s) => s.name === sub);
     if (!def) {
-      throw new AxiError(
-        `Unknown ${service} subcommand: ${sub}`,
-        "VALIDATION_ERROR",
-        [`Run \`gws-axi ${service} --help\` to see available subcommands`],
-      );
+      throw new AxiError(`Unknown ${service} subcommand: ${sub}`, "VALIDATION_ERROR", [
+        `Run \`gws-axi ${service} --help\` to see available subcommands`,
+      ]);
     }
 
     // Account resolution runs even though the operation is stubbed — this

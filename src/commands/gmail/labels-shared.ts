@@ -27,15 +27,10 @@ export async function fetchLabels(
  * or a raw label ID (system labels like INBOX/UNREAD, or Label_<n> ids).
  * Throws LABEL_NOT_FOUND with discovery suggestions when nothing matches.
  */
-export function resolveLabelId(
-  name: string,
-  labels: gmail_v1.Schema$Label[],
-): string {
+export function resolveLabelId(name: string, labels: gmail_v1.Schema$Label[]): string {
   const exact = labels.find((l) => l.name === name);
   if (exact?.id) return exact.id;
-  const insensitive = labels.find(
-    (l) => l.name?.toLowerCase() === name.toLowerCase(),
-  );
+  const insensitive = labels.find((l) => l.name?.toLowerCase() === name.toLowerCase());
   if (insensitive?.id) return insensitive.id;
   const byId = labels.find((l) => l.id === name);
   if (byId?.id) return byId.id;
@@ -46,18 +41,12 @@ export function resolveLabelId(
 }
 
 /** Resolve a list of label references to IDs (see resolveLabelId). */
-export function resolveLabelIds(
-  names: string[],
-  labels: gmail_v1.Schema$Label[],
-): string[] {
+export function resolveLabelIds(names: string[], labels: gmail_v1.Schema$Label[]): string[] {
   return names.map((n) => resolveLabelId(n, labels));
 }
 
 /** Map label IDs back to their user-facing names, falling back to the id. */
-export function labelNamesFor(
-  ids: string[],
-  labels: gmail_v1.Schema$Label[],
-): string[] {
+export function labelNamesFor(ids: string[], labels: gmail_v1.Schema$Label[]): string[] {
   const byId = new Map<string, string>();
   for (const l of labels) {
     if (l.id) byId.set(l.id, l.name ?? l.id);

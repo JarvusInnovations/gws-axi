@@ -1,10 +1,6 @@
 import type { gmail_v1 } from "googleapis";
 import { gmailClient, translateGoogleError } from "../../google/client.js";
-import {
-  field,
-  renderListResponse,
-  type FieldDef,
-} from "../../output/index.js";
+import { field, renderListResponse, type FieldDef } from "../../output/index.js";
 
 export const LABELS_HELP = `usage: gws-axi gmail labels [flags]
 flags[2]:
@@ -55,10 +51,7 @@ function labelSchema(): FieldDef[] {
   ];
 }
 
-export async function gmailLabelsCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function gmailLabelsCommand(account: string, args: string[]): Promise<string> {
   const flags = parseFlags(args);
   const api = await gmailClient(account);
 

@@ -39,11 +39,9 @@ function parseFlags(args: string[]): ParsedFlags {
     if (!arg.startsWith("--") && fileId === undefined) fileId = arg;
   }
   if (!fileId) {
-    throw new AxiError(
-      "Missing file ID argument",
-      "VALIDATION_ERROR",
-      ["Usage: gws-axi drive permissions <file-id>"],
-    );
+    throw new AxiError("Missing file ID argument", "VALIDATION_ERROR", [
+      "Usage: gws-axi drive permissions <file-id>",
+    ]);
   }
   return { fileId };
 }
@@ -58,10 +56,7 @@ function permissionSchema(): FieldDef[] {
   ];
 }
 
-export async function drivePermissionsCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function drivePermissionsCommand(account: string, args: string[]): Promise<string> {
   const flags = parseFlags(args);
   const api = await driveClient(account);
 
@@ -93,8 +88,7 @@ export async function drivePermissionsCommand(
   try {
     const res = await api.permissions.list({
       fileId: flags.fileId,
-      fields:
-        "permissions(id,type,role,emailAddress,domain,displayName,deleted,pendingOwner)",
+      fields: "permissions(id,type,role,emailAddress,domain,displayName,deleted,pendingOwner)",
       supportsAllDrives: true,
     });
     perms = res.data.permissions ?? [];

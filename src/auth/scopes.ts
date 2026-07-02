@@ -43,13 +43,7 @@ export const ADDITIONAL_SCOPE_INFO: AdditionalScope[] = [
 
 export const ADDITIONAL_SCOPES = ADDITIONAL_SCOPE_INFO.map((s) => s.scope);
 
-export const SERVICES: ServiceName[] = [
-  "gmail",
-  "calendar",
-  "docs",
-  "drive",
-  "slides",
-];
+export const SERVICES: ServiceName[] = ["gmail", "calendar", "docs", "drive", "slides"];
 
 export const REQUIRED_APIS: Record<ServiceName, string> = {
   gmail: "gmail.googleapis.com",

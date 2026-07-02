@@ -83,8 +83,7 @@ export function predictUnverifiedAppWarning(
 ): UnverifiedAppWarning {
   if (!email) return "maybe";
   const domain = email.split("@")[1]?.toLowerCase() ?? "";
-  const isPersonalGoogle =
-    domain === "gmail.com" || domain === "googlemail.com";
+  const isPersonalGoogle = domain === "gmail.com" || domain === "googlemail.com";
   if (!published) return "always";
   if (isPersonalGoogle) return "always";
   return "maybe";
@@ -104,9 +103,7 @@ export interface RestrictedScopeProbe {
  * Google checks." Skipped (returned ok with a note) if the gmail scope
  * wasn't granted to begin with.
  */
-export async function probeRestrictedScope(
-  tokens: StoredTokens,
-): Promise<RestrictedScopeProbe> {
+export async function probeRestrictedScope(tokens: StoredTokens): Promise<RestrictedScopeProbe> {
   const granted = tokens.scope.split(" ").filter(Boolean);
   if (!granted.includes(SERVICE_SCOPES.gmail)) {
     return {
@@ -115,10 +112,9 @@ export async function probeRestrictedScope(
     };
   }
   try {
-    const res = await fetch(
-      "https://gmail.googleapis.com/gmail/v1/users/me/profile",
-      { headers: { authorization: `Bearer ${tokens.access_token}` } },
-    );
+    const res = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/profile", {
+      headers: { authorization: `Bearer ${tokens.access_token}` },
+    });
     if (res.status === 200) {
       return {
         ok: true,

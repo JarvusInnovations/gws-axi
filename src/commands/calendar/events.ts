@@ -95,7 +95,10 @@ function parseEventsFlags(args: string[]): ParsedFlags {
         if (next === "false" || next === "true") i++;
         break;
       case "--fields":
-        flags.extraFields = next.split(",").map((s) => s.trim()).filter(Boolean);
+        flags.extraFields = next
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
         i++;
         break;
     }
@@ -111,18 +114,14 @@ function baseSchema(): FieldDef[] {
     {
       name: "start",
       extract: (item) => {
-        const s = item.start as
-          | { dateTime?: string; date?: string }
-          | undefined;
+        const s = item.start as { dateTime?: string; date?: string } | undefined;
         return s?.dateTime ?? s?.date ?? "";
       },
     },
     {
       name: "end",
       extract: (item) => {
-        const e = item.end as
-          | { dateTime?: string; date?: string }
-          | undefined;
+        const e = item.end as { dateTime?: string; date?: string } | undefined;
         return e?.dateTime ?? e?.date ?? "";
       },
     },
@@ -147,13 +146,9 @@ function baseSchema(): FieldDef[] {
     {
       name: "attachments",
       extract: (item) => {
-        const a = item.attachments as
-          | Array<{ mimeType?: string }>
-          | undefined;
+        const a = item.attachments as Array<{ mimeType?: string }> | undefined;
         if (!a?.length) return "";
-        const docs = a.filter(
-          (x) => x.mimeType === "application/vnd.google-apps.document",
-        ).length;
+        const docs = a.filter((x) => x.mimeType === "application/vnd.google-apps.document").length;
         return docs > 0 && docs < a.length
           ? `${a.length} (${docs} Doc${docs === 1 ? "" : "s"})`
           : `${a.length}`;
@@ -197,7 +192,9 @@ function schemaWithExtras(extras: string[]): FieldDef[] {
               },
               {} as Record<string, number>,
             );
-            return `${a.length} (${Object.entries(counts).map(([k, v]) => `${v} ${k}`).join(", ")})`;
+            return `${a.length} (${Object.entries(counts)
+              .map(([k, v]) => `${v} ${k}`)
+              .join(", ")})`;
           },
         });
         break;
@@ -219,10 +216,7 @@ function schemaWithExtras(extras: string[]): FieldDef[] {
   return base;
 }
 
-export async function calendarEventsCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function calendarEventsCommand(account: string, args: string[]): Promise<string> {
   const flags = parseEventsFlags(args);
 
   const api = await calendarClient(account);
@@ -290,9 +284,7 @@ export async function calendarEventsCommand(
       );
     }
     if (flags.extraFields.length === 0) {
-      suggestions.push(
-        `Add \`--fields attendees,location,status\` to show more columns`,
-      );
+      suggestions.push(`Add \`--fields attendees,location,status\` to show more columns`);
     }
     if (flags.calendar === "primary") {
       suggestions.push(

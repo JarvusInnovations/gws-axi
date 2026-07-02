@@ -1,11 +1,7 @@
 import { AxiError } from "axi-sdk-js";
 import type { drive_v3 } from "googleapis";
 import { driveClient, translateGoogleError } from "../../google/client.js";
-import {
-  field,
-  renderListResponse,
-  type FieldDef,
-} from "../../output/index.js";
+import { field, renderListResponse, type FieldDef } from "../../output/index.js";
 
 export const LS_HELP = `usage: gws-axi drive ls [<folder-id>] [flags]
 args[1]:
@@ -208,19 +204,10 @@ async function recursiveWalk(
 }
 
 function fileSchema(): FieldDef[] {
-  return [
-    field("path"),
-    field("id"),
-    field("mime_type"),
-    field("size_bytes"),
-    field("modified"),
-  ];
+  return [field("path"), field("id"), field("mime_type"), field("size_bytes"), field("modified")];
 }
 
-export async function driveLsCommand(
-  account: string,
-  args: string[],
-): Promise<string> {
+export async function driveLsCommand(account: string, args: string[]): Promise<string> {
   const flags = parseFlags(args);
   const api = await driveClient(account);
 

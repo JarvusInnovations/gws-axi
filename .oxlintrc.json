@@ -1,0 +1,9 @@
+{
+  "plugins": ["import", "typescript", "unicorn", "oxc"],
+  "categories": {
+    "correctness": "error"
+  },
+  "rules": {
+    "no-unused-vars": ["error", { "ignoreRestSiblings": true, "argsIgnorePattern": "^_", "varsIgnorePattern": "^_", "caughtErrorsIgnorePattern": "^_" }]
+  }
+}

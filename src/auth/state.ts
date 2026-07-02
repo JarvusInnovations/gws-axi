@@ -6,10 +6,7 @@ import {
   SETUP_STEP_ORDER,
 } from "../config.js";
 
-export function markStepDone(
-  key: SetupStepKey,
-  detail: Record<string, unknown> = {},
-): SetupState {
+export function markStepDone(key: SetupStepKey, detail: Record<string, unknown> = {}): SetupState {
   const state = readSetupState();
   state.steps[key] = {
     ...state.steps[key],
@@ -22,10 +19,7 @@ export function markStepDone(
   return state;
 }
 
-export function updateStepMetadata(
-  key: SetupStepKey,
-  detail: Record<string, unknown>,
-): SetupState {
+export function updateStepMetadata(key: SetupStepKey, detail: Record<string, unknown>): SetupState {
   const state = readSetupState();
   state.steps[key] = { ...state.steps[key], ...detail };
   updateResumeHint(state);

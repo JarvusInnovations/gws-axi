@@ -1,9 +1,4 @@
-import {
-  getDefaultAccount,
-  listAccounts,
-  readSetupState,
-  setupProgress,
-} from "../config.js";
+import { getDefaultAccount, listAccounts, readSetupState, setupProgress } from "../config.js";
 import { joinBlocks, renderHelp, renderObject } from "../output/index.js";
 
 export async function homeCommand(): Promise<string> {
@@ -17,9 +12,7 @@ export async function homeCommand(): Promise<string> {
   if (accounts.length > 0) {
     fields.account = defaultAccount ?? accounts[0];
     if (accounts.length > 1) {
-      fields.other_accounts = accounts.filter(
-        (a) => a !== (defaultAccount ?? accounts[0]),
-      );
+      fields.other_accounts = accounts.filter((a) => a !== (defaultAccount ?? accounts[0]));
       fields.write_protection = "enabled (2+ accounts — writes require --account)";
     }
   }
