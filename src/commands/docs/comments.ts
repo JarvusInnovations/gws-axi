@@ -111,7 +111,26 @@ function replySchema(truncateAt: number): FieldDef[] {
   ];
 }
 
-export async function docsCommentsCommand(account: string, args: string[]): Promise<string> {
+/**
+ * Options for aliasing this Drive-comments handler onto another resource type
+ * (e.g. `sheets comments`). Drive comments are file-type-agnostic, so the only
+ * per-service differences are cosmetic: the header label and the not-found code.
+ */
+export interface CommentsOptions {
+  /** Header/message noun, e.g. "document" (default) or "spreadsheet". */
+  resource?: string;
+  /** Domain error code for a 404, e.g. "DOCUMENT_NOT_FOUND" (default). */
+  notFoundCode?: string;
+}
+
+export async function docsCommentsCommand(
+  account: string,
+  args: string[],
+  opts: CommentsOptions = {},
+): Promise<string> {
+  const resource = opts.resource ?? "document";
+  const Resource = resource.charAt(0).toUpperCase() + resource.slice(1);
+  const notFoundCode = opts.notFoundCode ?? "DOCUMENT_NOT_FOUND";
   const flags = parseFlags(args);
   const api = await driveClient(account);
 
@@ -134,11 +153,11 @@ export async function docsCommentsCommand(account: string, args: string[]): Prom
     });
     if (translated.code === "NOT_FOUND") {
       throw new AxiError(
-        `Document '${flags.documentId}' not found (or ${account} doesn't have access)`,
-        "DOCUMENT_NOT_FOUND",
+        `${Resource} '${flags.documentId}' not found (or ${account} doesn't have access)`,
+        notFoundCode,
         [
-          `Verify the document ID is correct (the portion of the URL after /d/)`,
-          `Confirm ${account} has at least view access to the document`,
+          `Verify the ${resource} ID is correct (the portion of the URL after /d/)`,
+          `Confirm ${account} has at least view access to the ${resource}`,
         ],
       );
     }
@@ -170,7 +189,7 @@ export async function docsCommentsCommand(account: string, args: string[]): Prom
   );
 
   const blocks: string[] = [];
-  blocks.push(renderObject({ account, document: flags.documentId }));
+  blocks.push(renderObject({ account, [resource]: flags.documentId }));
 
   if (commentRows.length === 0) {
     // AXI canonical empty-list: collapse to a scalar message under the
@@ -178,7 +197,7 @@ export async function docsCommentsCommand(account: string, args: string[]): Prom
     blocks.push(
       renderObject({
         comments: flags.includeResolved
-          ? "no comments on this document"
+          ? `no comments on this ${resource}`
           : "no open comments (pass --include-resolved to include resolved)",
       }),
     );

@@ -1,12 +1,12 @@
 # gws-axi
 
-Agent-ergonomic CLI for Google Workspace — Gmail, Calendar, Docs, Drive, and Slides behind a single command, built to the [AXI standard](https://axi.md): [TOON](https://toonformat.dev/)-formatted output, contextual next-step suggestions, idempotent mutations, and multi-account safety by default.
+Agent-ergonomic CLI for Google Workspace — Gmail, Calendar, Docs, Drive, Slides, and Sheets behind a single command, built to the [AXI standard](https://axi.md): [TOON](https://toonformat.dev/)-formatted output, contextual next-step suggestions, idempotent mutations, and multi-account safety by default.
 
 Designed for use by AI agents. Every response is structured, every error names a specific fix, and write operations lock to the explicit account when multiple are authenticated — so two agents in parallel sessions can't silently touch the wrong mailbox.
 
 ## Status
 
-Read coverage is complete across all five services; write coverage is rolling out service by service.
+Read coverage is complete across all six services; write coverage is rolling out service by service.
 
 | Service | Reads | Writes |
 | --- | --- | --- |
@@ -15,6 +15,7 @@ Read coverage is complete across all five services; write coverage is rolling ou
 | **Docs** | ✅ read · find · comments · download · revisions · diff | 🚧 append · insert-text · delete-range |
 | **Drive** | ✅ ls · get · search · permissions · download · revisions · activity | 🟡 upload · mkdir &nbsp;·&nbsp; 🚧 create · copy · move · rename · delete |
 | **Slides** | ✅ get · page · summarize | 🚧 create · update |
+| **Sheets** | ✅ read · comments | 🚧 update · append · clear · create · add-tab |
 
 <sub>✅ shipped · 🟡 partial · 🚧 planned · ✋ out of scope by design</sub>
 
@@ -87,7 +88,7 @@ To make sure agents reach for `gws-axi` instead of stale alternatives, also cons
   ```markdown
   ## Google Workspace
 
-  Use `gws-axi` for ALL Google Calendar, Gmail, Docs, Drive, and Slides
+  Use `gws-axi` for ALL Google Calendar, Gmail, Docs, Drive, Slides, and Sheets
   interactions. Check the SessionStart `gws-axi` line for current auth
   state; run `gws-axi --help` for the command surface. Prefer this over
   any other Google integrations.
@@ -243,6 +244,21 @@ gws-axi slides page <presentationId> <slideId>    # one slide's content
 gws-axi slides summarize <presentationId>         # all slides condensed to text per slide
 ```
 
+### Sheets
+
+A spreadsheet's tabs are its sheets, so `sheets read` mirrors `docs read`: it lists the tabs, and renders one tab's grid into context. Embedded links resolve inline as markdown `[text](url)`; cell notes come back in a `notes[]` block.
+
+```bash
+gws-axi sheets read <spreadsheetId>                       # single tab renders; multi-tab lists tabs to pick
+gws-axi sheets read <spreadsheetId> --tab Costs           # by tab title (or numeric gid)
+gws-axi sheets read <spreadsheetId> --tab Costs --range A1:D50   # scope to an A1 range
+gws-axi sheets read <spreadsheetId> --header-row          # promote row 1 to column names (auto for a frozen top row; --raw to force letters)
+gws-axi sheets read <spreadsheetId> --tab Costs --full    # don't cap at 50 rows
+gws-axi sheets comments <spreadsheetId>                   # review comments (Drive comments)
+```
+
+<sub>Cell values are the displayed strings (not formulas). The new `spreadsheets` scope means existing accounts must `gws-axi auth login` once.</sub>
+
 ### Multi-account with write protection
 
 gws-axi supports multiple Google accounts under one OAuth client. When two or more are authenticated, write operations require `--account <email>` explicitly — silent wrong-account mutations are impossible:
@@ -279,6 +295,7 @@ help[2]:
 - **Docs writes** (`append`, `insert-text`, `delete-range`, etc.): scaffolded as `NOT_IMPLEMENTED`. The next frontier.
 - **Drive writes**: `upload` and `mkdir` are shipped; `create` / `copy` / `move` / `rename` / `delete` are still scaffolded as `NOT_IMPLEMENTED`.
 - **Slides writes**: still scaffolded as `NOT_IMPLEMENTED` (reads are complete).
+- **Sheets writes** (`update`, `append`, `clear`, `create`, `add-tab`): scaffolded as `NOT_IMPLEMENTED`; `read` (with inline-markdown links + cell notes) and `comments` are shipped.
 - **Testing-mode tokens** still expire every 7 days *if* you haven't published your OAuth app yet. Run `gws-axi auth publish` for the walkthrough — it covers the single-developer Production flow and removes the expiry once you've re-auth'd each account.
 
 ## Contributing

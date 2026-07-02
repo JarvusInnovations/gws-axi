@@ -5,6 +5,7 @@ import {
   type docs_v1,
   type drive_v3,
   type gmail_v1,
+  type sheets_v4,
   type slides_v1,
 } from "googleapis";
 import { OAuth2Client } from "google-auth-library";
@@ -53,6 +54,11 @@ export async function driveClient(email: string): Promise<drive_v3.Drive> {
 export async function slidesClient(email: string): Promise<slides_v1.Slides> {
   const auth = await oauthClientForAccount(email);
   return google.slides({ version: "v1", auth });
+}
+
+export async function sheetsClient(email: string): Promise<sheets_v4.Sheets> {
+  const auth = await oauthClientForAccount(email);
+  return google.sheets({ version: "v4", auth });
 }
 
 interface GoogleApiErrorShape {

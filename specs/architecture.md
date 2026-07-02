@@ -13,14 +13,14 @@ Foundational, concrete structure and model decisions for `gws-axi`. These are fa
 ## Entry → dispatch → handler
 
 - Entry `bin/gws-axi.ts` → `src/cli.ts`, which calls `runAxiCli(...)` from `axi-sdk-js` with: description, version (from `package.json`), `TOP_HELP`, a `home` handler, a `commands` map, and `getCommandHelp`.
-- Top-level commands: `(none)=home`, `auth`, `doctor`, `calendar`, `gmail`, `docs`, `drive`, `slides`, `setup`.
+- Top-level commands: `(none)=home`, `auth`, `doctor`, `calendar`, `gmail`, `docs`, `drive`, `slides`, `sheets`, `setup`.
 - Per service: dispatcher `src/commands/<service>.ts` routes to per-subcommand handlers `src/commands/<service>/<sub>.ts`.
 - A subcommand handler is `(account: string, args: string[]) => Promise<string>`: it parses its own flags (hand-rolled loop over `args`, no arg-parsing library), does the work, and returns a rendered TOON string. Each handler exports a `<SUB>_HELP` constant.
 - The SessionStart hook is installed **only** by the explicit `setup hooks` command — never as a side effect of running other commands, and there is no env toggle. `runAxiCli` is called without a `hooks` option (the SDK does not auto-install). See [SessionStart hook](#sessionstart-hook) and `specs/commands/setup.md`.
 
 ## Google API client layer (`src/google/`)
 
-- **`client.ts`** — per-service factory functions `calendarClient` / `gmailClient` / `docsClient` / `driveClient` / `slidesClient`, each `(email) => Promise<client>`, all built on `oauthClientForAccount(email)` which seeds a `google-auth-library` `OAuth2Client` with stored tokens (access + refresh + `expiry_date` + scope) for proactive/mid-request refresh. Also exports `translateGoogleError`.
+- **`client.ts`** — per-service factory functions `calendarClient` / `gmailClient` / `docsClient` / `driveClient` / `slidesClient` / `sheetsClient`, each `(email) => Promise<client>`, all built on `oauthClientForAccount(email)` which seeds a `google-auth-library` `OAuth2Client` with stored tokens (access + refresh + `expiry_date` + scope) for proactive/mid-request refresh. Also exports `translateGoogleError`.
 - **`tokens.ts`** — token lifecycle. `getValidAccessToken(email)` refreshes before expiry with a 5-minute safety buffer. Reads OAuth client creds from `credentials.json`; throws `CREDENTIALS_MISSING` if absent. Tokens written `0600`.
 - **`probe.ts`** — doctor's live per-service read probes via raw `fetch` + bearer token; classifies `ok | warn | fail`. Scope-presence checks (`hasScope`) key off the single representative scope per service.
 - **`account.ts`** — `resolveAccount` (account resolution + write-protection; single source of truth) and `accountHeaderFields`.
@@ -38,7 +38,7 @@ Foundational, concrete structure and model decisions for `gws-axi`. These are fa
 ## Scope model (`src/auth/scopes.ts`)
 
 - `BASE_SCOPES` = `openid email profile`.
-- `SERVICE_SCOPES` = one representative scope per service: gmail→`gmail.modify`, calendar→`calendar`, docs→`documents`, drive→`drive`, slides→`presentations`.
+- `SERVICE_SCOPES` = one representative scope per service: gmail→`gmail.modify`, calendar→`calendar`, docs→`documents`, drive→`drive`, slides→`presentations`, sheets→`spreadsheets`.
 - `ADDITIONAL_SCOPES` = scopes layered on top of a representative service scope but **not** implied by it, kept separate so per-service probes keep keying off the single representative scope. Currently `gmail.settings.basic` (Gmail filter management). Adding an entry here means pre-existing accounts must re-auth once.
 - `allScopes()` = base ∪ service ∪ additional, requested together at login (single consent screen). `REQUIRED_APIS` maps each service to its `*.googleapis.com` API.
 
