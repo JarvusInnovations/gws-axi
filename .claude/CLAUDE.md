@@ -5,7 +5,7 @@ Agent-ergonomic CLI for Google Workspace (Gmail, Calendar, Docs, Drive, Slides) 
 ## Commands
 
 | Task | Command |
-|---|---|
+| --- | --- |
 | Install deps | `bun install` |
 | Build | `bun run build` (runs `tsc` + `chmod +x dist/bin/gws-axi.js`) |
 | Run locally | `bun run dev <args>` (runs TS directly via bun) |
@@ -91,6 +91,8 @@ This repo uses [specops](https://github.com/JarvusInnovations/specops): **specs 
   - `revisions <fileId>` lists version history (native files carry an incompleteness note; `docs revisions` is an alias); `docs download --revision <id>` fetches historical content (markdown-default for native via exportLinks, `alt=media` for binary). No new scope.
   - `activity <itemId>` is the Drive Activity API v2 timeline (create/edit/move/rename/delete/permission_change/comment; `--folder`, `--since/--until`, `--action`). Needs the `drive.activity.readonly` scope (added to `ADDITIONAL_SCOPES`; NOT implied by `auth/drive`) + `driveactivity.googleapis.com` (in `ADDITIONAL_APIS`) — **pre-existing accounts must re-auth once**.
 - ✅ Slides reads: `get`, `page`, `summarize`
+- ✅ Sheets reads: `read` — mirrors `docs read`'s tab model (a spreadsheet's sheets *are* its tabs). Always lists `sheets[N]{gid,title,index,rows,cols}`; single-tab auto-renders, multi-tab without `--tab` returns the listing to disambiguate. Grid renders as `cells[N]{row,A,B,…}` (real sheet row numbers + A1 column letters, addressing preserved for future writes) or, with `--header-row`, promotes row 1 to `rows[N]{…}`. `--range` scopes within a tab (tab-qualified range makes `--tab` optional); the default (no `--range`/`--full`) fetch is **bounded to the render window** (fast on tall sheets) and reports `cells_note` instead of a precise total when capped. FORMATTED_VALUE only (no formulas). Needs the new `spreadsheets` scope (added to `SERVICE_SCOPES` + `sheets.googleapis.com` in `REQUIRED_APIS`) — **pre-existing accounts must re-auth once**. `src/commands/sheets/read.ts`; spec: `specs/commands/sheets-read.md`; plan: `plans/sheets-read.md`.
+- 🚧 Sheets writes (`update`, `append`, `clear`, `create`, `add-tab`): scaffolded stubs, `NOT_IMPLEMENTED`
 - ✅ Drive writes: `upload` — push content to Drive from a local file, **stdin (`-`), or `--content <string>`** (exactly one source; stdin/`--content` require `--name`, and `--mime` defaults from the name's extension). `--parent`, `--name`, `--mime`, `--convert` (→ native Doc/Sheet/Slides), `--update <fileId>` (replace content + optional rename). **`--convert` + `--update`** is allowed when the target is already the native type the source converts to (markdown → existing Doc as a new revision — the write side of `docs read`/`diff`/`revisions`); a `files.get` rejects non-native/type-mismatch targets. No new scope (rides the full `drive` grant). Logic split into `src/util/mime-types.ts` (extension→MIME + conversion map) + `src/commands/drive/upload.ts`. Spec: `specs/commands/drive-upload.md`.
 - ✅ Drive writes: `mkdir <name>` — create a folder (`files.create` with the folder MIME, no media); `--parent` nests it. Produces the folder ID `drive upload --parent` consumes. Non-idempotent (re-run → duplicate), disclosed in help. `src/commands/drive/mkdir.ts`; spec: `specs/commands/drive-mkdir.md`.
 - 🚧 Drive writes (`create`, `copy`, `move`, `rename`, `delete`) and Slides writes (`create`, `update`): scaffolded stubs, `NOT_IMPLEMENTED`
