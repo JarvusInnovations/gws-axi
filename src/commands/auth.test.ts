@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AxiError } from "axi-sdk-js";
-import { authCommand, AUTH_HELP } from "./auth.js";
+import { authCommand, AUTH_HELP, resolveLoginAccount } from "./auth.js";
 
 // `auth join` writes into the XDG config dir; isolate it per-test.
 let configHome: string;
@@ -146,5 +146,33 @@ describe("auth join", () => {
   it("is documented in AUTH_HELP", () => {
     expect(AUTH_HELP).toContain("gws-axi auth join");
     expect(AUTH_HELP).toContain("--published");
+  });
+});
+
+describe("resolveLoginAccount", () => {
+  it("passes an explicit --account through unchanged", () => {
+    expect(resolveLoginAccount("x@y.com", [])).toBe("x@y.com");
+    expect(resolveLoginAccount("x@y.com", ["a@b.com", "c@d.com"])).toBe("x@y.com");
+  });
+
+  it("returns undefined for a first sign-in (0 accounts)", () => {
+    expect(resolveLoginAccount(undefined, [])).toBeUndefined();
+  });
+
+  it("defaults to the sole account for re-auth (1 account)", () => {
+    expect(resolveLoginAccount(undefined, ["only@acct.com"])).toBe("only@acct.com");
+  });
+
+  it("throws ACCOUNT_REQUIRED when 2+ accounts and no --account", () => {
+    try {
+      resolveLoginAccount(undefined, ["a@b.com", "c@d.com"]);
+      throw new Error("expected throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(AxiError);
+      expect((err as AxiError).code).toBe("ACCOUNT_REQUIRED");
+      // both accounts surfaced as ready-to-run suggestions
+      expect((err as AxiError).suggestions.join("\n")).toContain("--account a@b.com");
+      expect((err as AxiError).suggestions.join("\n")).toContain("--account c@d.com");
+    }
   });
 });
