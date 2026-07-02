@@ -1,8 +1,9 @@
 ---
-status: in-progress
+status: done
 depends: []
 specs:
   - specs/commands/slides-read.md
+pr: 38
 ---
 
 # Plan: Slides — inline-markdown links + comments
@@ -56,15 +57,17 @@ content extraction (still counted only); a dedicated `slides find`.
 
 ## Validation
 
-- [ ] `bun run lint && format:check && typecheck && build` all pass.
-- [ ] `bun run test` green incl. new `slides/text.test.ts`.
-- [ ] External link in a slide → `[text](url)` in `page`/`summarize` output;
-      `links_resolved: N` in the header.
-- [ ] Internal slide link → `[text](slide:<id>)`.
-- [ ] Adjacent same-link runs coalesce; trailing newline stays outside `[...]`.
-- [ ] `slides comments <id>` returns Drive comments labeled `presentation:` /
+- [x] `bun run lint && format:check && typecheck && build` all pass.
+- [x] `bun run test` green (177) incl. new `slides/text.test.ts` (10).
+- [x] External link in a slide → `[text](url)` in `page`/`summarize` output;
+      `links_resolved: N` in the header. (TIDES deck: summarize `links_resolved:
+      9`, page slide 21 `links_resolved: 1`.)
+- [x] Internal slide link → `[text](slide:<id>)` (unit test).
+- [x] Adjacent same-link runs coalesce; trailing newline stays outside `[...]`
+      (unit tests).
+- [x] `slides comments <id>` returns Drive comments labeled `presentation:` /
       `PRESENTATION_NOT_FOUND`; `docs comments` unchanged.
-- [ ] `slides --help` lists `comments`; `slides comments --help` documents it.
+- [x] `slides --help` lists `comments`; `slides comments --help` documents it.
 
 ## Risks / unknowns
 
@@ -77,8 +80,22 @@ content extraction (still counted only); a dedicated `slides find`.
 
 ## Notes
 
-(Populated at closeout.)
+- **Same pattern as Sheets (#36), no new fetch.** `presentations.get` already
+  returns `textRun.style.link` — the extractor just had to read it; no fields
+  mask or extra call. Comments reuse the parameterized `docsCommentsCommand`
+  (single source of truth: docs/sheets/slides all share it).
+- **Links inline, not a separate block.** Slides text is already rendered as
+  markdown, so a link belongs in the flowing text (`[text](url)`) rather than a
+  detached list — matches the Sheets choice for portability.
+- **Whitespace-outside-brackets matters.** Slides link runs commonly carry a
+  trailing `\n`; wrapping naively (`[text\n](url)`) breaks markdown, so
+  `runsToMarkdown` moves leading/trailing whitespace outside the `[...]`.
+- **Backfilled spec.** Slides had no spec; `slides-read.md` now documents the
+  shared extraction contract for get/page/summarize + the comments alias.
 
 ## Follow-ups
 
-(Populated at closeout.)
+- **Slides writes** — `create` / `update` (still `NOT_IMPLEMENTED` stubs).
+- **Image/chart content** — currently counted only; OCR/alt-text extraction or a
+  visual export path is a separate effort.
+- **`slides find`** — cross-slide text search (analog of `docs find`).
