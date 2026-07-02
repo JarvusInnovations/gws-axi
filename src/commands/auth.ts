@@ -446,6 +446,7 @@ async function runJoin(args: string[]): Promise<Record<string, unknown>> {
   const help: string[] = [
     "Run `gws-axi auth login --account you@example.com` to authenticate your account (use your email)",
     "Do NOT run `gws-axi auth setup` — this client is already provisioned; join handled steps 1-6",
+    'You do NOT need the Google Cloud Console or any GCP project access. At sign-in, click through the "Google hasn\'t verified this app" warning (Advanced → Go to <app>); if you land on a Console "You need additional access" page, ignore it and ask the person who shared this client',
   ];
   if (published) {
     help.push(

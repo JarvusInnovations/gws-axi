@@ -187,7 +187,23 @@ interface CallbackHandle {
   finalize: (result: { ok: true } | { ok: false; error: string }) => void;
 }
 
-async function waitForCallback(server: Server, expectedState: string): Promise<CallbackHandle> {
+interface CallbackExpectation {
+  state: string;
+  account?: string;
+  joined: boolean;
+}
+
+/** Error thrown when Google returns an `error=` param on the callback. */
+class OAuthCallbackError extends Error {
+  constructor(public readonly oauthError: string) {
+    super(`OAuth error: ${oauthError}`);
+  }
+}
+
+async function waitForCallback(
+  server: Server,
+  expected: CallbackExpectation,
+): Promise<CallbackHandle> {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       reject(new Error("Timed out waiting for OAuth callback after 5 minutes"));
@@ -209,12 +225,16 @@ async function waitForCallback(server: Server, expectedState: string): Promise<C
       if (errorParam) {
         res.statusCode = 200;
         res.setHeader("content-type", "text/html; charset=utf-8");
-        res.end(errorPage(errorParam));
+        res.end(
+          errorParam === "access_denied"
+            ? accessDeniedPage(expected.account, expected.joined)
+            : errorPage(errorParam),
+        );
         clearTimeout(timeout);
-        reject(new Error(`OAuth error: ${errorParam}`));
+        reject(new OAuthCallbackError(errorParam));
         return;
       }
-      if (!code || state !== expectedState) {
+      if (!code || state !== expected.state) {
         res.statusCode = 200;
         res.setHeader("content-type", "text/html; charset=utf-8");
         res.end(errorPage("invalid_state_or_missing_code"));
@@ -253,15 +273,71 @@ function successPage(): string {
 </head><body><h1>Authenticated</h1><p>You can close this tab and return to your terminal.</p></body></html>`;
 }
 
+function escapeHtml(s: string): string {
+  return s.replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c] ?? c);
+}
+
 function errorPage(message: string): string {
-  const escaped = message.replace(
-    /[<>&]/g,
-    (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c] ?? c,
-  );
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>gws-axi — error</title>
 <style>body{font-family:-apple-system,system-ui,sans-serif;max-width:480px;margin:60px auto;padding:24px;color:#222}h1{color:#c62828}pre{background:#f4f4f4;padding:12px;border-radius:4px}</style>
-</head><body><h1>Authentication failed</h1><pre>${escaped}</pre><p>Close this tab and check the terminal.</p></body></html>`;
+</head><body><h1>Authentication failed</h1><pre>${escapeHtml(message)}</pre><p>Close this tab and check the terminal.</p></body></html>`;
+}
+
+/**
+ * Did this install adopt a shared OAuth client via `auth join` (rather than a
+ * from-scratch `auth setup`)? Joined teammates can't touch the shared project's
+ * Cloud Console, so `access_denied` guidance must point them at the distributor.
+ */
+export function wasJoinedSetup(): boolean {
+  try {
+    const steps = readSetupState().steps;
+    return Object.values(steps).some((s) => (s as { via?: unknown }).via === "team-join");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Google returns `access_denied` most often because the user stopped at the
+ * "Google hasn't verified this app" screen (clicking "Back to safety" instead
+ * of Advanced → Go), and occasionally because of a Testing-mode test-user
+ * gap or a Production user-cap limit. A joined teammate can't and shouldn't
+ * touch the shared project's Cloud Console, so the guidance branches on
+ * `joined` and never sends them there. Pure + unit-tested.
+ */
+export function accessDeniedCliInstructions(
+  account: string | undefined,
+  joined: boolean,
+): string[] {
+  const who = account ? `\`${account}\`` : "your Google account";
+  const retry = `re-run \`gws-axi auth login --account ${account ?? "<email>"}\``;
+  const lines = [
+    `Google denied access. The most common cause is stopping at the "Google hasn't verified this app" screen — ${retry}, and this time click "Advanced" → "Go to <app> (unsafe)" (safe for an internal tool), then approve the scopes.`,
+  ];
+  if (joined) {
+    lines.push(
+      'You do NOT need Google Cloud Console or GCP project access. A Console "You need additional access" page is unrelated to signing in — ignore it and don\'t request project access.',
+      `If it still fails after clicking through the warning, ask whoever shared this client — the fix is on their side (the consent screen's config or user cap), not yours.`,
+    );
+  } else {
+    lines.push(
+      `If it still fails, check your consent screen: in Testing, ${who} must be a test user (Audience → Test users); in Production, confirm the app hasn't hit its OAuth user cap.`,
+    );
+  }
+  return lines;
+}
+
+function accessDeniedPage(account: string | undefined, joined: boolean): string {
+  const retry = "retry <code>gws-axi auth login</code> in your terminal";
+  const common = `<p>Google denied access. The most common cause is stopping at the <strong>"Google hasn't verified this app"</strong> screen — ${retry}, and this time click <strong>Advanced → Go to &lt;app&gt; (unsafe)</strong> (safe for an internal tool), then approve the scopes.</p>`;
+  const tail = joined
+    ? `<p>You don't need Google Cloud Console or GCP project access. A Console "You need additional access" page is unrelated to signing in — ignore it. If it still fails, ask whoever shared this client.</p>`
+    : `<p>If it still fails, check your consent screen (test users in Testing, or the OAuth user cap in Production).</p>`;
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><title>gws-axi — access denied</title>
+<style>body{font-family:-apple-system,system-ui,sans-serif;max-width:560px;margin:60px auto;padding:24px;color:#222;line-height:1.5}h1{color:#c62828}code{background:#f4f4f5;padding:2px 6px;border-radius:3px}</style>
+</head><body><h1>Access denied</h1>${common}${tail}<p>Close this tab and return to your terminal.</p></body></html>`;
 }
 
 /**
@@ -437,9 +513,15 @@ export async function awaitPendingAuth(): Promise<StepOutcome> {
   // default) vs. an additional one (default stays put).
   const accountsBefore = listAccounts();
 
+  const joined = wasJoinedSetup();
+
   let handle: CallbackHandle | undefined;
   try {
-    handle = await waitForCallback(server, pending.state);
+    handle = await waitForCallback(server, {
+      state: pending.state,
+      account: pending.expected_account,
+      joined,
+    });
     const tokens = await exchangeCode({
       clientId: creds.client_id,
       clientSecret: creds.client_secret,
@@ -538,6 +620,22 @@ export async function awaitPendingAuth(): Promise<StepOutcome> {
     // If the browser request is still open (waitForCallback succeeded but
     // a later step blew up), surface the error there too.
     handle?.finalize({ ok: false, error: message });
+
+    // access_denied is the common "user bailed at the unverified-app warning"
+    // case (and, less often, a test-user/user-cap gap). It gets its own code +
+    // join-aware guidance that never sends a joined teammate to the Console —
+    // distinct from a genuine flow error.
+    if (err instanceof OAuthCallbackError && err.oauthError === "access_denied") {
+      return {
+        step,
+        advanced: false,
+        title: "Google denied access",
+        error: message,
+        code: "ACCESS_DENIED",
+        instructions: accessDeniedCliInstructions(pending.expected_account, joined),
+      };
+    }
+
     return {
       step,
       advanced: false,
@@ -545,7 +643,9 @@ export async function awaitPendingAuth(): Promise<StepOutcome> {
       error: message,
       code: "OAUTH_FAILED",
       instructions: [
-        "Check that the consent screen (step 5) and test user (step 6) are configured",
+        joined
+          ? "This client was shared with you (`auth join`) — you don't need Cloud Console access; ask the distributor if it persists"
+          : "Check that the consent screen (step 5) and test user (step 6) are configured",
         "Re-run: `gws-axi auth login --account <email>` to start a fresh flow",
       ],
     };

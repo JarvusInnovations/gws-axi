@@ -141,19 +141,30 @@ export function writeSetupHtml(options: SetupHtmlOptions = {}): string {
   const initialSetupDone = nextKey === undefined;
   const accounts = readAccountRows();
 
+  // A joined install (`auth join`) adopted a teammate's already-provisioned
+  // client — steps 1-6 are done `via: team-join`. Such a teammate has no IAM on
+  // the shared GCP project and must NOT be sent to the Cloud Console, so we
+  // suppress the per-step Console deep-links for joined installs (they only need
+  // to authenticate). See specs/commands/auth-join.md.
+  const joined = SETUP_STEP_ORDER.some(
+    (k) => (state.steps[k] as { via?: unknown }).via === "team-join",
+  );
+
   const rows = SETUP_STEP_ORDER.map((key, idx) => {
     const step = state.steps[key];
     const isNext = key === nextKey;
     const status = step.done ? "✓ done" : isNext ? "→ next" : "… pending";
     const statusClass = step.done ? "done" : isNext ? "next" : "pending";
-    const links = linksForStep(key, projectId)
-      .map((l) => `<a href="${l.url}" target="_blank" rel="noopener">${l.label}</a>`)
-      .join(" · ");
+    const links = joined
+      ? "<em>provisioned by your team — no Console access needed</em>"
+      : linksForStep(key, projectId)
+          .map((l) => `<a href="${l.url}" target="_blank" rel="noopener">${l.label}</a>`)
+          .join(" · ") || "<em>no external action needed</em>";
     return `<tr class="${statusClass}">
       <td class="num">${idx + 1}</td>
       <td class="status">${status}</td>
       <td class="name">${STEP_LABELS[key]}</td>
-      <td class="links">${links || "<em>no external action needed</em>"}</td>
+      <td class="links">${links}</td>
     </tr>`;
   }).join("\n");
 
@@ -222,15 +233,22 @@ ${accounts
 </div>`
     : "";
 
-  const footerText = initialSetupDone
-    ? `Setup is complete. Keep this tab open — it will show an "Authenticate" button when you run <code>gws-axi auth login --account &lt;email&gt;</code> to add a new account. Regenerated every time a gws-axi auth command runs.`
-    : `Click the links above to complete each step in <em>this</em> browser (so you stay in the Google account you're signed into). Regenerated every time you run <code>gws-axi auth setup</code>.`;
+  const footerText =
+    joined && !initialSetupDone
+      ? `This client was provisioned by your team — you only need to authenticate. If you ever land on a Google Cloud Console "You need additional access" page, ignore it: you don't need GCP project access. Regenerated every time a gws-axi auth command runs.`
+      : initialSetupDone
+        ? `Setup is complete. Keep this tab open — it will show an "Authenticate" button when you run <code>gws-axi auth login --account &lt;email&gt;</code> to add a new account. Regenerated every time a gws-axi auth command runs.`
+        : `Click the links above to complete each step in <em>this</em> browser (so you stay in the Google account you're signed into). Regenerated every time you run <code>gws-axi auth setup</code>.`;
 
-  const summaryContent = initialSetupDone
-    ? `<strong>Status:</strong> Setup complete · OAuth client ready<br>
+  const summaryContent =
+    joined && !initialSetupDone
+      ? `<strong>This client was provisioned by your team</strong> (via <code>auth join</code>). You don't need the Google Cloud Console or any GCP project access — just authenticate your own Google account.<br>
+  <strong>Next:</strong> run <code>gws-axi auth login --account &lt;you@email&gt;</code> in your terminal; an "Authenticate" button appears here within 10s.`
+      : initialSetupDone
+        ? `<strong>Status:</strong> Setup complete · OAuth client ready<br>
   <strong>Project:</strong> ${projectId ? `<code>${projectId}</code>` : "(not set)"}<br>
   <strong>Accounts:</strong> ${accounts.length} authenticated${accounts.length > 1 ? ` · write protection active (writes require <code>--account</code>)` : ""}`
-    : `<strong>Project:</strong> ${projectId ? `<code>${projectId}</code>` : "(not set yet)"}<br>
+        : `<strong>Project:</strong> ${projectId ? `<code>${projectId}</code>` : "(not set yet)"}<br>
   <strong>Progress:</strong> ${progress} of ${SETUP_STEP_ORDER.length} steps complete
   ${nextKey ? `<br><strong>Next step:</strong> <code>${STEP_LABELS[nextKey]}</code> — click the buttons below, then run <code>gws-axi auth setup</code> to continue` : ""}`;
 

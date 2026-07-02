@@ -65,6 +65,7 @@ This repo uses [specops](https://github.com/JarvusInnovations/specops): **specs 
 
 - `docs/design.md` — architecture, auth model, doctor tiers, command surface, multi-account + write-protection spec
 - `docs/shared-client-future.md` — deferred shared-client decision with re-assessment triggers
+- `docs/shared-client-onboarding.md` — distributor runbook for the `auth join` shared-client flow (consent-screen config, teammate steps, no-Console-access rule)
 - `README.md` — npm page audience (end users)
 
 ## References
