@@ -248,6 +248,55 @@ export async function advanceOauthClient(
   };
 }
 
+// Shared Desktop-credentials parse + validate ──────────────────────
+// The single source of truth for "is this a usable Desktop OAuth client
+// JSON?" — consumed by `credentials_saved` (setup), the `oauth_client`
+// auto-confirm in runSetup, and `auth join`. Callers wrap the classified
+// result with their own context-specific titles/instructions; the
+// definition of *valid* lives here once
+// ([principles.md#single-source-of-truth-helpers]).
+export interface DesktopCredentials {
+  client_id: string;
+  client_secret: string;
+  project_id?: string;
+}
+
+export type DesktopCredentialsResult =
+  | { ok: true; value: DesktopCredentials }
+  | { ok: false; code: "FILE_NOT_FOUND" | "INVALID_JSON" | "WRONG_CLIENT_TYPE"; message: string };
+
+export function parseDesktopCredentials(path: string): DesktopCredentialsResult {
+  if (!existsSync(path)) {
+    return { ok: false, code: "FILE_NOT_FOUND", message: `No file at: ${path}` };
+  }
+
+  let parsed: {
+    installed?: { client_id?: string; client_secret?: string; project_id?: string };
+  };
+  try {
+    parsed = JSON.parse(readFileSync(path, "utf-8"));
+  } catch {
+    return { ok: false, code: "INVALID_JSON", message: "JSON parse failed" };
+  }
+
+  if (!parsed.installed?.client_id || !parsed.installed?.client_secret) {
+    return {
+      ok: false,
+      code: "WRONG_CLIENT_TYPE",
+      message: 'Expected an "installed" field with client_id and client_secret',
+    };
+  }
+
+  return {
+    ok: true,
+    value: {
+      client_id: parsed.installed.client_id,
+      client_secret: parsed.installed.client_secret,
+      project_id: parsed.installed.project_id,
+    },
+  };
+}
+
 // STEP 4 — credentials_saved ───────────────────────────────────────
 export async function advanceCredentialsSaved(flags: SetupFlags): Promise<StepOutcome> {
   const step: SetupStepKey = "credentials_saved";
@@ -264,42 +313,32 @@ export async function advanceCredentialsSaved(flags: SetupFlags): Promise<StepOu
     };
   }
 
-  if (!existsSync(flags.credentialsJson)) {
-    return {
-      step,
-      advanced: false,
-      title: "Credentials file not found",
-      error: `No file at: ${flags.credentialsJson}`,
-      code: "FILE_NOT_FOUND",
-      instructions: ["Check the path and re-run `gws-axi auth setup --credentials-json <path>`"],
+  const result = parseDesktopCredentials(flags.credentialsJson);
+  if (!result.ok) {
+    const meta: Record<string, { title: string; instructions: string[] }> = {
+      FILE_NOT_FOUND: {
+        title: "Credentials file not found",
+        instructions: ["Check the path and re-run `gws-axi auth setup --credentials-json <path>`"],
+      },
+      INVALID_JSON: {
+        title: "Credentials file is not valid JSON",
+        instructions: ["Re-download the credentials file from the Google Cloud Console"],
+      },
+      WRONG_CLIENT_TYPE: {
+        title: "Credentials file is not a Desktop OAuth client",
+        instructions: [
+          'Make sure the OAuth client type was "Desktop app" (not Web/Service account)',
+          "Recreate the credentials in the Console if needed",
+        ],
+      },
     };
-  }
-
-  let parsed: { installed?: { client_id?: string; client_secret?: string } };
-  try {
-    parsed = JSON.parse(readFileSync(flags.credentialsJson, "utf-8"));
-  } catch {
     return {
       step,
       advanced: false,
-      title: "Credentials file is not valid JSON",
-      error: "JSON parse failed",
-      code: "INVALID_JSON",
-      instructions: ["Re-download the credentials file from the Google Cloud Console"],
-    };
-  }
-
-  if (!parsed.installed?.client_id || !parsed.installed?.client_secret) {
-    return {
-      step,
-      advanced: false,
-      title: "Credentials file is not a Desktop OAuth client",
-      error: 'Expected an "installed" field with client_id and client_secret',
-      code: "WRONG_CLIENT_TYPE",
-      instructions: [
-        'Make sure the OAuth client type was "Desktop app" (not Web/Service account)',
-        "Recreate the credentials in the Console if needed",
-      ],
+      title: meta[result.code].title,
+      error: result.message,
+      code: result.code,
+      instructions: meta[result.code].instructions,
     };
   }
 
@@ -309,7 +348,7 @@ export async function advanceCredentialsSaved(flags: SetupFlags): Promise<StepOu
 
   markStepDone(step, {
     path: destPath,
-    client_id: parsed.installed.client_id,
+    client_id: result.value.client_id,
   });
 
   return {
