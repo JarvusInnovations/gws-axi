@@ -60,7 +60,11 @@ describe("buildGrid — default column-letter grid", () => {
   ];
 
   it("tags rows with real sheet numbers and A1 letters from origin", () => {
-    const g = buildGrid(values, { col0: 0, row1: 1 }, { headerRow: false, maxRows: 200, full: false });
+    const g = buildGrid(
+      values,
+      { col0: 0, row1: 1 },
+      { headerRow: false, maxRows: 200, full: false },
+    );
     expect(g.listName).toBe("cells");
     expect(g.schema.map((f) => f.name)).toEqual(["row", "A", "B", "C"]);
     expect(g.rows[0]).toEqual({ row: 1, A: "Item", B: "Qty", C: "Cost" });
@@ -69,14 +73,22 @@ describe("buildGrid — default column-letter grid", () => {
   });
 
   it("honors a non-A1 origin (C5) for letters and row numbers", () => {
-    const g = buildGrid([["x", "y"]], { col0: 2, row1: 5 }, { headerRow: false, maxRows: 200, full: false });
+    const g = buildGrid(
+      [["x", "y"]],
+      { col0: 2, row1: 5 },
+      { headerRow: false, maxRows: 200, full: false },
+    );
     expect(g.schema.map((f) => f.name)).toEqual(["row", "C", "D"]);
     expect(g.rows[0]).toEqual({ row: 5, C: "x", D: "y" });
   });
 
   it("caps rows and flags truncation, total counts the full set", () => {
     const many = Array.from({ length: 250 }, (_, i) => [String(i)]);
-    const g = buildGrid(many, { col0: 0, row1: 1 }, { headerRow: false, maxRows: 200, full: false });
+    const g = buildGrid(
+      many,
+      { col0: 0, row1: 1 },
+      { headerRow: false, maxRows: 200, full: false },
+    );
     expect(g.rows).toHaveLength(200);
     expect(g.totalRows).toBe(250);
     expect(g.truncated).toBe(true);
@@ -132,10 +144,7 @@ describe("extractGrid", () => {
     const rows = [
       { values: [{ formattedValue: "Item" }, { formattedValue: "Doc", hyperlink: "https://d/1" }] },
       {
-        values: [
-          { formattedValue: "x", note: "check this" },
-          { formattedValue: "y" },
-        ],
+        values: [{ formattedValue: "x", note: "check this" }, { formattedValue: "y" }],
       },
     ];
     const out = extractGrid(rows, { col0: 0, row1: 1 });
@@ -166,42 +175,74 @@ describe("extractGrid", () => {
 
 describe("resolveHeaderMode", () => {
   it("auto-promotes a single frozen top row when the window starts at row 1", () => {
-    expect(resolveHeaderMode({ explicitHeader: false, explicitRaw: false, frozenRows: 1, originRow1: 1 })).toEqual({
+    expect(
+      resolveHeaderMode({
+        explicitHeader: false,
+        explicitRaw: false,
+        frozenRows: 1,
+        originRow1: 1,
+      }),
+    ).toEqual({
       headerRow: true,
       auto: true,
     });
   });
 
   it("does not auto-promote when no row is frozen", () => {
-    expect(resolveHeaderMode({ explicitHeader: false, explicitRaw: false, frozenRows: 0, originRow1: 1 })).toEqual({
+    expect(
+      resolveHeaderMode({
+        explicitHeader: false,
+        explicitRaw: false,
+        frozenRows: 0,
+        originRow1: 1,
+      }),
+    ).toEqual({
       headerRow: false,
       auto: false,
     });
   });
 
   it("does not auto-promote multi-row frozen headers", () => {
-    expect(resolveHeaderMode({ explicitHeader: false, explicitRaw: false, frozenRows: 2, originRow1: 1 })).toEqual({
+    expect(
+      resolveHeaderMode({
+        explicitHeader: false,
+        explicitRaw: false,
+        frozenRows: 2,
+        originRow1: 1,
+      }),
+    ).toEqual({
       headerRow: false,
       auto: false,
     });
   });
 
   it("does not auto-promote when the fetched window starts below row 1", () => {
-    expect(resolveHeaderMode({ explicitHeader: false, explicitRaw: false, frozenRows: 1, originRow1: 5 })).toEqual({
+    expect(
+      resolveHeaderMode({
+        explicitHeader: false,
+        explicitRaw: false,
+        frozenRows: 1,
+        originRow1: 5,
+      }),
+    ).toEqual({
       headerRow: false,
       auto: false,
     });
   });
 
   it("--header-row forces promotion even without a frozen row", () => {
-    expect(resolveHeaderMode({ explicitHeader: true, explicitRaw: false, frozenRows: 0, originRow1: 1 })).toEqual({
+    expect(
+      resolveHeaderMode({ explicitHeader: true, explicitRaw: false, frozenRows: 0, originRow1: 1 }),
+    ).toEqual({
       headerRow: true,
       auto: false,
     });
   });
 
   it("--raw overrides a frozen-row auto-promotion", () => {
-    expect(resolveHeaderMode({ explicitHeader: false, explicitRaw: true, frozenRows: 1, originRow1: 1 })).toEqual({
+    expect(
+      resolveHeaderMode({ explicitHeader: false, explicitRaw: true, frozenRows: 1, originRow1: 1 }),
+    ).toEqual({
       headerRow: false,
       auto: false,
     });
@@ -216,7 +257,11 @@ describe("buildGrid — --header-row promotion", () => {
   ];
 
   it("promotes row 1 to column names and drops the row column", () => {
-    const g = buildGrid(values, { col0: 0, row1: 1 }, { headerRow: true, maxRows: 200, full: false });
+    const g = buildGrid(
+      values,
+      { col0: 0, row1: 1 },
+      { headerRow: true, maxRows: 200, full: false },
+    );
     expect(g.listName).toBe("rows");
     expect(g.schema.map((f) => f.name)).toEqual(["Item", "Qty", "Cost"]);
     expect(g.rows).toHaveLength(2);

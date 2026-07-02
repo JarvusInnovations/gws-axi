@@ -98,9 +98,11 @@ function parseFlags(args: string[]): ParsedFlags {
         const raw = args[++i];
         const n = Number(raw);
         if (!Number.isInteger(n) || n <= 0) {
-          throw new AxiError(`--max-rows must be a positive integer (got '${raw}')`, "VALIDATION_ERROR", [
-            "Usage: gws-axi sheets read <spreadsheetId> --max-rows <n>",
-          ]);
+          throw new AxiError(
+            `--max-rows must be a positive integer (got '${raw}')`,
+            "VALIDATION_ERROR",
+            ["Usage: gws-axi sheets read <spreadsheetId> --max-rows <n>"],
+          );
         }
         maxRows = n;
         break;
@@ -357,7 +359,9 @@ export function cellToMarkdown(cell: GridCellLike): { text: string; links: numbe
 
   if (cell.hyperlink) {
     // Empty-text link: fall back to showing the URL as its own label.
-    return raw ? { text: `[${raw}](${cell.hyperlink})`, links: 1 } : { text: cell.hyperlink, links: 1 };
+    return raw
+      ? { text: `[${raw}](${cell.hyperlink})`, links: 1 }
+      : { text: cell.hyperlink, links: 1 };
   }
 
   return { text: raw, links: 0 };

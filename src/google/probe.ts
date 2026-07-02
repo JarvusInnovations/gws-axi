@@ -257,11 +257,13 @@ export async function probeAccount(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     // token refresh failed — every service fails for this account
-    return (["gmail", "calendar", "docs", "drive", "slides", "sheets"] as ServiceName[]).map((service) => ({
-      service,
-      status: "fail" as const,
-      detail: message,
-    }));
+    return (["gmail", "calendar", "docs", "drive", "slides", "sheets"] as ServiceName[]).map(
+      (service) => ({
+        service,
+        status: "fail" as const,
+        detail: message,
+      }),
+    );
   }
 
   const ctx: ProbeContext = {
