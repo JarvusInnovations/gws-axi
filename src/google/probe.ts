@@ -199,6 +199,26 @@ function probeSlides(ctx: ProbeContext, driveOk: boolean): ProbeResult {
 }
 
 /**
+ * Sheets: same situation as docs/slides — no cheap generic endpoint (a real
+ * probe needs a known spreadsheet ID). Check scope presence and rely on the
+ * drive probe as a proxy for auth health.
+ */
+function probeSheets(ctx: ProbeContext, driveOk: boolean): ProbeResult {
+  const service: ServiceName = "sheets";
+  if (!hasScope(ctx.tokens, SERVICE_SCOPES.sheets)) {
+    return { service, status: "fail", detail: "scope not granted" };
+  }
+  if (!driveOk) {
+    return {
+      service,
+      status: "warn",
+      detail: "scope granted; drive probe failed so auth state unclear",
+    };
+  }
+  return { service, status: "ok", detail: "scope granted (no cheap direct probe)" };
+}
+
+/**
  * Presence checks for each ADDITIONAL_SCOPES entry — scopes layered on top of
  * a service's representative scope that are NOT implied by it. These are a
  * cheap token-string check (no API call). Each result is keyed to its parent
@@ -237,7 +257,7 @@ export async function probeAccount(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     // token refresh failed — every service fails for this account
-    return (["gmail", "calendar", "docs", "drive", "slides"] as ServiceName[]).map((service) => ({
+    return (["gmail", "calendar", "docs", "drive", "slides", "sheets"] as ServiceName[]).map((service) => ({
       service,
       status: "fail" as const,
       detail: message,
@@ -260,8 +280,9 @@ export async function probeAccount(
   const driveOk = drive.status === "ok";
   const docs = probeDocs(ctx, driveOk);
   const slides = probeSlides(ctx, driveOk);
+  const sheets = probeSheets(ctx, driveOk);
 
-  return [gmail, calendar, docs, drive, slides, ...probeAdditionalScopes(ctx)];
+  return [gmail, calendar, docs, drive, slides, sheets, ...probeAdditionalScopes(ctx)];
 }
 
 function errorResult(service: ServiceName, err: unknown): ProbeResult {
