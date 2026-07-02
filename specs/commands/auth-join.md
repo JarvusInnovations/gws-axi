@@ -77,9 +77,10 @@ project_id: jarvus-mcp
 client_id: 1065467392851-…apps.googleusercontent.com
 credentials: ~/.config/gws-axi/credentials.json
 steps_ready: 6 of 7 (only your own sign-in remains)
-help[3]:
+help[4]:
   Run `gws-axi auth login --account you@jarv.us` to authenticate your account
   Do NOT run `gws-axi auth setup` — this client is already provisioned; join handled steps 1–6
+  You do NOT need the Google Cloud Console or any GCP project access. At sign-in, click through the "Google hasn't verified this app" warning (Advanced → Go to <app>); if you land on a Console "You need additional access" page, ignore it and ask the person who shared this client
   Run `gws-axi doctor` after login to verify auth + runtime health
 ```
 
@@ -87,6 +88,31 @@ help[3]:
 - When `--published` was passed, add a line noting the client is marked published so
   the teammate's refresh token will be permanent (no `auth publish` needed).
 - Paths are home-collapsed (`~/…`) per the existing `collapseHome` convention.
+
+## Teammate never touches the Cloud Console
+
+A joined teammate has **no IAM on the shared GCP project** and must never be
+directed there — their only task is `auth login`. Two consequences follow from
+the `via: "team-join"` markers this command writes:
+
+- **`setup.html` suppresses the per-step Console deep-links** for a joined
+  install (each step's links become "provisioned by your team — no Console
+  access needed"), and the summary/footer state that no GCP access is needed.
+  A from-scratch `auth setup` still renders the links (its owner needs them).
+  Without this, a joined teammate clicks e.g. "Audience → Test users" and hits a
+  Console "You need additional access" IAM wall for a project they can't (and
+  needn't) access.
+- **`auth login` failure guidance is join-aware.** `access_denied` (usually the
+  user stopping at the "Google hasn't verified this app" screen instead of
+  Advanced → Go) returns code `ACCESS_DENIED` with guidance that, for a joined
+  install, points at the distributor and explicitly says a Console "additional
+  access" page is unrelated to signing in — never "add yourself as a test user"
+  (which a joined teammate can't do). A generic `OAUTH_FAILED` likewise drops the
+  "configure the consent screen" advice for joined installs.
+
+The distributor owns all project-side configuration (consent screen user
+type/publish status, user cap, any test users). See the shared-client runbook in
+`docs/`.
 
 ## Errors
 
