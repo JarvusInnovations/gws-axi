@@ -69,7 +69,10 @@ join flags[1]:
                               can't detect it; sets the local published flag so
                               login/publish reporting reflects permanent tokens)
 login flags[3]:
-  --account <email>           Authenticate or re-auth a specific account
+  --account <email>           Authenticate or re-auth a specific account. Omit
+                              only when 0 or 1 accounts exist (1 → re-auths it);
+                              with 2+ authenticated, --account is REQUIRED so the
+                              setup page + Google login_hint name the target.
   --no-wait                   Prepare only and return fast (for agent flows
                               that want to relay instructions to the user
                               before binding the callback server). Pair
@@ -490,6 +493,37 @@ async function runLogin(args: string[]): Promise<Record<string, unknown>> {
   return await blockOnCallback();
 }
 
+/**
+ * Resolve the account an `auth login` targets. The resolved account drives both
+ * the setup.html "authenticate as <email>" prompt AND the Google `login_hint`
+ * (which pre-selects the account at the consent screen) — so without it the user
+ * can't tell which browser profile/session to be in, and Google shows a bare
+ * account chooser.
+ *
+ *   explicit --account → passes through unchanged.
+ *   no --account, 0 accounts → first sign-in; undefined (Google shows chooser).
+ *   no --account, 1 account  → re-auth it (a mismatch is still caught later).
+ *   no --account, 2+ accounts → ambiguous; ACCOUNT_REQUIRED (must name which).
+ */
+export function resolveLoginAccount(
+  account: string | undefined,
+  existing: string[],
+): string | undefined {
+  if (account) return account;
+  if (existing.length === 1) return existing[0];
+  if (existing.length >= 2) {
+    throw new AxiError(
+      `${existing.length} accounts are authenticated — specify which one to (re)authenticate so the setup page and Google's account chooser can pre-select it`,
+      "ACCOUNT_REQUIRED",
+      [
+        ...existing.map((e) => `Re-authenticate ${e}: \`gws-axi auth login --account ${e}\``),
+        "Add a different account: `gws-axi auth login --account <new-email>`",
+      ],
+    );
+  }
+  return undefined;
+}
+
 async function prepareLogin(account: string | undefined): Promise<Record<string, unknown>> {
   if (!existsSync(credentialsPath())) {
     throw new AxiError(
@@ -498,6 +532,10 @@ async function prepareLogin(account: string | undefined): Promise<Record<string,
       ["Run `gws-axi auth setup` to continue progressive setup"],
     );
   }
+
+  // Resolve which account this login targets so the setup.html prompt and the
+  // Google login_hint can name it (see resolveLoginAccount).
+  account = resolveLoginAccount(account, listAccounts());
 
   // Pre-flight typo check: if --account is close to (but not exactly) an
   // existing authenticated account, abort before burning an OAuth round-
