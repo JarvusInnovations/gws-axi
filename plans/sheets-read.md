@@ -1,9 +1,10 @@
 ---
-status: in-progress
+status: done
 depends: []
 specs:
   - specs/commands/sheets-read.md
   - specs/architecture.md
+pr: 36
 ---
 
 # Plan: Sheets service — read
@@ -88,27 +89,32 @@ unit-testable without a Google client.
 
 ## Validation
 
-- [ ] `bun run build` (tsc) passes; `ServiceName` union change compiles with
+- [x] `bun run build` (tsc) passes; `ServiceName` union change compiles with
       `REQUIRED_APIS`/`probe` updated.
-- [ ] `bun run test` green, incl. new `sheets/read.test.ts`.
-- [ ] `gws-axi sheets --help` lists `read` under reads and the write stubs.
-- [ ] `gws-axi sheets read --help` documents flags + tab semantics.
-- [ ] Multi-tab spreadsheet, no `--tab` → tabs listing only, no grid, help
-      suggests `--tab <name>` per tab.
-- [ ] Single-tab (or `--tab`) → `cells[N]{row,A,B,…}` with correct row numbers
-      and column letters; `--range C5:E9` origins at `row: 5`, cols `C,D,E`.
-- [ ] `--header-row` promotes row 1 to column names and drops `row`; a single
+- [x] `bun run test` green (167), incl. new `sheets/read.test.ts` (26).
+- [x] `gws-axi sheets --help` lists `read`/`comments` under reads and the write stubs.
+- [x] `gws-axi sheets read --help` documents flags + tab semantics.
+- [x] Multi-tab spreadsheet, no `--tab` → tabs listing only, no grid, help
+      suggests `--tab <name>` per tab. (Beluga Playbook, 14 tabs.)
+- [x] Single-tab (or `--tab`) → `cells[N]{row,A,B,…}` with correct row numbers
+      and column letters; `--range B1:F8` origins at col `B`; C5-origin covered
+      in unit tests.
+- [x] `--header-row` promotes row 1 to column names and drops `row`; a single
       frozen top row auto-promotes (`header_source: frozen-row`); `--raw` forces
       the column-letter grid.
-- [ ] Row-capped render carries the truncation marker + `--full` help.
-- [ ] Empty tab/range → `cells: no data in …` scalar.
-- [ ] Embedded links resolve inline as markdown `[text](url)` (whole-cell +
+- [x] Row-capped render carries the truncation marker + `--full` help.
+- [x] Empty tab/range → `cells: no data in …` scalar.
+- [x] Embedded links resolve inline as markdown `[text](url)` (whole-cell +
       rich-text multi-link), `links_resolved: N` in header, link cells exempt
       from the truncation cap; cell notes surface in `notes[N]{cell,note}`.
-- [ ] `sheets comments <id>` returns the same Drive comments as `docs comments`.
-- [ ] Non-native file → `NON_NATIVE_SPREADSHEET`; unknown tab → `TAB_NOT_FOUND`
-      listing tabs; unknown file → `SPREADSHEET_NOT_FOUND`.
-- [ ] `gws-axi doctor` shows a `sheets` row (scope-presence probe).
+      (17 links resolved live on the Asset Tracker tab; notes via unit tests —
+      the test workbook has none.)
+- [x] `sheets comments <id>` returns the same Drive comments as `docs comments`
+      (labeled `spreadsheet:` / `SPREADSHEET_NOT_FOUND`).
+- [x] Unknown tab → `TAB_NOT_FOUND` listing tabs; unknown/non-native file →
+      `SPREADSHEET_NOT_FOUND` (distinct `NON_NATIVE_SPREADSHEET` deferred — see
+      Follow-ups).
+- [x] `gws-axi doctor` shows a `sheets` row (scope-presence probe).
 
 ## Risks / unknowns
 
@@ -124,9 +130,35 @@ unit-testable without a Google client.
 
 ## Notes
 
-(Populated at closeout.)
+- **Rich fetch by design.** The grid uses one `spreadsheets.get` +
+  `includeGridData` call (not `values.get`) so values, embedded links, and cell
+  notes come back together — required for default-on link resolution. Origin is
+  computed from the requested range, not a response echo (includeGridData has
+  none).
+- **Links inline as markdown, not a separate block.** Chosen for portability —
+  a link travels inside its cell (`[text](url)`) straight into a doc/ticket.
+  Link-bearing cells are exempt from the 200-char cell cap (truncating a URL
+  mid-string breaks it).
+- **Default cap is 50 rows** (owner call), bounded-fetched (`A1:<lastCol>52`) so
+  tall sheets stay fast and context-sized; a capped default read reports
+  `cells_note` rather than a precise total (the window doesn't know the total).
+- **Drive scope already authorizes Sheets reads.** The Sheets API accepts the
+  broad `drive` scope, so accounts with the drive grant can read sheets *before*
+  re-authing for the new `spreadsheets` scope — but `doctor` still (correctly)
+  reports `spreadsheets` as not-granted until re-auth, and writes will need it.
+- **Comments handler parameterized, not forked.** `docsCommentsCommand` gained a
+  `{ resource, notFoundCode }` options arg (single source of truth preserved);
+  `sheets comments` passes `spreadsheet` / `SPREADSHEET_NOT_FOUND`.
 
 ## Follow-ups
 
-(Populated at closeout — expected: Sheets writes, inline provenance, `--formula`,
-`sheets find`.)
+- **Sheets writes** — `update` / `append` / `clear` / `create` / `add-tab`
+  (currently `NOT_IMPLEMENTED` stubs). Needs the `spreadsheets` scope grant.
+- **`NON_NATIVE_SPREADSHEET`** — positive mimeType detection via a Drive
+  `files.get` on 404, instead of folding the .xlsx case into
+  `SPREADSHEET_NOT_FOUND` suggestions.
+- **`--formula`** — a `FORMULA` value-render option to expose formulas.
+- **`sheets find`** — cross-tab value search (analog of `docs find`).
+- **Inline provenance** — Sheets exposes no per-read revision id; provenance is
+  funnelled to `drive revisions` / `drive activity`. Revisit if a cheap anchor
+  becomes available.
