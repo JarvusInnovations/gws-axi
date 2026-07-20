@@ -1,9 +1,10 @@
 ---
-status: in-progress
+status: done
 depends: []
 specs:
   - specs/commands/calendar-conferencing.md
 issues: [43]
+pr: 44
 ---
 
 # Plan: Calendar — provider-uniform join URLs (conferenceData + scrape fallback)
@@ -81,8 +82,31 @@ conferencing on write commands (`create`/`update` still don't set
 
 ## Notes
 
-(Populated at closeout.)
+- **The issue's premise was half-wrong, and live data caught it.** #43 said the
+  join URL "lives in the structured conferenceData object" for Teams/Zoom/Webex.
+  Testing against a real Teams meeting (Transit Data - Weekly Sync) showed
+  `conferenceData: null` — Google only populates it for Calendar-integrated
+  conferences (native Meet or a Calendar add-on). Externally-organized meetings
+  synced in via invite carry the URL only in the description. So the
+  "fragile fallback" the issue dismissed is the *only* source for that whole
+  class of meeting; the scrape isn't a nicety, it's load-bearing.
+- **Scrape is provider-anchored, not "any URL".** The perceived fragility comes
+  from grabbing any URL; matching known conferencing hosts + join paths
+  (`meet.google.com`, `*.zoom.us/(j|w|my)`, `teams.(microsoft|live).com`,
+  `*.webex.com`) is reliable. `source`/`fromScrape` still disclose it so a
+  consumer can gate on structured-only if it prefers.
+- **No new scope, no new fetch.** `conferenceData`/`description`/`location` are
+  already in the default `events.list`/`get` response.
+- **Structured-beats-scraped disclosure** is captured as a local principle in
+  `specs/commands/calendar-conferencing.md`; promote to `principles.md` if a
+  second command needs the same structured-vs-scraped honesty.
 
 ## Follow-ups
 
-(Populated at closeout.)
+- **Conferencing on write commands** — `calendar create`/`update` don't set
+  `conferenceData` (would need `conferenceDataVersion=1` + a
+  `createRequest`). Separate effort if we want to *create* Meet links.
+- **Provider coverage** — Meet/Zoom/Teams/Webex today; new provider URL shapes
+  (GoTo, Around, vanity Zoom domains) are additive to `PROVIDER_PATTERNS`.
+- **Full calendar spec backfill** — this speccs only the conferencing surface of
+  `events`/`get`; the rest of the calendar command behavior remains unspecced.
