@@ -2,6 +2,7 @@ import { AxiError } from "axi-sdk-js";
 import type { calendar_v3 } from "googleapis";
 import { calendarClient, translateGoogleError } from "../../google/client.js";
 import { field, joinBlocks, renderHelp, renderList, renderObject } from "../../output/index.js";
+import { extractConference } from "./conference.js";
 import { formatEventTime } from "./dateish.js";
 
 export const GET_HELP = `usage: gws-axi calendar get <event-id> [flags]
@@ -19,6 +20,14 @@ output:
   location, hangout link, htmlLink) plus the attendee list with each
   person's response status. Description is truncated to 500 chars by
   default — use --full to see the complete body.
+
+  A conference{} block surfaces the provider-uniform join link when the
+  event has conferencing: provider, join_url, and source (conferenceData |
+  hangoutLink | description | location). conference_entry_points[] lists
+  the structured video/phone/sip entries when conferenceData is present.
+  A source of description/location means the URL was scraped best-effort
+  from free text (externally-organized Teams/Zoom/Webex meetings carry no
+  conferenceData) — verify before use.
 `;
 
 interface ParsedFlags {
@@ -126,6 +135,30 @@ export async function calendarGetCommand(account: string, args: string[]): Promi
   if (event.updated) details.updated = event.updated;
   blocks.push(renderObject({ event: details }));
 
+  // Conferencing block — the provider-uniform join surface. Resolves a join
+  // URL for Meet, Calendar-add-on Zoom/Teams/Webex, AND externally-organized
+  // meetings whose link lives only in the description (no conferenceData). The
+  // `source` field discloses structured-vs-scraped so the reader can judge
+  // trust. hangout_link stays in the details block above for back-compat.
+  const conference = extractConference(event);
+  if (conference && (conference.joinUrl || conference.provider || conference.entryPoints.length)) {
+    const confObj: Record<string, unknown> = {};
+    if (conference.provider) confObj.provider = conference.provider;
+    if (conference.joinUrl) confObj.join_url = conference.joinUrl;
+    if (conference.source) confObj.source = conference.source;
+    blocks.push(renderObject({ conference: confObj }));
+    if (conference.entryPoints.length > 0) {
+      const epSchema = [field("type"), field("uri"), field("label")];
+      blocks.push(
+        renderList(
+          "conference_entry_points",
+          conference.entryPoints as unknown as Array<Record<string, unknown>>,
+          epSchema,
+        ),
+      );
+    }
+  }
+
   if (descResult.value) {
     const descBlock: Record<string, unknown> = { description: descResult.value };
     if (descResult.truncated) {
@@ -196,6 +229,13 @@ export async function calendarGetCommand(account: string, args: string[]): Promi
   }
   if (descResult.truncated || attendees.length > 20) {
     suggestions.push(`Run with --full to see complete description and all attendees`);
+  }
+  if (conference?.joinUrl) {
+    const via =
+      conference.source === "description" || conference.source === "location"
+        ? ` (scraped from ${conference.source} — verify before use)`
+        : "";
+    suggestions.push(`Join ${conference.provider || "meeting"}: ${conference.joinUrl}${via}`);
   }
   if (event.htmlLink) {
     suggestions.push(`Open in browser: ${event.htmlLink}`);

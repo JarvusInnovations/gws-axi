@@ -2,6 +2,7 @@ import { AxiError } from "axi-sdk-js";
 import type { calendar_v3 } from "googleapis";
 import { calendarClient, translateGoogleError } from "../../google/client.js";
 import {
+  computed,
   field,
   mapEnum,
   pluck,
@@ -9,6 +10,7 @@ import {
   truncated,
   type FieldDef,
 } from "../../output/index.js";
+import { extractConference, resolveJoinUrl } from "./conference.js";
 import { parseDateishFlag } from "./dateish.js";
 
 export const EVENTS_HELP = `usage: gws-axi calendar events [flags]
@@ -19,7 +21,7 @@ flags[8]:
   --limit <n>          Max events to return (default: 100, max: 2500)
   --query <text>       Full-text search across summary/description/location/attendees
   --single-events      Expand recurring events into individual instances (default: true)
-  --fields <list>      Extra columns: status, organizer, location, attendees, description, htmlLink, hangoutLink
+  --fields <list>      Extra columns: status, organizer, location, attendees, description, htmlLink, hangoutLink, join_url, conference, conference_source
   --account <email>    Account override when 2+ are configured
 examples:
   gws-axi calendar events
@@ -27,6 +29,7 @@ examples:
   gws-axi calendar events --calendar team@jarv.us --limit 50
   gws-axi calendar events --query standup
   gws-axi calendar events --fields status,attendees,location
+  gws-axi calendar events --fields join_url,conference
 time formats:
   Timed events:  ISO 8601 with offset — 2026-04-20T14:00:00-04:00
   Local time:    2026-04-20T14:00 (interpreted as local tz)
@@ -43,6 +46,19 @@ default columns:
   to see file_ids and hand off to \`docs read\`).
   status column suppressed by default (most events are "confirmed" —
   add --fields status to see cancelled/tentative).
+conferencing:
+  --fields join_url         provider-uniform join link — resolves from
+                            structured conferenceData (Meet + Calendar add-on
+                            Zoom/Teams/Webex), then hangoutLink, then a
+                            provider-anchored URL scraped from the description
+                            or location (externally-organized Teams/Zoom/Webex
+                            meetings carry no conferenceData).
+  --fields conference       provider label (Google Meet / Zoom / Microsoft
+                            Teams / Webex).
+  --fields conference_source  where join_url came from: conferenceData |
+                            hangoutLink | description | location. A
+                            description/location value means a best-effort
+                            scrape — verify before use.
 `;
 
 interface ParsedFlags {
@@ -207,6 +223,37 @@ function schemaWithExtras(extras: string[]): FieldDef[] {
       case "hangoutLink":
         base.push(field("hangoutLink"));
         break;
+      case "join_url":
+        // Provider-uniform tappable join link. Resolution chain (structured →
+        // hangoutLink → description/location scrape) lives in conference.ts;
+        // resolves Teams/Zoom/Webex meetings that carry no conferenceData.
+        base.push(
+          computed("join_url", (item) =>
+            resolveJoinUrl(item as unknown as calendar_v3.Schema$Event),
+          ),
+        );
+        break;
+      case "conference":
+        // Provider label (Google Meet / Zoom / Microsoft Teams / Webex).
+        base.push(
+          computed(
+            "conference",
+            (item) =>
+              extractConference(item as unknown as calendar_v3.Schema$Event)?.provider ?? "",
+          ),
+        );
+        break;
+      case "conference_source":
+        // Which path resolved join_url: conferenceData | hangoutLink |
+        // description | location. Lets a consumer trust a structured hit and
+        // treat a description/location scrape as best-effort.
+        base.push(
+          computed(
+            "conference_source",
+            (item) => extractConference(item as unknown as calendar_v3.Schema$Event)?.source ?? "",
+          ),
+        );
+        break;
       default:
         // Unknown field — skip silently rather than error. Keeps --fields
         // lenient (user doesn't need to know exact field names).
@@ -290,6 +337,22 @@ export async function calendarEventsCommand(account: string, args: string[]): Pr
       suggestions.push(
         `Query a different calendar with \`--calendar <id>\` (list them with \`gws-axi calendar calendars\`)`,
       );
+    }
+    // Disclose when any join_url was scraped from description/location text
+    // rather than read from structured conferenceData — the scrape is
+    // provider-anchored but best-effort, so a consumer should verify.
+    const conferenceRequested = flags.extraFields.some((f) =>
+      ["join_url", "conference", "conference_source"].includes(f),
+    );
+    if (conferenceRequested) {
+      const scraped = items.filter(
+        (it) => extractConference(it as unknown as calendar_v3.Schema$Event)?.fromScrape,
+      ).length;
+      if (scraped > 0) {
+        suggestions.push(
+          `${scraped} join_url${scraped === 1 ? "" : "s"} scraped from event description/location text (no structured conferenceData) — verify before use`,
+        );
+      }
     }
   } else {
     // Empty-result-specific hints — don't recycle the general ones above.

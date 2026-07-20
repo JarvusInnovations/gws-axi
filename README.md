@@ -120,7 +120,8 @@ gws-axi doctor                           # prerequisites + setup + live API prob
 gws-axi calendar events                  # upcoming 7 days on primary
 gws-axi calendar events --from 2026-04-20T00:00 --to 2026-04-27T00:00
 gws-axi calendar events --fields attendees,location,status
-gws-axi calendar get <event-id>          # full detail + attendees
+gws-axi calendar events --fields join_url,conference  # provider-uniform join link (Meet/Zoom/Teams/Webex)
+gws-axi calendar get <event-id>          # full detail + attendees + conference block
 gws-axi calendar get <event-id> --full   # don't truncate description
 gws-axi calendar calendars               # list calendars accessible to this account
 gws-axi calendar search --query "standup"  # primary calendar by default
