@@ -1,9 +1,10 @@
 ---
-status: in-progress
+status: done
 depends: [drive-upload-update-convert]
 specs:
   - specs/commands/drive-upload.md
 issues: []
+pr: 46
 ---
 
 # Plan: guard `drive upload --update` against silently collapsing a multi-tab Doc
