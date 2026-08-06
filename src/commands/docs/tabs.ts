@@ -45,10 +45,7 @@ export function flattenTabSummaries(tabs: docs_v1.Schema$Tab[] | undefined): Tab
  * at all — callers treat "unknown" as "not multi-tab" rather than blocking a
  * write on a missing field.
  */
-export async function listDocumentTabs(
-  account: string,
-  documentId: string,
-): Promise<TabSummary[]> {
+export async function listDocumentTabs(account: string, documentId: string): Promise<TabSummary[]> {
   const docs = await docsClient(account);
   try {
     const res = await docs.documents.get({

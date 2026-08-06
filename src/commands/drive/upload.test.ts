@@ -148,9 +148,7 @@ describe("drive upload validateFlags", () => {
   });
 
   it("allows --replace-all-tabs with --update (tab count happens at runtime)", () => {
-    expect(() =>
-      validateFlags({ ...base, update: "1XyZ", replaceAllTabs: true }),
-    ).not.toThrow();
+    expect(() => validateFlags({ ...base, update: "1XyZ", replaceAllTabs: true })).not.toThrow();
   });
 
   it("rejects --replace-all-tabs without --update", () => {
