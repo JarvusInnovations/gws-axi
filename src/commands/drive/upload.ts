@@ -7,9 +7,44 @@ import type { drive_v3 } from "googleapis";
 import { driveClient, translateGoogleError } from "../../google/client.js";
 import { joinBlocks, renderHelp, renderObject } from "../../output/index.js";
 import { detectMimeType, googleConversionTarget } from "../../util/mime-types.js";
-import { listDocumentTabs } from "../docs/tabs.js";
+import { listDocumentTabs, type TabSummary } from "../docs/tabs.js";
+import { listSpreadsheetSheets } from "../sheets/tabs.js";
 
 const GOOGLE_DOC_MIME = "application/vnd.google-apps.document";
+const GOOGLE_SHEET_MIME = "application/vnd.google-apps.spreadsheet";
+
+/**
+ * Native types whose content is split across named sub-surfaces that a
+ * wholesale upload would flatten. Keyed by mimeType so the guard is one code
+ * path: a Doc's tabs and a Spreadsheet's sheets collapse identically, and both
+ * are gated by the same `--replace-all-tabs` opt-in (a spreadsheet's sheets
+ * *are* its tabs — the framing `sheets read` already uses).
+ */
+const TAB_CONTAINERS: Record<
+  string,
+  {
+    noun: string;
+    singular: string;
+    plural: string;
+    readCommand: string;
+    list: (account: string, fileId: string) => Promise<TabSummary[]>;
+  }
+> = {
+  [GOOGLE_DOC_MIME]: {
+    noun: "Document",
+    singular: "tab",
+    plural: "tabs",
+    readCommand: "docs read",
+    list: listDocumentTabs,
+  },
+  [GOOGLE_SHEET_MIME]: {
+    noun: "Spreadsheet",
+    singular: "sheet",
+    plural: "sheets",
+    readCommand: "sheets read",
+    list: listSpreadsheetSheets,
+  },
+};
 
 export const UPLOAD_HELP = `usage: gws-axi drive upload <source> [flags]
 args[1]:
@@ -30,8 +65,9 @@ flags[7]:
                        --update, only when the target is already that native type.
   --update <file-id>   Replace an existing file's content (new revision)
                        instead of creating a new file.
-  --replace-all-tabs   Required to --update a Doc that has 2+ tabs: the import
-                       collapses it to a single tab, destroying the others.
+  --replace-all-tabs   Required to --update a Doc with 2+ tabs or a Sheet with
+                       2+ sheets: the import collapses it to a single tab /
+                       sheet, destroying the others.
   --account <email>    REQUIRED when 2+ accounts are authenticated
 examples:
   gws-axi drive upload ./report.pdf
@@ -44,9 +80,10 @@ notes:
   Without --update, every upload creates a NEW Drive file — re-running makes
   another copy (Drive allows duplicate names). Use --update <id> to replace an
   existing file's content in place.
-  --update replaces a Doc WHOLESALE: it cannot target one tab of a multi-tab
-  doc, and the import leaves the doc with a single tab. Multi-tab targets are
-  refused unless you pass --replace-all-tabs.
+  --update replaces a Doc or Sheet WHOLESALE: it cannot target one tab of a
+  multi-tab doc or one sheet of a multi-sheet spreadsheet, and the import
+  leaves a single tab / sheet behind. Such targets are refused unless you
+  pass --replace-all-tabs.
 output:
   An \`action: created\` (or \`updated\`) line plus a \`file{...}\` object with
   id, name, mime_type, size_bytes, parents, and web_view_link.
@@ -237,6 +274,7 @@ export async function driveUploadCommand(account: string, args: string[]): Promi
   // below — which applies with or without --convert, since Drive converts the
   // media implicitly when the target is already native.
   let collapsedTabs = 0;
+  let collapsedNoun = "tabs";
   if (flags.update) {
     let existingMime: string;
     try {
@@ -289,25 +327,30 @@ export async function driveUploadCommand(account: string, args: string[]): Promi
       }
     }
 
-    // A Doc target is replaced WHOLESALE: Drive's import yields a single-tab
-    // document, so every tab but the first is destroyed. Refuse unless the
+    // A Doc or Spreadsheet target is replaced WHOLESALE: Drive's import yields
+    // a single-tab document / single-sheet spreadsheet, so every tab or sheet
+    // but the first is destroyed. Both are verified live. Refuse unless the
     // caller has said that's what they meant.
-    if (existingMime === GOOGLE_DOC_MIME) {
-      const tabs = await listDocumentTabs(account, flags.update);
-      if (tabs.length > 1 && !flags.replaceAllTabs) {
-        const titles = tabs.map((t) => t.title || t.id).join(", ");
+    const containerKind = TAB_CONTAINERS[existingMime];
+    if (containerKind) {
+      const parts = await containerKind.list(account, flags.update);
+      if (parts.length > 1 && !flags.replaceAllTabs) {
+        const titles = parts.map((p) => p.title || p.id).join(", ");
         throw new AxiError(
-          `Document '${flags.update}' has ${tabs.length} tabs — an update replaces all of them with a single tab`,
+          `${containerKind.noun} '${flags.update}' has ${parts.length} ${containerKind.plural} — an update replaces all of them with a single ${containerKind.singular}`,
           "MULTI_TAB_TARGET",
           [
-            `Tabs that would be lost: ${titles}`,
-            `Run \`gws-axi docs read ${flags.update}\` to inspect them first`,
-            "Pass --replace-all-tabs to proceed and collapse the doc to one tab",
-            "Per-tab writes aren't supported — Drive uploads replace a Doc wholesale",
+            `${containerKind.plural[0].toUpperCase()}${containerKind.plural.slice(1)} that would be lost: ${titles}`,
+            `Run \`gws-axi ${containerKind.readCommand} ${flags.update}\` to inspect them first`,
+            `Pass --replace-all-tabs to proceed and collapse it to one ${containerKind.singular}`,
+            `Per-${containerKind.singular} writes aren't supported — Drive uploads replace a ${containerKind.noun} wholesale`,
           ],
         );
       }
-      if (tabs.length > 1) collapsedTabs = tabs.length;
+      if (parts.length > 1) {
+        collapsedTabs = parts.length;
+        collapsedNoun = containerKind.plural;
+      }
     }
   }
 
@@ -382,7 +425,7 @@ export async function driveUploadCommand(account: string, args: string[]): Promi
   if (collapsedTabs > 0) {
     // Disclose the loss we were authorized to cause (surface-completeness-limits).
     suggestions.push(
-      `Replaced ${collapsedTabs} tabs with a single imported tab — the prior version is in \`gws-axi drive revisions ${id}\``,
+      `Replaced ${collapsedTabs} ${collapsedNoun} with a single imported ${collapsedNoun.slice(0, -1)} — the prior version is in \`gws-axi drive revisions ${id}\``,
     );
   }
   if (isNativeDoc) {

@@ -89,9 +89,10 @@ Against a scratch 3-tab Doc (`docs read` → `tab_count: 3`):
 
 ## Follow-ups
 
-- **Sheets has the identical hazard, unguarded**: `--convert --update` of a CSV
-  over a multi-sheet Spreadsheet collapses it the same way. Same shape of fix,
-  different API for the count — deliberately not bundled here.
+- ~~**Sheets has the identical hazard, unguarded**~~ — closed by
+  [`drive-upload-multi-sheet-guard`](drive-upload-multi-sheet-guard.md), which
+  reuses this plan's `--replace-all-tabs` / `MULTI_TAB_TARGET` rather than adding
+  a parallel flag.
 - **Tab-targeted writes** (`docs append --tab`, adding a tab) need Docs
   `batchUpdate`; `Schema$AddDocumentTabRequest` and per-request `tabId` locations
   do exist in the API, so the deferred `docs` write surface can reach tabs
