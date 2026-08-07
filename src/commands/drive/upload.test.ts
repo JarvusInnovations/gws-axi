@@ -34,6 +34,13 @@ describe("drive upload parseFlags", () => {
   it("parses --update with a file id", () => {
     const f = parseFlags(["./report.pdf", "--update", "1XyZ"]);
     expect(f.update).toBe("1XyZ");
+    expect(f.replaceAllTabs).toBe(false);
+  });
+
+  it("parses --replace-all-tabs as a boolean, consuming no value", () => {
+    const f = parseFlags(["./report.md", "--replace-all-tabs", "--update", "1XyZ"]);
+    expect(f.replaceAllTabs).toBe(true);
+    expect(f.update).toBe("1XyZ");
   });
 
   it("takes the first positional as the local path, ignoring later ones", () => {
@@ -66,6 +73,7 @@ describe("drive upload validateFlags", () => {
     mime: undefined,
     convert: false,
     update: undefined,
+    replaceAllTabs: false,
   };
 
   it("accepts a valid create invocation", () => {
@@ -137,5 +145,19 @@ describe("drive upload validateFlags", () => {
 
   it("allows --convert combined with --update (target-type check happens at runtime)", () => {
     expect(() => validateFlags({ ...base, convert: true, update: "1XyZ" })).not.toThrow();
+  });
+
+  it("allows --replace-all-tabs with --update (tab count happens at runtime)", () => {
+    expect(() => validateFlags({ ...base, update: "1XyZ", replaceAllTabs: true })).not.toThrow();
+  });
+
+  it("rejects --replace-all-tabs without --update", () => {
+    try {
+      validateFlags({ ...base, replaceAllTabs: true });
+      throw new Error("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(AxiError);
+      expect((err as AxiError).code).toBe("VALIDATION_ERROR");
+    }
   });
 });
