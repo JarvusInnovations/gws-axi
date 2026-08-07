@@ -7,12 +7,15 @@ import type { drive_v3 } from "googleapis";
 import { driveClient, translateGoogleError } from "../../google/client.js";
 import { joinBlocks, renderHelp, renderObject } from "../../output/index.js";
 import { detectMimeType, googleConversionTarget } from "../../util/mime-types.js";
+import { listDocumentTabs } from "../docs/tabs.js";
+
+const GOOGLE_DOC_MIME = "application/vnd.google-apps.document";
 
 export const UPLOAD_HELP = `usage: gws-axi drive upload <source> [flags]
 args[1]:
   <source>             Content source — exactly one of: a local file path
                        (default), \`-\` to read from stdin, or --content below
-flags[6]:
+flags[7]:
   --content <string>   Inline upload body (alternative to a path or stdin)
   --parent <folder-id> Destination folder ID (default: My Drive root).
                        Cannot be combined with --update.
@@ -27,6 +30,8 @@ flags[6]:
                        --update, only when the target is already that native type.
   --update <file-id>   Replace an existing file's content (new revision)
                        instead of creating a new file.
+  --replace-all-tabs   Required to --update a Doc that has 2+ tabs: the import
+                       collapses it to a single tab, destroying the others.
   --account <email>    REQUIRED when 2+ accounts are authenticated
 examples:
   gws-axi drive upload ./report.pdf
@@ -39,6 +44,9 @@ notes:
   Without --update, every upload creates a NEW Drive file — re-running makes
   another copy (Drive allows duplicate names). Use --update <id> to replace an
   existing file's content in place.
+  --update replaces a Doc WHOLESALE: it cannot target one tab of a multi-tab
+  doc, and the import leaves the doc with a single tab. Multi-tab targets are
+  refused unless you pass --replace-all-tabs.
 output:
   An \`action: created\` (or \`updated\`) line plus a \`file{...}\` object with
   id, name, mime_type, size_bytes, parents, and web_view_link.
@@ -53,6 +61,7 @@ export interface ParsedFlags {
   mime: string | undefined;
   convert: boolean;
   update: string | undefined;
+  replaceAllTabs: boolean;
 }
 
 export function parseFlags(args: string[]): ParsedFlags {
@@ -65,6 +74,7 @@ export function parseFlags(args: string[]): ParsedFlags {
     mime: undefined,
     convert: false,
     update: undefined,
+    replaceAllTabs: false,
   };
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -92,6 +102,9 @@ export function parseFlags(args: string[]): ParsedFlags {
       case "--update":
         flags.update = next;
         i++;
+        break;
+      case "--replace-all-tabs":
+        flags.replaceAllTabs = true;
         break;
       case "-":
         // `-` as the positional means read the body from stdin.
@@ -148,9 +161,16 @@ export function validateFlags(flags: ParsedFlags): void {
       "Drop --parent, or upload as a new file (omit --update) to place it in a folder",
     ]);
   }
+  if (flags.replaceAllTabs && !flags.update) {
+    throw new AxiError("--replace-all-tabs is only meaningful with --update", "VALIDATION_ERROR", [
+      "A new file has no existing tabs to replace — drop --replace-all-tabs",
+      "It acknowledges collapsing a multi-tab Doc when you --update one",
+    ]);
+  }
   // --convert + --update is allowed, but only against a target that's already
-  // the matching native type. That check needs the target's mimeType (a
-  // files.get), so it lives in the command, not in this pure validator.
+  // the matching native type; and updating a multi-tab Doc collapses it. Both
+  // checks need the target's state (a files.get / documents.get), so they live
+  // in the command, not in this pure validator.
 }
 
 export async function driveUploadCommand(account: string, args: string[]): Promise<string> {
@@ -212,10 +232,12 @@ export async function driveUploadCommand(account: string, args: string[]): Promi
 
   const api = await driveClient(account);
 
-  // --convert + --update: the target must already be the native type the
-  // source converts to. Verify before uploading so a mismatch fails clean
-  // rather than producing a surprise revision.
-  if (flags.update && flags.convert) {
+  // Every --update preflights the target's current type. `--convert` needs it
+  // to verify convertibility, and a native Doc target needs the tab check
+  // below — which applies with or without --convert, since Drive converts the
+  // media implicitly when the target is already native.
+  let collapsedTabs = 0;
+  if (flags.update) {
     let existingMime: string;
     try {
       const res = await api.files.get({
@@ -241,25 +263,51 @@ export async function driveUploadCommand(account: string, args: string[]): Promi
       }
       throw translated;
     }
-    if (!existingMime.startsWith("application/vnd.google-apps.")) {
-      throw new AxiError(
-        `--convert --update needs a native Google target, but '${flags.update}' is ${existingMime}`,
-        "VALIDATION_ERROR",
-        [
-          "Converting a binary file's type in place isn't supported — upload a new file with --convert instead",
-          "Or drop --convert to replace the binary content as-is",
-        ],
-      );
+    // --convert: the target must already be the native type the source
+    // converts to. Verify before uploading so a mismatch fails clean rather
+    // than producing a surprise revision.
+    if (flags.convert) {
+      if (!existingMime.startsWith("application/vnd.google-apps.")) {
+        throw new AxiError(
+          `--convert --update needs a native Google target, but '${flags.update}' is ${existingMime}`,
+          "VALIDATION_ERROR",
+          [
+            "Converting a binary file's type in place isn't supported — upload a new file with --convert instead",
+            "Or drop --convert to replace the binary content as-is",
+          ],
+        );
+      }
+      if (existingMime !== targetMime) {
+        throw new AxiError(
+          `${sourceMime} converts to ${targetMime}, but target file '${flags.update}' is ${existingMime}`,
+          "VALIDATION_ERROR",
+          [
+            "The source's native type must match the existing file's type",
+            "e.g. markdown/docx updates a Doc; csv/xlsx updates a Sheet",
+          ],
+        );
+      }
     }
-    if (existingMime !== targetMime) {
-      throw new AxiError(
-        `${sourceMime} converts to ${targetMime}, but target file '${flags.update}' is ${existingMime}`,
-        "VALIDATION_ERROR",
-        [
-          "The source's native type must match the existing file's type",
-          "e.g. markdown/docx updates a Doc; csv/xlsx updates a Sheet",
-        ],
-      );
+
+    // A Doc target is replaced WHOLESALE: Drive's import yields a single-tab
+    // document, so every tab but the first is destroyed. Refuse unless the
+    // caller has said that's what they meant.
+    if (existingMime === GOOGLE_DOC_MIME) {
+      const tabs = await listDocumentTabs(account, flags.update);
+      if (tabs.length > 1 && !flags.replaceAllTabs) {
+        const titles = tabs.map((t) => t.title || t.id).join(", ");
+        throw new AxiError(
+          `Document '${flags.update}' has ${tabs.length} tabs — an update replaces all of them with a single tab`,
+          "MULTI_TAB_TARGET",
+          [
+            `Tabs that would be lost: ${titles}`,
+            `Run \`gws-axi docs read ${flags.update}\` to inspect them first`,
+            "Pass --replace-all-tabs to proceed and collapse the doc to one tab",
+            "Per-tab writes aren't supported — Drive uploads replace a Doc wholesale",
+          ],
+        );
+      }
+      if (tabs.length > 1) collapsedTabs = tabs.length;
     }
   }
 
@@ -330,7 +378,13 @@ export async function driveUploadCommand(account: string, args: string[]): Promi
 
   const suggestions: string[] = [];
   const id = file.id ?? "";
-  const isNativeDoc = file.mimeType === "application/vnd.google-apps.document";
+  const isNativeDoc = file.mimeType === GOOGLE_DOC_MIME;
+  if (collapsedTabs > 0) {
+    // Disclose the loss we were authorized to cause (surface-completeness-limits).
+    suggestions.push(
+      `Replaced ${collapsedTabs} tabs with a single imported tab — the prior version is in \`gws-axi drive revisions ${id}\``,
+    );
+  }
   if (isNativeDoc) {
     suggestions.push(`Run \`gws-axi docs read ${id}\` to read it as markdown`);
   } else if ((file.mimeType ?? "").startsWith("application/vnd.google-apps.")) {
