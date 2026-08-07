@@ -1,9 +1,10 @@
 ---
-status: in-progress
+status: done
 depends: [drive-upload-multi-tab-guard]
 specs:
   - specs/commands/drive-upload.md
 issues: []
+pr: 48
 ---
 
 # Plan: extend the wholesale-replace guard to multi-sheet Spreadsheets
@@ -62,7 +63,7 @@ distinct A1 content):
       the opt-in still discloses "Replaced 3 tabs".
 - [x] Single-sheet Spreadsheet `--update` → no friction.
 - [x] Non-native (`text/plain`) target → no preflight, unchanged.
-- [ ] `bun run build`, `lint`, `format:check`, `typecheck`, `test` all clean.
+- [x] `bun run build`, `lint`, `format:check`, `typecheck`, `test` all clean (211 tests).
 
 ## Risks / unknowns
 
