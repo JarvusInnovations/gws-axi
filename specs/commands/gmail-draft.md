@@ -58,8 +58,9 @@ Rules:
 
 - **Part order is `text/plain` then `text/html`.** RFC 2046 orders alternatives least- to
   most-faithful; clients pick the last they can render.
-- **The `text/plain` part is the `--body` source verbatim** — unwrapped, unmodified. Markdown
-  source is readable as plain text, so this doubles as the text-only fallback.
+- **The `text/plain` part is the `--body` source verbatim** — unwrapped, unmodified. It is the
+  fallback for the *stored draft*, not necessarily for the delivered message: see
+  [What Gmail does on send](#what-gmail-does-on-send).
 - **The boundary is unique per message** and cannot collide with body content
   (`=_gws-axi_<uuid>`). No content scanning or boundary-retry is required.
 - **Both parts are base64** with CRLF line endings, wrapped at 76 columns (RFC 2045), so
@@ -73,6 +74,23 @@ the recipient sees permanently narrow, ragged columns that nothing can reflow. T
 compose window shows the original unwrapped paragraphs, so the damage is invisible until
 after send. Emitting the HTML alternative keeps the composer in rich-text mode and leaves
 line structure under this command's control rather than the sending client's.
+
+### What Gmail does on send
+
+Verified against a real send: Gmail does **not** forward the stored draft byte-for-byte. It
+re-derives both parts from the `text/html` one, with its own boundary — wrapping the rendered
+fragment in a `<div dir="ltr">`, adding `target="_blank"` to links, and generating a *new*
+`text/plain` alternative from that HTML (so `**bold**` arrives as `*bold*`, and a link as
+`text <url>`), hard-wrapped at ~75 columns.
+
+Two consequences an implementer must not get wrong:
+
+1. **The HTML part is the load-bearing one.** It is the only part whose content survives to
+   the recipient. Effort spent hand-tuning the `text/plain` part for delivered output is
+   wasted — Gmail discards it.
+2. **The ~75-column wrapping in a delivered message is now expected and harmless**, because it
+   lands on the regenerated fallback alternative rather than on the only part present. That is
+   precisely the difference from the single-part failure described below.
 
 ## Body rendering
 
