@@ -6,7 +6,7 @@ import { joinBlocks, renderHelp, renderObject } from "../../output/index.js";
 import { buildRawMessage, parseRecipients } from "./compose.js";
 
 export const DRAFT_HELP = `usage: gws-axi gmail draft --to <emails> --subject <text> --body <markdown> [flags]
-flags[8]:
+flags[9]:
   --to <emails>        REQUIRED — comma-separated recipient addresses
   --subject <text>     Subject line (default: empty)
   --body <text>        Body text. Pass via quoted string or shell heredoc
@@ -15,6 +15,8 @@ flags[8]:
   --cc <emails>        Comma-separated Cc addresses
   --bcc <emails>       Comma-separated Bcc addresses
   --thread <thread-id> Attach the draft to an existing thread (reply draft)
+  --plain              Treat the body as LITERAL text, not markdown. Use when
+                       *, _, # or backticks must reach the reader as typed
   --account <email>    REQUIRED when 2+ accounts are authenticated
 examples:
   gws-axi gmail draft --to alice@x.com --subject "Re: budget" --body "Looks good — approving."
@@ -29,7 +31,8 @@ notes:
   newline you write becomes a line break in the sent message, so a body
   pre-wrapped at 72/80 columns arrives locked to that width on every screen.
   Blank line = new paragraph. GFM applies: **bold**, lists, tables, fenced
-  code blocks (use those for text meant literally).
+  code blocks (use those for text meant literally) — or pass --plain to turn
+  markdown off entirely and keep indentation as typed.
 output:
   Returns \`action: drafted\` plus the new draft_id, message_id, recipients,
   and subject. A help line links to where to review/send it.
@@ -52,6 +55,7 @@ interface ParsedFlags {
   body: string | undefined;
   bodyFile: string | undefined;
   thread: string | undefined;
+  plain: boolean;
 }
 
 function parseFlags(args: string[]): ParsedFlags {
@@ -63,6 +67,7 @@ function parseFlags(args: string[]): ParsedFlags {
     body: undefined,
     bodyFile: undefined,
     thread: undefined,
+    plain: false,
   };
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -95,6 +100,9 @@ function parseFlags(args: string[]): ParsedFlags {
       case "--thread":
         flags.thread = next;
         i++;
+        break;
+      case "--plain":
+        flags.plain = true;
         break;
     }
   }
@@ -135,6 +143,7 @@ export async function gmailDraftCommand(account: string, args: string[]): Promis
     bcc: flags.bcc.length ? flags.bcc : undefined,
     subject: flags.subject,
     body,
+    plain: flags.plain,
   });
 
   const message: gmail_v1.Schema$Message = { raw };
