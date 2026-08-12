@@ -1,10 +1,11 @@
 ---
-status: planned
+status: done
 depends: []
 specs:
   - specs/api/conventions.md
   - specs/principles.md
 issues: [50]
+pr: 52
 ---
 
 # Plan: signpost the working path from every stubbed subcommand
@@ -64,17 +65,17 @@ extracting the OAuth token and hand-rolling a `.js` script to update a spreadshe
 
 ## Validation
 
-- [ ] `gws-axi sheets --help` shows an `alternatives[N]:` block naming `drive upload`.
-- [ ] `gws-axi sheets update <id> --account <email>` returns `NOT_IMPLEMENTED` whose **first**
+- [x] `gws-axi sheets --help` shows an `alternatives[N]:` block naming `drive upload`.
+- [x] `gws-axi sheets update <id> --account <email>` returns `NOT_IMPLEMENTED` whose **first**
       suggestion is the `drive upload --update … --convert` line, not the account diagnostic.
-- [ ] `gws-axi sheets update --help` ends with an `instead[N]:` block.
-- [ ] Same three checks pass for `docs append`, `drive create`, and `slides update`.
-- [ ] `sheets add-tab` and `drive move` (no alternative) state that explicitly rather than
+- [x] `gws-axi sheets update --help` ends with an `instead[N]:` block.
+- [x] Same three checks pass for `docs append`, `drive create`, and `slides update`.
+- [x] `sheets add-tab` and `drive move` (no alternative) state that explicitly rather than
       omitting the block.
-- [ ] `calendar --help` is unchanged (nothing stubbed) and gains no empty `alternatives:` block.
-- [ ] Every alternative line names a command that actually resolves today
+- [x] `calendar --help` is unchanged (nothing stubbed) and gains no empty `alternatives:` block.
+- [x] Every alternative line names a command that actually resolves today
       (`drive upload`, `drive mkdir`, `docs download`).
-- [ ] `bun run test` and `bun run build` pass.
+- [x] `bun run test` (220 passed) and `bun run build` pass.
 
 ## Risks / unknowns
 
@@ -88,8 +89,16 @@ extracting the OAuth token and hand-rolling a `.js` script to update a spreadshe
 
 ## Notes
 
-(Populated at closeout.)
+- The alternative lines live in each dispatcher's `SUBCOMMANDS` table rather than in a
+  central registry, so deleting a stub deletes its claim. That placement is the whole
+  mitigation for signpost drift as real writes land.
+- `src/commands/service-stub.ts` (`buildServiceStub`) is unreferenced — dead code predating
+  the real dispatchers. Left in place; see Follow-ups.
+- `notImplemented` reorders the existing suggestions rather than adding to them: the account
+  diagnostic was first and is now last. Anything asserting on `suggestions[0]` for a stubbed
+  subcommand changes meaning.
 
 ## Follow-ups
 
-(Populated at closeout.)
+- Issue [#53](https://github.com/JarvusInnovations/gws-axi/issues/53) — remove the unused
+  `buildServiceStub` helper in `src/commands/service-stub.ts`.
