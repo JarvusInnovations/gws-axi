@@ -77,20 +77,26 @@ line structure under this command's control rather than the sending client's.
 
 ### What Gmail does on send
 
-Verified against a real send: Gmail does **not** forward the stored draft byte-for-byte. It
-re-derives both parts from the `text/html` one, with its own boundary — wrapping the rendered
-fragment in a `<div dir="ltr">`, adding `target="_blank"` to links, and generating a *new*
-`text/plain` alternative from that HTML (so `**bold**` arrives as `*bold*`, and a link as
-`text <url>`), hard-wrapped at ~75 columns.
+Gmail does **not** forward the stored draft byte-for-byte. Its composer adopts *one* of the
+two parts as the editing surface, discards the other, and regenerates both from the adopted
+one under its own boundary on send. **Which part it adopts is not under this command's
+control**, and both outcomes have been observed on drafts built identically:
 
-Two consequences an implementer must not get wrong:
+| Adopted | Composer shows | Delivered HTML |
+| --- | --- | --- |
+| `text/html` | rich text | our rendered markup, re-wrapped in `<div dir="ltr">`, `target="_blank"` added to links |
+| `text/plain` | the raw body source | HTML regenerated from the plain text — `<br><br>` between blocks, and **any markdown syntax arrives literally** (`**bold**`, `[text](url)`) |
 
-1. **The HTML part is the load-bearing one.** It is the only part whose content survives to
-   the recipient. Effort spent hand-tuning the `text/plain` part for delivered output is
-   wasted — Gmail discards it.
-2. **The ~75-column wrapping in a delivered message is now expected and harmless**, because it
-   lands on the regenerated fallback alternative rather than on the only part present. That is
-   precisely the difference from the single-part failure described below.
+Two rules follow, and an implementer must not get either wrong:
+
+1. **Neither part may contain anything the recipient shouldn't read.** Because the plain part
+   can become the source of the delivered HTML, it must be a plain-text *rendering* of the
+   body, never markup a reader would see raw. See [Body rendering](#body-rendering).
+2. **The multipart structure is what fixes the wrapping, not the HTML content.** Unbroken
+   paragraphs survive under *both* outcomes above — Gmail's ~75-column hard wrap lands on
+   whichever part it regenerates as the fallback, instead of on the only part present. That
+   is precisely the difference from the single-part failure described below, and it is why
+   the fix holds even when the rendered markup is discarded.
 
 ## Body rendering
 
