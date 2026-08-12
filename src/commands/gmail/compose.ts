@@ -31,8 +31,14 @@ export interface ComposeFields {
   cc?: string[];
   bcc?: string[];
   subject: string;
-  /** Markdown source, rendered to the HTML body. */
+  /** Markdown source, rendered to the HTML body — unless `plain` is set. */
   body: string;
+  /**
+   * Treat `body` as literal text rather than markdown. Still sends a single
+   * `text/html` part (reverting to `text/plain` is the original defect); the
+   * HTML is built structurally instead of through the markdown renderer.
+   */
+  plain?: boolean;
 }
 
 /** Split a comma-separated recipient flag into trimmed, non-empty addresses. */
@@ -67,6 +73,43 @@ export function renderMarkdown(body: string): string {
   return `<html><body>${fragment}</body></html>`;
 }
 
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/**
+ * Keep indentation and column alignment that HTML would otherwise collapse.
+ *
+ * Leading spaces become `&nbsp;` outright; an internal run keeps one real
+ * space — a wrap point, so the line still reflows — and pads the rest. This is
+ * what Gmail itself does when it converts plain text to HTML, so it is known to
+ * survive the composer.
+ */
+function preserveSpacing(line: string): string {
+  return line
+    .replace(/\t/g, "    ")
+    .replace(/^ +/, (run) => "&nbsp;".repeat(run.length))
+    .replace(/ {2,}/g, (run) => ` ${"&nbsp;".repeat(run.length - 1)}`);
+}
+
+/**
+ * Render the body as literal text: no markdown, so `*`, `_`, `#` and friends
+ * reach the reader exactly as written. Blank line starts a paragraph, a single
+ * newline is a line break — the same block semantics as the markdown path, so
+ * `--plain` changes how the body is interpreted, not how it is laid out.
+ */
+export function renderPlainText(body: string): string {
+  const blocks = body
+    .replace(/\r\n/g, "\n")
+    .split(/\n{2,}/)
+    .filter((block) => block.trim() !== "")
+    .map((block) => {
+      const lines = escapeHtml(block).split("\n").map(preserveSpacing);
+      return `<p>${lines.join("<br>")}</p>`;
+    });
+  return `<html><body>${blocks.join("\n")}</body></html>`;
+}
+
 /** Base64 with CRLF line endings wrapped at 76 columns (RFC 2045). */
 function encodeBody(text: string): string {
   return Buffer.from(text, "utf8")
@@ -87,6 +130,7 @@ export function buildRawMessage(fields: ComposeFields): string {
   headers.push('Content-Type: text/html; charset="UTF-8"');
   headers.push("Content-Transfer-Encoding: base64");
 
-  const raw = `${headers.join("\r\n")}\r\n\r\n${encodeBody(renderMarkdown(fields.body))}`;
+  const html = fields.plain ? renderPlainText(fields.body) : renderMarkdown(fields.body);
+  const raw = `${headers.join("\r\n")}\r\n\r\n${encodeBody(html)}`;
   return Buffer.from(raw, "utf8").toString("base64url");
 }

@@ -19,9 +19,12 @@ HTML, and Gmail generates the `text/plain` alternative itself on send.
 
 - `--to <emails>` — REQUIRED. Comma-separated recipient addresses. Empty → `VALIDATION_ERROR`.
 - `--subject <text>` — subject line. Default: empty (rendered as `(no subject)` in the response).
-- `--body <markdown>` — the message body, as markdown (see [Body rendering](#body-rendering)).
+- `--body <markdown>` — the message body, as markdown unless `--plain` is passed (see
+  [Body rendering](#body-rendering)).
 - `--body-file <path>` — read the body from a file instead. Mutually exclusive with `--body`.
 - `--cc <emails>` / `--bcc <emails>` — comma-separated.
+- `--plain` — treat the body as **literal text** rather than markdown (see
+  [Literal-text mode](#literal-text-mode)). Boolean; takes no value.
 - `--thread <thread-id>` — attach the draft to an existing thread (a reply draft).
 - `--account <email>` — REQUIRED when 2+ accounts are authenticated (this is a write —
   [principles.md#write-protection-requires-explicit-account](../principles.md#write-protection-requires-explicit-account)).
@@ -106,6 +109,30 @@ each paragraph as one long line and let the recipient's client wrap it. `--help`
 explicitly, since a pre-wrapped body reproduces exactly the ragged-column defect this
 structure exists to prevent.
 
+### Literal-text mode
+
+`--plain` turns markdown interpretation off. It is for bodies where `*`, `_`, `#`, or
+backticks must reach the reader as typed — pasted configuration, legal text, identifiers,
+anything the author did not intend as markup.
+
+It changes **how the body is interpreted, never the message structure**: the draft is still a
+single `text/html` part. Sending `text/plain` — the obvious-looking implementation of a
+"plain" flag — is the original defect this command's structure exists to avoid, and adding a
+`text/plain` alternative alongside the HTML reopens the composer coin flip. Neither is
+permitted.
+
+The HTML is built structurally rather than through the markdown renderer:
+
+- `&`, `<`, `>` are escaped, so markup in the body is displayed rather than rendered.
+- **Block semantics match the markdown path** — a blank line starts a `<p>`, a single newline
+  is a `<br>`. `--plain` should change what the characters *mean*, not where the text sits.
+- **Indentation and column alignment are preserved.** HTML collapses runs of whitespace, which
+  would destroy exactly the aligned text this mode exists to carry. Leading spaces become
+  `&nbsp;`; an internal run keeps one real space — a wrap point, so the line still reflows —
+  and pads the remainder. Tabs expand to four spaces first. This is what Gmail itself does when
+  converting plain text to HTML, so it is known to survive the composer.
+- Blocks that are entirely whitespace are dropped; an empty body yields an empty document.
+
 ## Display Rules
 
 A single flat object, in order: `action: drafted`, `account`, `draft_id`, `message_id`,
@@ -138,11 +165,6 @@ output shape is unchanged by this spec.
 - **Sending** — permanently, by design. See
   [principles.md#gmail-send-out-of-scope-by-design](../principles.md#gmail-send-out-of-scope-by-design).
 - **Attachments** — a draft carries body text only; `multipart/mixed` with file parts is deferred.
-- **A literal-text mode** — a future `--plain` would still send a single `text/html` part, but
-  build it structurally (escape the text, blank line → `<p>`, newline → `<br>`) instead of
-  through markdown, for bodies whose `*`/`_`/`#` characters are meant literally. It must not
-  revert to sending `text/plain`: that is the original defect. Not in v1; the markdown escape
-  hatches (fenced code blocks, backslash escapes) cover the common case.
 - **Inline images / `cid:` references** — deferred with attachments.
 
 ## Principles

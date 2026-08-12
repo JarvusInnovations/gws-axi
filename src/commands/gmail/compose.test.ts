@@ -137,3 +137,68 @@ describe("buildRawMessage", () => {
     expect(decodeRaw(raw).body).toContain("x".repeat(200));
   });
 });
+
+describe("buildRawMessage --plain", () => {
+  const plainBody = (body: string) =>
+    decodeRaw(
+      buildRawMessage({ from: "me@x.com", to: ["a@x.com"], subject: "s", body, plain: true }),
+    ).body;
+
+  it("still sends a single text/html part", () => {
+    // Reverting to text/plain is the original defect; --plain changes how the
+    // body is interpreted, not the message structure.
+    const { header } = decodeRaw(
+      buildRawMessage({ from: "me@x.com", to: ["a@x.com"], subject: "s", body: "b", plain: true }),
+    );
+    expect(header).toContain('Content-Type: text/html; charset="UTF-8"');
+    expect(header).not.toContain("multipart");
+    expect(header).not.toContain("text/plain");
+  });
+
+  it("leaves markdown syntax literal", () => {
+    const body = plainBody("Some **bold** text, a [link](https://axi.md), and _underscores_.");
+    expect(body).toContain("**bold**");
+    expect(body).toContain("[link](https://axi.md)");
+    expect(body).toContain("_underscores_");
+    expect(body).not.toContain("<strong>");
+    expect(body).not.toContain("<a href");
+  });
+
+  it("does not turn a leading # or - into a heading or list", () => {
+    const body = plainBody("# not a heading\n- not a list item");
+    expect(body).toContain("# not a heading");
+    expect(body).toContain("- not a list item");
+    expect(body).not.toContain("<h1>");
+    expect(body).not.toContain("<li>");
+  });
+
+  it("escapes HTML so tags reach the reader as text", () => {
+    const body = plainBody("Use <script>alert(1)</script> & <b>tags</b> literally");
+    expect(body).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
+    expect(body).toContain("&amp;");
+    expect(body).toContain("&lt;b&gt;tags&lt;/b&gt;");
+  });
+
+  it("keeps the same block semantics as the markdown path", () => {
+    const body = plainBody("First para.\n\nSecond line one\nsecond line two");
+    expect(body.match(/<p>/g)).toHaveLength(2);
+    expect(body).toContain("Second line one<br>second line two");
+  });
+
+  it("preserves indentation and column alignment", () => {
+    const body = plainBody("    calories   1,895\n    protein    100 g");
+    // Leading indent is fully non-breaking; an internal run keeps one real
+    // space as a wrap point.
+    expect(body).toContain("&nbsp;&nbsp;&nbsp;&nbsp;calories");
+    expect(body).toContain("calories &nbsp;&nbsp;1,895");
+  });
+
+  it("expands tabs and drops blank-only blocks", () => {
+    expect(plainBody("\tindented")).toContain("&nbsp;&nbsp;&nbsp;&nbsp;indented");
+    expect(plainBody("one\n\n   \n\ntwo").match(/<p>/g)).toHaveLength(2);
+  });
+
+  it("renders an empty body as an empty document", () => {
+    expect(plainBody("")).toBe("<html><body></body></html>");
+  });
+});
