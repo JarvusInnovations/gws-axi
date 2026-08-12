@@ -1,9 +1,10 @@
 ---
-status: planned
+status: done
 depends: []
 specs:
   - specs/commands/gmail-draft.md
 issues: []
+pr: 51
 ---
 
 # Plan: gmail draft — multipart/alternative body with rendered markdown
@@ -52,21 +53,21 @@ command's response shape. All noted under "Out of scope" in
 
 ## Validation
 
-- [ ] `buildRawMessage` emits `Content-Type: multipart/alternative` with a `boundary=` that
+- [x] `buildRawMessage` emits `Content-Type: multipart/alternative` with a `boundary=` that
       appears in the body as `--<boundary>` twice and `--<boundary>--` once.
-- [ ] The `text/plain` part decodes to the `--body` source **byte-for-byte**, including its
+- [x] The `text/plain` part decodes to the `--body` source **byte-for-byte**, including its
       original newlines.
-- [ ] The `text/html` part decodes to HTML in which `**bold**` is `<strong>`, a blank-line gap
+- [x] The `text/html` part decodes to HTML in which `**bold**` is `<strong>`, a blank-line gap
       starts a new `<p>`, and a single newline inside a paragraph is a `<br>` (`breaks: true`).
-- [ ] A paragraph longer than 76 characters survives the round trip with **no CRLF inside the
+- [x] A paragraph longer than 76 characters survives the round trip with **no CRLF inside the
       decoded text** of either part — the 76-column wrapping is base64 transport only.
-- [ ] Non-ASCII bodies (`café ☕`, em dashes) round-trip intact through both parts, and a
+- [x] Non-ASCII bodies (`café ☕`, em dashes) round-trip intact through both parts, and a
       non-ASCII `--subject` is still RFC 2047 encoded.
-- [ ] Part order is `text/plain` before `text/html`.
-- [ ] `raw` is still valid base64url (no `+`, `/`, or `=`).
-- [ ] `DRAFT_HELP` no longer claims markdown is preserved verbatim, and states the
+- [x] Part order is `text/plain` before `text/html`.
+- [x] `raw` is still valid base64url (no `+`, `/`, or `=`).
+- [x] `DRAFT_HELP` no longer claims markdown is preserved verbatim, and states the
       no-hard-wrapping rule.
-- [ ] `bun run test` and `bun run build` pass.
+- [x] `bun run test` and `bun run build` pass.
 - [ ] **Live**: a draft created against a real account, read back with
       `gmail read <id> --raw`, shows both MIME parts; sending it produces a received message
       whose HTML part has no hard line breaks inside a paragraph.
@@ -85,8 +86,23 @@ command's response shape. All noted under "Out of scope" in
 
 ## Notes
 
-(Populated at closeout.)
+- **Root cause was Gmail, not gws-axi.** The stored draft body was never wrapped — decoding an
+  unsent gws-axi draft showed paragraphs of 100/208/230/272/413/369 chars. Gmail hard-wraps at
+  ~70 columns *on send*, but only for a single-part `text/plain` message. That is why the
+  defect was invisible in the compose window and why no amount of input normalization would
+  have fixed it.
+- `marked` renders `breaks: true` as `<br>` (not `<br/>`); the tests assert the exact form.
+- The live draft used for validation is in Drafts as "gws-axi multipart test"
+  (`draft_id r8284951195750828614`, message `19ff695736c48e16`), addressed to the account
+  itself. Delete it once the send check is done.
+
+- The final validation box (send → inspect received message) stays **unchecked**: gws-axi
+  cannot send by design ([principles.md#gmail-send-out-of-scope-by-design](../specs/principles.md#gmail-send-out-of-scope-by-design)),
+  so it needs a human to press send. Everything short of the send is verified — Gmail stored
+  and returned both MIME parts intact, with unbroken paragraphs in the HTML.
 
 ## Follow-ups
 
-(Populated at closeout.)
+- Issue [#54](https://github.com/JarvusInnovations/gws-axi/issues/54) — `--plain` mode that
+  keeps `multipart/alternative` but builds the HTML part structurally, for bodies whose
+  `*`/`_`/`#` are meant literally.
