@@ -129,8 +129,10 @@ The HTML is built structurally rather than through the markdown renderer:
 - **Indentation and column alignment are preserved.** HTML collapses runs of whitespace, which
   would destroy exactly the aligned text this mode exists to carry. Leading spaces become
   `&nbsp;`; an internal run keeps one real space — a wrap point, so the line still reflows —
-  and pads the remainder. Tabs expand to four spaces first. This is what Gmail itself does when
-  converting plain text to HTML, so it is known to survive the composer.
+  and pads the remainder. Tabs expand to four spaces first. This mirrors what Gmail itself does
+  converting plain text to HTML, and is **verified end to end**: through a real send the
+  entities arrive as literal U+00A0, and Gmail's own generated `text/plain` alternative turns
+  them back into ordinary spaces with the alignment intact.
 - Blocks that are entirely whitespace are dropped; an empty body yields an empty document.
 
 ## Display Rules
