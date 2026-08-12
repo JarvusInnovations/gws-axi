@@ -140,8 +140,9 @@ describe("buildRawMessage", () => {
 
 describe("buildRawMessage --plain", () => {
   const plainBody = (body: string) =>
-    decodeRaw(buildRawMessage({ from: "me@x.com", to: ["a@x.com"], subject: "s", body, plain: true }))
-      .body;
+    decodeRaw(
+      buildRawMessage({ from: "me@x.com", to: ["a@x.com"], subject: "s", body, plain: true }),
+    ).body;
 
   it("still sends a single text/html part", () => {
     // Reverting to text/plain is the original defect; --plain changes how the
