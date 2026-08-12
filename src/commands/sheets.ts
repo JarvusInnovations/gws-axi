@@ -2,6 +2,7 @@ import { AxiError } from "axi-sdk-js";
 import { resolveAccount } from "../google/account.js";
 import { docsCommentsCommand } from "./docs/comments.js";
 import { READ_HELP, sheetsReadCommand } from "./sheets/read.js";
+import { notImplemented, renderAlternatives, withInstead } from "./stub-signposts.js";
 
 // Google Sheets comments are Drive comments — the exact same file-agnostic API
 // `docs comments` uses. Alias the handler (cf. `docs revisions` → `drive
@@ -28,7 +29,20 @@ interface SheetsSubcommand {
   mutation: boolean;
   help: string;
   handler?: (account: string, args: string[]) => Promise<string>;
+  instead?: string[];
 }
+
+// Until the Sheets write surface lands, `drive upload --convert` is the only
+// way to put content into a spreadsheet. It replaces the file wholesale, so
+// each line says so — an agent that reads "use drive upload" and nothing else
+// would silently destroy the sheets it never looked at.
+const REPLACE_WHOLESALE = [
+  "gws-axi drive upload <file.csv> --update <spreadsheetId> --convert --account <email> — replaces the ENTIRE spreadsheet from CSV/TSV (or --content <string>); NOT a per-range write",
+  "Multi-sheet targets are refused with MULTI_TAB_TARGET unless --replace-all-tabs; read them first with `gws-axi sheets read <spreadsheetId>`",
+];
+const CREATE_VIA_UPLOAD = [
+  'gws-axi drive upload <file.csv> --convert --name "<title>" --account <email> — creates a new native Spreadsheet and returns its id',
+];
 
 // Write subcommands are stubs for the next slice — kept with per-command --help
 // so agents can plan around the future surface. They throw NOT_IMPLEMENTED after
@@ -68,10 +82,12 @@ const sheetsCommentsCommand = (account: string, args: string[]): Promise<string>
 const SUBCOMMANDS: SheetsSubcommand[] = [
   { name: "read", mutation: false, help: READ_HELP, handler: sheetsReadCommand },
   { name: "comments", mutation: false, help: COMMENTS_HELP, handler: sheetsCommentsCommand },
-  { name: "update", mutation: true, help: UPDATE_HELP },
-  { name: "append", mutation: true, help: APPEND_HELP },
-  { name: "clear", mutation: true, help: CLEAR_HELP },
-  { name: "create", mutation: true, help: CREATE_HELP },
+  { name: "update", mutation: true, help: UPDATE_HELP, instead: REPLACE_WHOLESALE },
+  { name: "append", mutation: true, help: APPEND_HELP, instead: REPLACE_WHOLESALE },
+  { name: "clear", mutation: true, help: CLEAR_HELP, instead: REPLACE_WHOLESALE },
+  { name: "create", mutation: true, help: CREATE_HELP, instead: CREATE_VIA_UPLOAD },
+  // Adding a tab needs spreadsheets.batchUpdate — drive upload can only
+  // collapse a spreadsheet to one sheet, never grow it one.
   { name: "add-tab", mutation: true, help: ADD_TAB_HELP },
 ];
 
@@ -110,7 +126,7 @@ notes:
   Reads use the default account when --account is not provided.
   Write subcommands are scaffolded for the next slice — all currently
   throw NOT_IMPLEMENTED after account resolution runs.
-subcommand help:
+${renderAlternatives(SUBCOMMANDS)}subcommand help:
   gws-axi sheets read --help       for spreadsheetId + tab/range handling
   gws-axi sheets comments --help   for review comments (Drive comments)
 examples:
@@ -135,7 +151,7 @@ export async function sheetsCommand(args: string[]): Promise<string> {
 
   const rest = args.slice(1);
   if (rest.includes("--help")) {
-    return def.help;
+    return def.handler ? def.help : withInstead(def.help, def.instead);
   }
 
   const { account: accountFlag, rest: remaining } = parseAccountFlag(rest);
@@ -145,10 +161,7 @@ export async function sheetsCommand(args: string[]): Promise<string> {
   });
 
   if (!def.handler) {
-    throw new AxiError(`gws-axi sheets ${sub} is not yet implemented`, "NOT_IMPLEMENTED", [
-      `Account resolution succeeded: would run as ${resolution.account}`,
-      `See \`gws-axi sheets ${sub} --help\` for the planned surface`,
-    ]);
+    throw notImplemented("sheets", sub, resolution.account, def.instead);
   }
 
   return def.handler(resolution.account, remaining);
