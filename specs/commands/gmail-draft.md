@@ -7,11 +7,9 @@ withheld by design ([principles.md#gmail-send-out-of-scope-by-design](../princip
 a human reviews the draft in the Gmail UI and presses send.
 
 That division of labor is what makes the message's **on-the-wire form** load-bearing.
-gws-axi authors the message; the human who sends it does not re-author it. Whatever
-MIME structure the draft carries is what the recipient receives. So the draft is built
-as `multipart/alternative` carrying a rendered `text/html` part alongside the
-markdown source as `text/plain` — the shape Gmail's own composer produces — and the
-`--body` markdown is rendered to that HTML.
+gws-axi authors the message; the human who sends it does not re-author it. So the draft
+is built as a **single `text/html` part** carrying the `--body` markdown rendered to
+HTML, and Gmail generates the `text/plain` alternative itself on send.
 
 ## Invocation
 
@@ -39,40 +37,54 @@ To: <joined recipients>
 [Cc: …]  [Bcc: …]
 Subject: <RFC 2047 encoded-word when non-ASCII, else verbatim>
 MIME-Version: 1.0
-Content-Type: multipart/alternative; boundary="<boundary>"
-
---<boundary>
-Content-Type: text/plain; charset="UTF-8"
-Content-Transfer-Encoding: base64
-
-<the --body source, verbatim, base64, wrapped at 76 columns>
---<boundary>
 Content-Type: text/html; charset="UTF-8"
 Content-Transfer-Encoding: base64
 
 <the rendered HTML, base64, wrapped at 76 columns>
---<boundary>--
 ```
 
 Rules:
 
-- **Part order is `text/plain` then `text/html`.** RFC 2046 orders alternatives least- to
-  most-faithful; clients pick the last they can render.
-- **The `text/plain` part is the `--body` source verbatim** — unwrapped, unmodified. Markdown
-  source is readable as plain text, so this doubles as the text-only fallback.
-- **The boundary is unique per message** and cannot collide with body content
-  (`=_gws-axi_<uuid>`). No content scanning or boundary-retry is required.
-- **Both parts are base64** with CRLF line endings, wrapped at 76 columns (RFC 2045), so
-  arbitrary UTF-8 survives.
+- **The body is a single `text/html` part.** No `text/plain` alternative is sent; Gmail
+  generates one on send (see below).
+- **Base64** with CRLF line endings, wrapped at 76 columns (RFC 2045), so arbitrary UTF-8
+  survives. The wrapping is transport-only and never appears in the decoded content.
 
-### Why not single-part `text/plain`
+### How Gmail's composer treats a draft
 
-A single-part `text/plain` draft puts Gmail's composer into plain-text mode. On send Gmail
-hard-wraps the body at ~70 columns with real CRLFs and ships **no HTML alternative**, so
-the recipient sees permanently narrow, ragged columns that nothing can reflow. The Gmail
-compose window shows the original unwrapped paragraphs, so the damage is invisible until
-after send. Emitting the HTML alternative keeps the composer in rich-text mode and leaves
-line structure under this command's control rather than the sending client's.
+Gmail does **not** forward a stored draft byte-for-byte. Its composer adopts exactly *one*
+part as its editing surface, discards the rest, and regenerates the delivered message from
+the adopted part under its own boundary. Everything below is verified against live sends.
+
+| Draft structure | Composer shows | Delivered result |
+| --- | --- | --- |
+| single `text/plain` | plain-text mode | **Broken.** Body hard-wrapped at ~70 columns with real CRLFs, no HTML alternative — ragged columns nothing can reflow |
+| `multipart/alternative` (plain + HTML) | **either** — not predictable | **Coin flip.** Two identically-built drafts diverged: one kept the rendered markup, the other adopted the plain part and delivered the markdown source raw (`**bold**`, `[text](url)`) to the reader |
+| single `text/html` | rich text | **Correct.** Markup preserved, and Gmail derives a proper `text/plain` alternative itself |
+
+Two things follow, and an implementer must not get either wrong:
+
+1. **Offer exactly one part, and make it the HTML.** The composer's choice is not under this
+   command's control, so the only reliable way to control the outcome is to leave it nothing
+   to choose between. Adding a `text/plain` alternative — even a well-formed one — reopens
+   the coin flip for no gain, since Gmail synthesizes a better one than we can anyway.
+2. **What fixes the wrapping is the presence of an HTML part, not its content.** Gmail's
+   ~70–75 column hard wrap is applied to whichever part it *generates*; it only reaches the
+   reader when a plain part is the only thing in the message. This is why the original defect
+   was invisible in the compose window: the wrap happened at send, downstream of anything the
+   author could see.
+
+On send Gmail also normalizes the adopted HTML — wrapping the fragment in `<div dir="ltr">`,
+adding `target="_blank"` to links, and sometimes tagging an edited paragraph with
+`<span style="background-color:transparent">`. These are cosmetic and expected.
+
+### Survives human editing
+
+The structure holds through the composer, which is the whole point — a draft nobody edits is
+the easy case. Verified: after a human typed into the middle of a paragraph, added a list
+item, and appended new paragraphs, the delivered HTML still carried our `<p>`, `<strong>`,
+`<a>`, `<br>`, and `<ul>`/`<li>`, with the human's additions merged into that structure (a
+typed list item became an `<li>` inside our existing `<ul>`).
 
 ## Body rendering
 
@@ -126,10 +138,11 @@ output shape is unchanged by this spec.
 - **Sending** — permanently, by design. See
   [principles.md#gmail-send-out-of-scope-by-design](../principles.md#gmail-send-out-of-scope-by-design).
 - **Attachments** — a draft carries body text only; `multipart/mixed` with file parts is deferred.
-- **A literal-text mode** — a future `--plain` would keep the `multipart/alternative` structure
-  but build the HTML part structurally (escape, blank line → `<p>`, newline → `<br>`) instead of
-  through markdown, for bodies whose `*`/`_`/`#` characters are meant literally. Not in v1; the
-  markdown escape hatches (fenced code blocks, backslash escapes) cover the common case.
+- **A literal-text mode** — a future `--plain` would still send a single `text/html` part, but
+  build it structurally (escape the text, blank line → `<p>`, newline → `<br>`) instead of
+  through markdown, for bodies whose `*`/`_`/`#` characters are meant literally. It must not
+  revert to sending `text/plain`: that is the original defect. Not in v1; the markdown escape
+  hatches (fenced code blocks, backslash escapes) cover the common case.
 - **Inline images / `cid:` references** — deferred with attachments.
 
 ## Principles
