@@ -22,9 +22,9 @@ examples:
   gws-axi gmail draft --to alice@x.com --subject "Re: thread" --body "..." --thread 1899abcd
 notes:
   Creates a DRAFT only — gws-axi never sends mail. Review and send from the
-  Gmail UI. The body is markdown, rendered to HTML: the draft goes out as
-  multipart/alternative (markdown source as text/plain, rendered GFM as
-  text/html) so recipients get reflowable text.
+  Gmail UI. The body is markdown, rendered to a single text/html part so
+  recipients get reflowable, formatted text (Gmail adds the plain-text
+  alternative itself on send).
   DO NOT hard-wrap the body. Write each paragraph as one long line — every
   newline you write becomes a line break in the sent message, so a body
   pre-wrapped at 72/80 columns arrives locked to that width on every screen.

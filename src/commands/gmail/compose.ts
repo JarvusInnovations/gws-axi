@@ -1,19 +1,27 @@
 /**
  * RFC 5322 message builder for draft creation.
  *
- * Drafts go out as `multipart/alternative`: the `--body` markdown verbatim as
- * `text/plain`, and its rendered form as `text/html`. That structure is what
- * Gmail's own composer produces, and emitting it is load-bearing rather than
- * cosmetic — a single-part `text/plain` draft drops Gmail's composer into
- * plain-text mode, and on send Gmail hard-wraps the body at ~70 columns with
- * real CRLFs and ships no HTML alternative. The compose window still shows the
- * original unwrapped paragraphs, so the recipient's ragged columns are
- * invisible until after the message is gone.
+ * Drafts go out as a single `text/html` part carrying the rendered `--body`
+ * markdown. Gmail's composer adopts exactly one part of a draft as its editing
+ * surface and discards the rest, so a message offering only HTML leaves it no
+ * choice — the composer opens in rich text, our markup survives the human's
+ * edits, and Gmail generates the `text/plain` alternative itself on send.
+ *
+ * Both alternatives were tried and rejected against live sends:
+ *
+ * - Single-part `text/plain` (the original bug) drops the composer into
+ *   plain-text mode. On send Gmail hard-wraps at ~70 columns with real CRLFs
+ *   and ships no HTML alternative, so recipients get ragged columns nothing
+ *   can reflow — while the compose window still shows the original unwrapped
+ *   paragraphs, hiding the damage until the message is gone.
+ * - `multipart/alternative` (plain + HTML) fixes the wrapping but is a coin
+ *   flip: two identically-built drafts behaved differently, one keeping our
+ *   rendered markup and one adopting the plain part and delivering the raw
+ *   markdown source to the reader — `**bold**` and `[text](url)` and all.
  *
  * See specs/commands/gmail-draft.md ("Message structure", "Body rendering").
  */
 
-import { randomUUID } from "node:crypto";
 import { marked } from "marked";
 
 export interface ComposeFields {
@@ -23,7 +31,7 @@ export interface ComposeFields {
   cc?: string[];
   bcc?: string[];
   subject: string;
-  /** Markdown source. Rendered into the text/html part, kept verbatim as text/plain. */
+  /** Markdown source, rendered to the HTML body. */
   body: string;
 }
 
@@ -60,7 +68,7 @@ export function renderMarkdown(body: string): string {
 }
 
 /** Base64 with CRLF line endings wrapped at 76 columns (RFC 2045). */
-function encodePart(text: string): string {
+function encodeBody(text: string): string {
   return Buffer.from(text, "utf8")
     .toString("base64")
     .replace(/(.{76})/g, "$1\r\n");
@@ -71,27 +79,14 @@ function encodePart(text: string): string {
  * `users.drafts.create` / `users.messages.send` `raw` fields.
  */
 export function buildRawMessage(fields: ComposeFields): string {
-  // Unique per message, so it can never collide with body content — no
-  // scanning the body for the boundary, no retry loop.
-  const boundary = `=_gws-axi_${randomUUID()}`;
-
   const headers: string[] = [`From: ${fields.from}`, `To: ${fields.to.join(", ")}`];
   if (fields.cc?.length) headers.push(`Cc: ${fields.cc.join(", ")}`);
   if (fields.bcc?.length) headers.push(`Bcc: ${fields.bcc.join(", ")}`);
   headers.push(`Subject: ${encodeHeaderValue(fields.subject)}`);
   headers.push("MIME-Version: 1.0");
-  headers.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
+  headers.push('Content-Type: text/html; charset="UTF-8"');
+  headers.push("Content-Transfer-Encoding: base64");
 
-  // RFC 2046 orders alternatives least- to most-faithful; clients render the
-  // last part they understand, so text/html goes second.
-  const parts = [
-    ['Content-Type: text/plain; charset="UTF-8"', fields.body],
-    ['Content-Type: text/html; charset="UTF-8"', renderMarkdown(fields.body)],
-  ].map(
-    ([contentType, content]) =>
-      `--${boundary}\r\n${contentType}\r\nContent-Transfer-Encoding: base64\r\n\r\n${encodePart(content)}`,
-  );
-
-  const raw = `${headers.join("\r\n")}\r\n\r\n${parts.join("\r\n")}\r\n--${boundary}--`;
+  const raw = `${headers.join("\r\n")}\r\n\r\n${encodeBody(renderMarkdown(fields.body))}`;
   return Buffer.from(raw, "utf8").toString("base64url");
 }
