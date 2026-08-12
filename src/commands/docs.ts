@@ -1,5 +1,6 @@
 import { AxiError } from "axi-sdk-js";
 import { resolveAccount } from "../google/account.js";
+import { notImplemented, renderAlternatives, withInstead } from "./stub-signposts.js";
 import { docsCommentsCommand, COMMENTS_HELP } from "./docs/comments.js";
 import { docsDiffCommand, DIFF_HELP } from "./docs/diff.js";
 import { docsDownloadCommand, DOWNLOAD_HELP } from "./docs/download.js";
@@ -12,7 +13,18 @@ interface DocsSubcommand {
   mutation: boolean;
   help: string;
   handler?: (account: string, args: string[]) => Promise<string>;
+  instead?: string[];
 }
+
+// Granular Docs edits need documents.batchUpdate, which isn't wired yet. The
+// download → edit → upload round trip is the shipped substitute, and it
+// replaces the whole document — so the lines say that rather than implying a
+// targeted edit.
+const ROUND_TRIP = [
+  "gws-axi docs download <documentId> --out ./doc.md — export the current content to edit locally",
+  "gws-axi drive upload ./doc.md --update <documentId> --convert --account <email> — write it back as a NEW REVISION, replacing the ENTIRE document",
+  "Multi-tab Docs are refused with MULTI_TAB_TARGET unless --replace-all-tabs; `gws-axi docs diff <documentId> <revA>` compares revisions afterward",
+];
 
 // Write subcommands are still stubs but we keep per-command --help text
 // so agents can plan around the future surface.
@@ -62,13 +74,15 @@ const SUBCOMMANDS: DocsSubcommand[] = [
   // model, but the implementation is Drive-wide (any file type).
   { name: "revisions", mutation: false, help: REVISIONS_HELP, handler: driveRevisionsCommand },
   { name: "diff", mutation: false, help: DIFF_HELP, handler: docsDiffCommand },
-  { name: "append", mutation: true, help: APPEND_HELP },
-  { name: "insert-text", mutation: true, help: INSERT_TEXT_HELP },
-  { name: "delete-range", mutation: true, help: DELETE_RANGE_HELP },
-  { name: "style-text", mutation: true, help: STYLE_TEXT_HELP },
-  { name: "style-paragraph", mutation: true, help: STYLE_PARAGRAPH_HELP },
-  { name: "insert-table", mutation: true, help: INSERT_TABLE_HELP },
-  { name: "edit-cell", mutation: true, help: EDIT_CELL_HELP },
+  { name: "append", mutation: true, help: APPEND_HELP, instead: ROUND_TRIP },
+  { name: "insert-text", mutation: true, help: INSERT_TEXT_HELP, instead: ROUND_TRIP },
+  { name: "delete-range", mutation: true, help: DELETE_RANGE_HELP, instead: ROUND_TRIP },
+  { name: "style-text", mutation: true, help: STYLE_TEXT_HELP, instead: ROUND_TRIP },
+  { name: "style-paragraph", mutation: true, help: STYLE_PARAGRAPH_HELP, instead: ROUND_TRIP },
+  { name: "insert-table", mutation: true, help: INSERT_TABLE_HELP, instead: ROUND_TRIP },
+  { name: "edit-cell", mutation: true, help: EDIT_CELL_HELP, instead: ROUND_TRIP },
+  // Comment writes need the Drive comments API, which no shipped command
+  // touches — the round trip below rewrites body content only.
   { name: "comment-add", mutation: true, help: COMMENT_ADD_HELP },
   { name: "comment-reply", mutation: true, help: COMMENT_REPLY_HELP },
   { name: "comment-resolve", mutation: true, help: COMMENT_RESOLVE_HELP },
@@ -109,7 +123,7 @@ notes:
   Reads use the default account when --account is not provided.
   Write subcommands are scaffolded for the next slice — all currently
   throw NOT_IMPLEMENTED after account resolution runs.
-subcommand help:
+${renderAlternatives(SUBCOMMANDS)}subcommand help:
   gws-axi docs read --help        for documentId + tab handling
   gws-axi docs find --help        for text-match search
   gws-axi docs comments --help    for review comments + replies
@@ -139,7 +153,7 @@ export async function docsCommand(args: string[]): Promise<string> {
 
   const rest = args.slice(1);
   if (rest.includes("--help")) {
-    return def.help;
+    return def.handler ? def.help : withInstead(def.help, def.instead);
   }
 
   const { account: accountFlag, rest: remaining } = parseAccountFlag(rest);
@@ -149,10 +163,7 @@ export async function docsCommand(args: string[]): Promise<string> {
   });
 
   if (!def.handler) {
-    throw new AxiError(`gws-axi docs ${sub} is not yet implemented`, "NOT_IMPLEMENTED", [
-      `Account resolution succeeded: would run as ${resolution.account}`,
-      `See \`gws-axi docs ${sub} --help\` for the planned surface`,
-    ]);
+    throw notImplemented("docs", sub, resolution.account, def.instead);
   }
 
   return def.handler(resolution.account, remaining);

@@ -34,6 +34,25 @@ When an API cannot guarantee a complete or exact result — the upstream documen
 
 > **Why:** Traceable, trustworthy results are an AXI goal. An agent that's told "this list may omit older entries" can reason about the gap and seek another source; one handed a silently-partial list will treat it as exhaustive and conclude wrongly. Honesty about coverage is more useful than a clean-looking lie.
 
+## no-dead-end-surfaces
+
+A command that cannot do the thing names the command that can. Every `NOT_IMPLEMENTED` /
+`NOT_SUPPORTED` short-circuit, every stubbed subcommand's `--help`, and every service help
+screen that lists stubs points at the working alternative — **with its limits stated** — or
+says plainly that no alternative exists. Never leave the caller holding only "not
+implemented; see `--help`", where `--help` lists the same unimplemented command.
+
+> **Why:** Agents don't browse a command surface; they act on the response in front of them.
+> A refusal whose only suggestion loops back to the surface that refused is a closed circuit,
+> and the agent's next move is to leave the tool entirely — extract the OAuth token and
+> hand-roll raw API calls, discarding write-protection, error translation, and every other
+> guarantee gws-axi exists to provide. A wrong turn inside the tool is recoverable; being
+> pushed outside it is not. The signpost must also be honest about where the alternative
+> falls short ([surface-completeness-limits](#surface-completeness-limits)) — these
+> substitutes are typically wholesale-replace standing in for a granular edit, and a
+> signpost that oversells is worse than none. `gmail send`'s redirect to `draft` is the
+> reference shape.
+
 ## toon-over-json
 
 Output is TOON, not JSON. JSON is debugging-only (`doctor --json`).
