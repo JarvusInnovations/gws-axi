@@ -27,6 +27,28 @@ Every successful command emits TOON ([principles.md#toon-over-json](../principle
 
 When the upstream API documents that a response may be incomplete, or returns a lossy/partial representation of the underlying data, the command states that limit in its output (a `note`/`warning` field or a `help[]` line) rather than presenting the partial result as whole ([principles.md#surface-completeness-limits](../principles.md#surface-completeness-limits)).
 
+## Unimplemented and unsupported surfaces
+
+A subcommand may be **scaffolded** (listed, `--help`-documented, no handler — throws
+`NOT_IMPLEMENTED` after account resolution) or **refused by design** (`NOT_SUPPORTED`, e.g.
+`gmail send`). Either way it must signpost the working path
+([principles.md#no-dead-end-surfaces](../principles.md#no-dead-end-surfaces)):
+
+- A scaffolded subcommand declares its **alternatives** — real, runnable gws-axi commands
+  that accomplish some or all of what it will do — as part of its dispatcher entry, so the
+  same list feeds every surface that mentions it.
+- The `NOT_IMPLEMENTED` error leads its `suggestions[]` with those alternatives. Diagnostic
+  lines (which account resolution picked, where the planned surface is documented) come
+  after — they are context, not the next step.
+- `<service> <sub> --help` for a scaffolded subcommand appends an `instead[N]:` block with
+  the same lines.
+- `<service> --help` carries an `alternatives[N]:` block whenever any of its subcommands is
+  scaffolded, so the working path is visible without drilling into a stub.
+- Each alternative line states what it does **and where it falls short** — most are
+  wholesale-replace substitutes for a granular edit
+  ([principles.md#surface-completeness-limits](../principles.md#surface-completeness-limits)).
+- When no alternative exists, say so explicitly rather than omitting the block.
+
 ## Error envelope
 
 - All errors are `AxiError(message, code, suggestions[])` on **stdout** ([principles.md#structured-errors-to-stdout](../principles.md#structured-errors-to-stdout)).

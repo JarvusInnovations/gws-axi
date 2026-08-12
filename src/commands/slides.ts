@@ -1,5 +1,6 @@
 import { AxiError } from "axi-sdk-js";
 import { resolveAccount } from "../google/account.js";
+import { notImplemented, renderAlternatives, withInstead } from "./stub-signposts.js";
 import { docsCommentsCommand } from "./docs/comments.js";
 import { GET_HELP, slidesGetCommand } from "./slides/get.js";
 import { PAGE_HELP, slidesPageCommand } from "./slides/page.js";
@@ -35,6 +36,7 @@ interface SlidesSubcommand {
   mutation: boolean;
   help: string;
   handler?: (account: string, args: string[]) => Promise<string>;
+  instead?: string[];
 }
 
 const CREATE_HELP = `usage: gws-axi slides create --title <text> [--from <template-id>] [flags]
@@ -62,8 +64,23 @@ const SUBCOMMANDS: SlidesSubcommand[] = [
     handler: slidesSummarizeCommand,
   },
   { name: "comments", mutation: false, help: COMMENTS_HELP, handler: slidesCommentsCommand },
-  { name: "create", mutation: true, help: CREATE_HELP },
-  { name: "update", mutation: true, help: UPDATE_HELP },
+  {
+    name: "create",
+    mutation: true,
+    help: CREATE_HELP,
+    instead: [
+      'gws-axi drive upload <deck.pptx> --convert --name "<title>" --account <email> — creates a new native Presentation and returns its id',
+    ],
+  },
+  {
+    name: "update",
+    mutation: true,
+    help: UPDATE_HELP,
+    instead: [
+      "gws-axi drive upload <deck.pptx> --update <presentationId> --convert --account <email> — replaces the ENTIRE deck as a new revision; NOT a per-slide or per-element edit",
+      "gws-axi slides summarize <presentationId> — read the current deck first; there is no export-to-pptx round trip",
+    ],
+  },
 ];
 
 const SUB_BY_NAME: Record<string, SlidesSubcommand> = Object.fromEntries(
@@ -101,7 +118,7 @@ notes:
   Reads use the default account when --account is not provided.
   Write subcommands are scaffolded for the next slice; they throw
   NOT_IMPLEMENTED after account resolution runs.
-subcommand help:
+${renderAlternatives(SUBCOMMANDS)}subcommand help:
   gws-axi slides get --help        for metadata + slide list
   gws-axi slides page --help       for a single slide's content
   gws-axi slides summarize --help  for the whole deck as markdown
@@ -128,7 +145,7 @@ export async function slidesCommand(args: string[]): Promise<string> {
 
   const rest = args.slice(1);
   if (rest.includes("--help")) {
-    return def.help;
+    return def.handler ? def.help : withInstead(def.help, def.instead);
   }
 
   const { account: accountFlag, rest: remaining } = parseAccountFlag(rest);
@@ -138,10 +155,7 @@ export async function slidesCommand(args: string[]): Promise<string> {
   });
 
   if (!def.handler) {
-    throw new AxiError(`gws-axi slides ${sub} is not yet implemented`, "NOT_IMPLEMENTED", [
-      `Account resolution succeeded: would run as ${resolution.account}`,
-      `See \`gws-axi slides ${sub} --help\` for the planned surface`,
-    ]);
+    throw notImplemented("slides", sub, resolution.account, def.instead);
   }
 
   return def.handler(resolution.account, remaining);

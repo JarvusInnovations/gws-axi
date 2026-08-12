@@ -1,5 +1,6 @@
 import { AxiError } from "axi-sdk-js";
 import { resolveAccount } from "../google/account.js";
+import { notImplemented, renderAlternatives, withInstead } from "./stub-signposts.js";
 import { docsDownloadCommand } from "./docs/download.js";
 import { driveGetCommand, GET_HELP } from "./drive/get.js";
 import { driveLsCommand, LS_HELP } from "./drive/ls.js";
@@ -15,6 +16,7 @@ interface DriveSubcommand {
   mutation: boolean;
   help: string;
   handler?: (account: string, args: string[]) => Promise<string>;
+  instead?: string[];
 }
 
 // Drive `download` shares the docs/download.ts implementation — same code
@@ -92,7 +94,18 @@ const SUBCOMMANDS: DriveSubcommand[] = [
     help: UPLOAD_HELP,
     handler: driveUploadCommand,
   },
-  { name: "create", mutation: true, help: CREATE_HELP },
+  {
+    name: "create",
+    mutation: true,
+    help: CREATE_HELP,
+    instead: [
+      "gws-axi drive upload <path|-|--content <string>> --name <name> --account <email> — creates a file from content (add --convert for a native Doc/Sheet/Slides)",
+      'gws-axi drive mkdir "<name>" --account <email> — creates a folder',
+    ],
+  },
+  // copy / move / delete have no shipped equivalent. `rename` deliberately
+  // gets none either: `drive upload --update --name` does rename, but only
+  // while replacing the file's content, so advertising it here would mislead.
   { name: "copy", mutation: true, help: COPY_HELP },
   { name: "move", mutation: true, help: MOVE_HELP },
   { name: "rename", mutation: true, help: RENAME_HELP },
@@ -140,7 +153,7 @@ notes:
   Reads use the default account when --account is not provided.
   upload and mkdir are live; the remaining write subcommands are scaffolded
   for the next slice and throw NOT_IMPLEMENTED after account resolution runs.
-subcommand help:
+${renderAlternatives(SUBCOMMANDS)}subcommand help:
   gws-axi drive ls --help            for folder listing (incl. --recursive)
   gws-axi drive get --help           for full file metadata
   gws-axi drive search --help        for full-text search
@@ -173,7 +186,7 @@ export async function driveCommand(args: string[]): Promise<string> {
 
   const rest = args.slice(1);
   if (rest.includes("--help")) {
-    return def.help;
+    return def.handler ? def.help : withInstead(def.help, def.instead);
   }
 
   const { account: accountFlag, rest: remaining } = parseAccountFlag(rest);
@@ -183,10 +196,7 @@ export async function driveCommand(args: string[]): Promise<string> {
   });
 
   if (!def.handler) {
-    throw new AxiError(`gws-axi drive ${sub} is not yet implemented`, "NOT_IMPLEMENTED", [
-      `Account resolution succeeded: would run as ${resolution.account}`,
-      `See \`gws-axi drive ${sub} --help\` for the planned surface`,
-    ]);
+    throw notImplemented("drive", sub, resolution.account, def.instead);
   }
 
   return def.handler(resolution.account, remaining);
