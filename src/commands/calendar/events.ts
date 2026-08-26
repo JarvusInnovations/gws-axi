@@ -11,29 +11,44 @@ import {
   type FieldDef,
 } from "../../output/index.js";
 import { extractConference, resolveJoinUrl } from "./conference.js";
-import { parseDateishFlag } from "./dateish.js";
+import { resolveWindow, toLocalOffsetISO } from "./dateish.js";
+import { resolveWeekStart } from "./week-start.js";
 
 export const EVENTS_HELP = `usage: gws-axi calendar events [flags]
-flags[8]:
+flags[10]:
   --calendar <id>      Calendar to query (default: "primary")
-  --from <iso>         Earliest event start (default: now)
-  --to <iso>           Latest event start (default: 7 days from now)
+  --today              Just today (local calendar day)
+  --this-week          The current week (starts on your Google Calendar's
+                       configured first day of the week)
+  --from <when>        Earliest event start (default: now)
+  --to <when>          Latest event start (default: 7 days from now)
   --limit <n>          Max events to return (default: 100, max: 2500)
   --query <text>       Full-text search across summary/description/location/attendees
   --single-events      Expand recurring events into individual instances (default: true)
   --fields <list>      Extra columns: status, organizer, location, attendees, description, htmlLink, hangoutLink, join_url, conference, conference_source
   --account <email>    Account override when 2+ are configured
 examples:
-  gws-axi calendar events
+  gws-axi calendar events --today
+  gws-axi calendar events --this-week
+  gws-axi calendar events --from 2026-04-20 --to 2026-04-20      (all of Apr 20)
   gws-axi calendar events --from 2026-04-20T00:00 --to 2026-04-21T00:00
   gws-axi calendar events --calendar team@jarv.us --limit 50
   gws-axi calendar events --query standup
   gws-axi calendar events --fields status,attendees,location
   gws-axi calendar events --fields join_url,conference
-time formats:
-  Timed events:  ISO 8601 with offset — 2026-04-20T14:00:00-04:00
+time formats / ranges:
+  Ranges are half-open: [--from, --to).
+  Date-only:     2026-04-20 denotes the DAY — --from opens at its
+                 midnight, --to closes at the END of it. So
+                 --from 2026-04-20 --to 2026-04-20 is all of Apr 20.
+                 (--to 2026-04-20 and --to 2026-04-20T00:00 therefore
+                 differ by 24h — day granularity in, day boundary out.)
   Local time:    2026-04-20T14:00 (interpreted as local tz)
-  Date-only:     2026-04-20 (midnight local)
+  With offset:   2026-04-20T14:00:00-04:00 (preserved as written)
+  Tokens:        now, today, tomorrow, yesterday, +Nd/-Nd, +Nw/-Nw
+                 (day precision), +Nh/-Nh (instant). Compose them:
+                 --from now --to today       (rest of today)
+                 --from today --to +6d       (next seven days)
 output note:
   The start/end columns use datetime (with offset) for timed events
   and date-only strings for all-day events. Agents parsing these
@@ -63,8 +78,11 @@ conferencing:
 
 interface ParsedFlags {
   calendar: string;
-  from: string;
-  to: string;
+  /** Raw flag values — resolved by `resolveWindow` so it can quote what was typed. */
+  from: string | undefined;
+  to: string | undefined;
+  today: boolean;
+  thisWeek: boolean;
   limit: number;
   query: string | undefined;
   singleEvents: boolean;
@@ -74,8 +92,10 @@ interface ParsedFlags {
 function parseEventsFlags(args: string[]): ParsedFlags {
   const flags: ParsedFlags = {
     calendar: "primary",
-    from: new Date().toISOString(),
-    to: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
+    from: undefined,
+    to: undefined,
+    today: false,
+    thisWeek: false,
     limit: 100,
     query: undefined,
     singleEvents: true,
@@ -91,12 +111,18 @@ function parseEventsFlags(args: string[]): ParsedFlags {
         i++;
         break;
       case "--from":
-        flags.from = parseDateishFlag(next);
+        flags.from = next;
         i++;
         break;
       case "--to":
-        flags.to = parseDateishFlag(next);
+        flags.to = next;
         i++;
+        break;
+      case "--today":
+        flags.today = true;
+        break;
+      case "--this-week":
+        flags.thisWeek = true;
         break;
       case "--limit":
         flags.limit = Math.min(2500, Math.max(1, parseInt(next, 10) || 100));
@@ -266,11 +292,26 @@ function schemaWithExtras(extras: string[]): FieldDef[] {
 export async function calendarEventsCommand(account: string, args: string[]): Promise<string> {
   const flags = parseEventsFlags(args);
 
+  // Only a week shortcut needs the account's weekStart preference — keep every
+  // other invocation to a single round trip.
+  const weekStart = flags.thisWeek ? await resolveWeekStart(account) : undefined;
+  const now = new Date();
+  const window = resolveWindow(flags, {
+    defaults: {
+      from: now.toISOString(),
+      to: new Date(now.getTime() + 7 * 24 * 3600 * 1000).toISOString(),
+    },
+    weekStartDay: weekStart?.day,
+    now,
+  });
+  const from = window.from as string;
+  const to = window.to as string;
+
   const api = await calendarClient(account);
   const requestParams: calendar_v3.Params$Resource$Events$List = {
     calendarId: flags.calendar,
-    timeMin: flags.from,
-    timeMax: flags.to,
+    timeMin: from,
+    timeMax: to,
     maxResults: flags.limit,
     singleEvents: flags.singleEvents,
     orderBy: flags.singleEvents ? "startTime" : undefined,
@@ -311,8 +352,11 @@ export async function calendarEventsCommand(account: string, args: string[]): Pr
 
   const summary: Record<string, unknown> = {
     count: items.length,
-    range: `${flags.from} → ${flags.to}`,
+    range: `${toLocalOffsetISO(from)} → ${toLocalOffsetISO(to)}`,
   };
+  if (weekStart) {
+    summary.week_start = `${weekStart.label} (${weekStart.source})`;
+  }
   if (flags.query) {
     summary.query = flags.query;
   }
@@ -362,8 +406,11 @@ export async function calendarEventsCommand(account: string, args: string[]): Pr
       );
     }
     suggestions.push(
-      `Broaden the time range with --from / --to (current: ${flags.from} → ${flags.to})`,
+      `Broaden the time range with --from / --to (current: ${toLocalOffsetISO(from)} → ${toLocalOffsetISO(to)})`,
     );
+    if (!flags.thisWeek) {
+      suggestions.push(`Try \`--this-week\` for the current week, or \`--today\` for just today`);
+    }
     if (flags.calendar === "primary") {
       suggestions.push(
         `Try a different calendar with \`--calendar <id>\` (list them with \`gws-axi calendar calendars\`)`,
