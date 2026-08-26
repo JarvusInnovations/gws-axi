@@ -89,6 +89,16 @@ export function profilePathForAccount(email: string): string {
   return join(accountDir(email), "profile.json");
 }
 
+/**
+ * Cache of remote per-account API preferences (currently the Calendar
+ * `weekStart` setting). Deliberately NOT profile.json: the auth flow rewrites
+ * that file wholesale from the id_token, which would clobber anything cached
+ * alongside it on every re-login.
+ */
+export function settingsPathForAccount(email: string): string {
+  return join(accountDir(email), "settings.json");
+}
+
 export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
