@@ -82,13 +82,25 @@ or the previous Monday without guessing, and a range flag is the wrong place to 
 `--from`/`--to` pair before anything else runs:
 
 - **`--today`** — today's local calendar day: `[today 00:00, tomorrow 00:00)`.
-- **`--this-week`** — the **ISO week** containing today: Monday 00:00 local through the following
-  Monday 00:00, regardless of what day it currently is. Not "the next seven days"
-  (`--from today --to +6d`), and not "the rest of the week" (`--from now --to <sunday's date>`).
+- **`--this-week`** — the week containing today, from its first day at 00:00 local through the same
+  weekday 00:00 seven days later, regardless of what day it currently is. Not "the next seven days"
+  (`--from today --to +6d`), and not "the rest of the week" (`--from now --to <the week's last date>`).
 
-Week start is fixed at Monday and documented in `--help`. It is deliberately **not** read from the
-account's Google Calendar `weekStart` setting: a hidden remote lookup that silently changes what a
-flag means is the opposite of a deterministic shortcut.
+Which day starts the week is **the account's own Google Calendar `weekStart` setting** (`0` Sunday,
+`1` Monday, `6` Saturday), not a constant. A person asking their calendar "what's this week" means
+the week as their calendar draws it; a fixed Monday would be wrong for every Sunday-start user. The
+setting is readable under the existing `calendar` scope (`settings.get`) — no new grant — and is
+**cached per account** so the shortcut costs no extra round trip on the common path.
+
+The lookup stays honest rather than hidden:
+
+- The resolved window is echoed like any other range, and a week shortcut additionally reports
+  `week_start: <day>` with its source, so the interpretation is visible on the call that used it.
+- A failed or unavailable lookup **falls back to Monday and says so** in that same field. A
+  preference lookup must never fail the query it was decorating — same best-effort posture as
+  `docs read`'s inlined revisions.
+- The cache carries a fetch timestamp and expires, so changing the setting in Google takes effect
+  without re-auth.
 
 A shortcut combined with `--from`/`--to`, or with another shortcut, is a `VALIDATION_ERROR` — never
 silently resolved in favor of one.

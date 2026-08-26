@@ -23,8 +23,9 @@ ask the two most common questions: today, and this week.
   to the *next* local midnight, so `--from D --to D` is the whole of day D.
 - **Relative tokens** on every range flag — `now`, `today`, `tomorrow`, `yesterday`,
   `±Nd`, `±Nw` (day precision), `±Nh` (instant precision).
-- **Window shortcuts** `--today` and `--this-week` (ISO week, Mon→Mon) on
-  `calendar events`, `calendar search`, `calendar freebusy`.
+- **Window shortcuts** `--today` and `--this-week` on `calendar events`, `calendar search`,
+  `calendar freebusy`, with the week's first day taken from the account's Google Calendar
+  `weekStart` setting (cached per account, Monday fallback).
 - **Empty-window validation** — `from >= to` is a `VALIDATION_ERROR`, never an empty list.
 - **Local-offset `range:` echo** everywhere a range is applied, including a new echo on
   `drive activity` (which currently applies `--since/--until` without reporting the window).
@@ -86,8 +87,10 @@ Day-precision results then take the edge into account: `from` → `new Date(y, m
 day component is what makes the arithmetic DST-correct and month/year-rollover-correct in
 one stroke — never `+ n * 86_400_000`.
 
-Week helpers for `--this-week`: `startOfISOWeek(now)` = local midnight of the Monday on or
-before today (`day = (getDay() + 6) % 7` days back), end = that Monday `+ 7`.
+Week helpers for `--this-week`: `startOfWeek(now, weekStartDay)` = local midnight of the most
+recent occurrence of `weekStartDay` (0=Sun…6=Sat) on or before today —
+`back = (getDay() - weekStartDay + 7) % 7` — and end = that day `+ 7`. Pure and injectable; the
+setting lookup lives in step 1b, never inside the arithmetic.
 
 `resolveWindow` owns the conflict and validation rules so no call site re-implements them:
 
@@ -98,6 +101,24 @@ before today (`day = (getDay() + 6) % 7` days back), end = that Monday `+ 7`.
 
 Error suggestions must be runnable, not descriptive — an empty window suggests the
 shortcut that probably matches the intent (`Use --today for a single day`).
+
+### 1b. `weekStart` — read once, cache per account
+
+`--this-week` needs the account's week-start day. Verified live against `chris@jarv.us`: the
+existing `calendar` scope already authorizes `calendar.settings.get({setting:"weekStart"})`
+(returns `value: "1"`), so **no scope change and no re-auth** — this is a plain read.
+
+- New `src/commands/calendar/week-start.ts`:
+  `resolveWeekStart(account): Promise<{ day: 0|1|6; label: string; source: "account"|"cache"|"fallback" }>`.
+- Cache file `~/.config/gws-axi/accounts/<email>/settings.json` — `{ week_start, fetched }`.
+  A **separate file from `profile.json`**, which the auth flow rewrites wholesale from the
+  id_token; a cached API preference stored there would be clobbered on every re-login. Path
+  helper alongside `profilePathForAccount` in `src/config.ts`.
+- TTL 30 days; missing/expired/corrupt cache → fetch → write. Any failure (403, offline,
+  unparseable value) → `{ day: 1, label: "monday", source: "fallback" }`, never a thrown error.
+- Only called when a week shortcut is actually used, so `--today` and explicit ranges stay
+  single-round-trip.
+- Commands using it add `week_start: <label> (<source>)` to the summary block, next to `range:`.
 
 ### 2. Call sites
 
@@ -140,8 +161,12 @@ All helpers take an injectable `now`, so every case is deterministic without fak
   falls through to the existing `parseDateishFlag` error, message unchanged.
 - Local-calendar arithmetic: `+1d` across a month boundary, a year boundary, and across a
   US DST transition still lands on local midnight (not 23:00/01:00).
-- ISO week: `startOfISOWeek` from a Monday, a Sunday, and a Wednesday; `--this-week`
-  spans exactly 7 local days.
+- `startOfWeek`: each `weekStart` value (0/1/6) evaluated from a Monday, a Sunday, and a
+  Wednesday; `--this-week` spans exactly 7 local days in every case, including across a DST
+  transition.
+- `weekStart` cache: cold read fetches and writes, a warm read inside TTL does not refetch, an
+  expired entry refetches, and an unparseable value / thrown fetch both fall back to Monday
+  with `source: "fallback"`.
 - `resolveWindow`: shortcut+explicit conflict, double shortcut, `from == to`, `from > to`,
   and the happy path with defaults.
 
@@ -152,7 +177,13 @@ All helpers take an injectable `now`, so every case is deterministic without fak
 - [ ] `calendar events --from 2026-08-26 --to 2026-08-26` returns that day's events (the
       originating bug), and `range:` echoes `…T00:00:00-04:00 → 2026-08-27T00:00:00-04:00`.
 - [ ] `calendar events --today` and `--this-week` return the expected windows; `--this-week`
-      spans Mon 00:00 → the following Mon 00:00 when run mid-week.
+      spans the account's week-start day 00:00 → the same weekday 00:00 seven days later when
+      run mid-week (Monday for `chris@jarv.us`, whose `weekStart` is `1`).
+- [ ] `--this-week` reports `week_start: monday (account)` on a cold run and `(cache)` on the
+      next; the cache lands in `accounts/<email>/settings.json` and survives an `auth login`
+      (i.e. is not stored in `profile.json`).
+- [ ] With the setting lookup forced to fail, `--this-week` still returns a window and reports
+      `week_start: monday (fallback)` — no error.
 - [ ] `calendar events --from 2026-08-26T10:00 --to 2026-08-26T09:00` → `VALIDATION_ERROR`
       naming both boundaries, **not** `count: 0`.
 - [ ] `calendar events --today --from 2026-08-26` → `VALIDATION_ERROR`; `--today --this-week`
@@ -176,9 +207,11 @@ All helpers take an injectable `now`, so every case is deterministic without fak
   The alternative — expanding only when `from == to` — is worse and is rejected in the spec.
 - **Weekday tokens deliberately omitted.** `monday` has no non-guessing resolution. If they
   land later they need explicit `next-monday` / `last-monday` spellings.
-- **ISO-week choice will occasionally surprise a Sunday-start user.** Accepted for
-  determinism; the `range:` echo makes the actual window visible on every call, and the
-  account's Google `weekStart` setting is explicitly not consulted (spec'd).
+- **`weekStart` is a cached remote preference.** Verified live that the existing `calendar`
+  scope covers `settings.get` (no re-auth), but the value can go stale within the TTL and the
+  fetch can fail. Mitigated by: a Monday fallback that never fails the query, the `week_start:`
+  field disclosing both value and source on every week-shortcut call, and the `range:` echo
+  showing the concrete window regardless.
 - **`drive activity` edges are optional**, unlike the calendar commands where both always
   resolve to a default. `resolveWindow` must tolerate `undefined` on either side and only
   run the `from >= to` check when both are present.
