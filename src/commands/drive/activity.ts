@@ -1,7 +1,7 @@
 import { AxiError } from "axi-sdk-js";
 import { oauthClientForAccount, translateGoogleError } from "../../google/client.js";
 import { field, joinBlocks, renderHelp, renderList, renderObject } from "../../output/index.js";
-import { parseDateishFlag } from "../calendar/dateish.js";
+import { resolveWindow, toLocalOffsetISO } from "../calendar/dateish.js";
 
 export const ACTIVITY_HELP = `usage: gws-axi drive activity <itemId> [flags]
 args[1]:
@@ -10,8 +10,13 @@ args[1]:
 flags[5]:
   --folder             Treat <itemId> as a folder: report activity for it and
                        all descendants (ancestorName), not just the item itself
-  --since <date>       Only activity at/after this time (ISO or YYYY-MM-DD)
-  --until <date>       Only activity before this time (ISO or YYYY-MM-DD)
+  --since <when>       Only activity at/after this time. A date-only value
+                       opens at that day's local midnight.
+  --until <when>       Only activity before this time. A date-only value
+                       closes at the END of that day, so
+                       --since D --until D is all of day D. Both accept
+                       tokens: now, today, tomorrow, yesterday, +Nd/-Nd,
+                       +Nw/-Nw, +Nh/-Nh.
   --action <list>      Comma-separated action types to include: create, edit,
                        move, rename, delete, restore, permission_change,
                        comment
@@ -21,6 +26,7 @@ examples:
   gws-axi drive activity 1V09rp...
   gws-axi drive activity 1AbCfolder... --folder --action permission_change,delete
   gws-axi drive activity 1V09rp... --since 2026-01-01 --until 2026-04-01
+  gws-axi drive activity 1V09rp... --since today
 output:
   An \`item{id,scope}\` header followed by an \`activities[N]{time,action,actor,target}\`
   list, newest first. Actions cover create/edit/move/rename/delete/restore,
@@ -90,11 +96,11 @@ export function parseFlags(args: string[]): ParsedFlags {
         folder = true;
         break;
       case "--since":
-        since = parseDateishFlag(next);
+        since = next;
         i++;
         break;
       case "--until":
-        until = parseDateishFlag(next);
+        until = next;
         i++;
         break;
       case "--action":
@@ -128,7 +134,15 @@ export function parseFlags(args: string[]): ParsedFlags {
       ]);
     }
   }
-  return { itemId, folder, since, until, actions, limit };
+  // Resolve the window centrally: per-edge day expansion, tokens, and the
+  // empty-range guard. Both edges stay optional here — the filter simply omits
+  // an absent clause.
+  const window = resolveWindow(
+    { from: since, to: until },
+    { flagNames: { from: "--since", to: "--until" }, shortcuts: false },
+  );
+
+  return { itemId, folder, since: window.from, until: window.to, actions, limit };
 }
 
 /** Build the `filter` string for the Activity query from time + action flags. */
@@ -280,7 +294,17 @@ export async function driveActivityCommand(account: string, args: string[]): Pro
   blocks.push(renderObject({ account }));
   blocks.push(
     renderObject({
-      item: { id: flags.itemId, scope: flags.folder ? "ancestor" : "item" },
+      item: {
+        id: flags.itemId,
+        scope: flags.folder ? "ancestor" : "item",
+        ...(flags.since || flags.until
+          ? {
+              range: `${flags.since ? toLocalOffsetISO(flags.since) : "(any)"} → ${
+                flags.until ? toLocalOffsetISO(flags.until) : "(any)"
+              }`,
+            }
+          : {}),
+      },
     }),
   );
 
