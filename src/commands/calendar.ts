@@ -67,8 +67,15 @@ subcommand help:
   gws-axi calendar <sub> --help     for any other subcommand
 examples:
   gws-axi calendar events
-  gws-axi calendar events --from 2026-04-20T00:00 --to 2026-04-21T00:00
+  gws-axi calendar events --today
+  gws-axi calendar events --this-week
+  gws-axi calendar events --from 2026-04-20 --to 2026-04-20   (all of Apr 20)
   gws-axi calendar events --fields attendees,location
+time ranges:
+  events / search / freebusy take --today, --this-week, and --from/--to.
+  A date-only --to closes at the END of that day; tokens (now, today,
+  tomorrow, yesterday, +Nd, +Nw, +Nh) work on both edges. See
+  \`gws-axi calendar events --help\`.
 `;
 
 export async function calendarCommand(args: string[]): Promise<string> {

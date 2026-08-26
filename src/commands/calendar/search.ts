@@ -8,13 +8,17 @@ import {
   truncated,
   type FieldDef,
 } from "../../output/index.js";
-import { parseDateishFlag } from "./dateish.js";
+import { resolveWindow, toLocalOffsetISO } from "./dateish.js";
+import { resolveWeekStart } from "./week-start.js";
 
 export const SEARCH_HELP = `usage: gws-axi calendar search --query <text> [flags]
-flags[9]:
+flags[11]:
   --query <text>         REQUIRED — full-text search across summary/description/location/attendees
-  --from <iso>           Earliest event start (default: 30 days ago)
-  --to <iso>             Latest event start (default: 1 year from now)
+  --today                Just today (local calendar day)
+  --this-week            The current week (starts on your Google Calendar's
+                         configured first day of the week)
+  --from <when>          Earliest event start (default: 30 days ago)
+  --to <when>            Latest event start (default: 1 year from now)
   --calendars <ids>      Comma-separated calendar IDs (overrides scope default)
   --include-shared       Also search non-primary calendars: teammate
                          calendars delegated to you, read-only subscriptions,
@@ -26,7 +30,9 @@ flags[9]:
   --account <email>      Account override when 2+ are configured
 examples:
   gws-axi calendar search --query "standup"
+  gws-axi calendar search --query "standup" --this-week
   gws-axi calendar search --query "budget" --from 2025-01-01
+  gws-axi calendar search --query "budget" --from 2026-04-20 --to 2026-04-20
   gws-axi calendar search --query "chris" --include-shared
   gws-axi calendar search --query "chris" --calendars primary,team@jarv.us
 scope:
@@ -46,12 +52,20 @@ dedupe:
 default columns:
   calendar, id, summary (truncated 80), start, end, my_response,
   seen_on_count (only shown when > 1)
+time formats / ranges:
+  Half-open [--from, --to). A date-only value denotes the DAY: --from
+  opens at its midnight, --to closes at the end of it, so
+  --from 2026-04-20 --to 2026-04-20 is all of Apr 20. Tokens: now,
+  today, tomorrow, yesterday, +Nd/-Nd, +Nw/-Nw, +Nh/-Nh.
 `;
 
 interface ParsedFlags {
   query: string | undefined;
-  from: string;
-  to: string;
+  /** Raw flag values — resolved by `resolveWindow` so it can quote what was typed. */
+  from: string | undefined;
+  to: string | undefined;
+  today: boolean;
+  thisWeek: boolean;
   calendarFilter: string[] | undefined;
   includeShared: boolean;
   limit: number;
@@ -60,11 +74,12 @@ interface ParsedFlags {
 }
 
 function parseFlags(args: string[]): ParsedFlags {
-  const now = Date.now();
   const flags: ParsedFlags = {
     query: undefined,
-    from: new Date(now - 30 * 24 * 3600 * 1000).toISOString(),
-    to: new Date(now + 365 * 24 * 3600 * 1000).toISOString(),
+    from: undefined,
+    to: undefined,
+    today: false,
+    thisWeek: false,
     calendarFilter: undefined,
     includeShared: false,
     limit: 50,
@@ -81,12 +96,18 @@ function parseFlags(args: string[]): ParsedFlags {
         i++;
         break;
       case "--from":
-        flags.from = parseDateishFlag(next);
+        flags.from = next;
         i++;
         break;
       case "--to":
-        flags.to = parseDateishFlag(next);
+        flags.to = next;
         i++;
+        break;
+      case "--today":
+        flags.today = true;
+        break;
+      case "--this-week":
+        flags.thisWeek = true;
         break;
       case "--calendars":
         flags.calendarFilter = next
@@ -222,6 +243,20 @@ export async function calendarSearchCommand(account: string, args: string[]): Pr
     ]);
   }
 
+  // Only a week shortcut needs the account's weekStart preference.
+  const weekStart = flags.thisWeek ? await resolveWeekStart(account) : undefined;
+  const now = new Date();
+  const window = resolveWindow(flags, {
+    defaults: {
+      from: new Date(now.getTime() - 30 * 24 * 3600 * 1000).toISOString(),
+      to: new Date(now.getTime() + 365 * 24 * 3600 * 1000).toISOString(),
+    },
+    weekStartDay: weekStart?.day,
+    now,
+  });
+  const from = window.from as string;
+  const to = window.to as string;
+
   const api = await calendarClient(account);
 
   // Resolve which calendars to query. If user specified --calendars, use
@@ -277,8 +312,8 @@ export async function calendarSearchCommand(account: string, args: string[]): Pr
       try {
         const res = await api.events.list({
           calendarId,
-          timeMin: flags.from,
-          timeMax: flags.to,
+          timeMin: from,
+          timeMax: to,
           maxResults: flags.limit,
           singleEvents: true,
           orderBy: "startTime",
@@ -353,7 +388,8 @@ export async function calendarSearchCommand(account: string, args: string[]): Pr
   const summary: Record<string, unknown> = {
     count: merged.length,
     calendars_searched: succeededCount,
-    range: `${flags.from} → ${flags.to}`,
+    range: `${toLocalOffsetISO(from)} → ${toLocalOffsetISO(to)}`,
+    ...(weekStart ? { week_start: `${weekStart.label} (${weekStart.source})` } : {}),
   };
   if (flags.dedupe) {
     summary.dedupe = true;
