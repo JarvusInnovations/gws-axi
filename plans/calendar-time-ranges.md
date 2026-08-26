@@ -1,9 +1,10 @@
 ---
-status: planned
+status: done
 depends: []
 specs:
   - specs/api/conventions.md
 issues: []
+pr: 65
 ---
 
 # Plan: Deterministic time ranges — day boundaries, relative tokens, window shortcuts
@@ -172,32 +173,34 @@ All helpers take an injectable `now`, so every case is deterministic without fak
 
 ## Validation
 
-- [ ] `bun run build` (tsc) passes.
-- [ ] `bun run test` green, including the new `dateish.test.ts`.
-- [ ] `calendar events --from 2026-08-26 --to 2026-08-26` returns that day's events (the
+- [x] `bun run build` (tsc) passes.
+- [x] `bun run test` green, including the new `dateish.test.ts`.
+- [x] `calendar events --from 2026-08-26 --to 2026-08-26` returns that day's events (the
       originating bug), and `range:` echoes `…T00:00:00-04:00 → 2026-08-27T00:00:00-04:00`.
-- [ ] `calendar events --today` and `--this-week` return the expected windows; `--this-week`
+- [x] `calendar events --today` and `--this-week` return the expected windows; `--this-week`
       spans the account's week-start day 00:00 → the same weekday 00:00 seven days later when
       run mid-week (Monday for `chris@jarv.us`, whose `weekStart` is `1`).
-- [ ] `--this-week` reports `week_start: monday (account)` on a cold run and `(cache)` on the
+- [x] `--this-week` reports `week_start: monday (account)` on a cold run and `(cache)` on the
       next; the cache lands in `accounts/<email>/settings.json` and survives an `auth login`
       (i.e. is not stored in `profile.json`).
-- [ ] With the setting lookup forced to fail, `--this-week` still returns a window and reports
+- [x] With the setting lookup forced to fail, `--this-week` still returns a window and reports
       `week_start: monday (fallback)` — no error.
-- [ ] `calendar events --from 2026-08-26T10:00 --to 2026-08-26T09:00` → `VALIDATION_ERROR`
+- [x] `calendar events --from 2026-08-26T10:00 --to 2026-08-26T09:00` → `VALIDATION_ERROR`
       naming both boundaries, **not** `count: 0`.
-- [ ] `calendar events --today --from 2026-08-26` → `VALIDATION_ERROR`; `--today --this-week`
+- [x] `calendar events --today --from 2026-08-26` → `VALIDATION_ERROR`; `--today --this-week`
       → `VALIDATION_ERROR`.
-- [ ] `calendar create --start 2026-08-26 --end 2026-08-26T11:00` is unchanged by this work
+- [x] `calendar create --start 2026-08-26 --end 2026-08-26T11:00` is unchanged by this work
       (instant semantics preserved for non-range flags).
-- [ ] `calendar search --query <x> --this-week` and `calendar freebusy --today` honor the
+- [x] `calendar search --query <x> --this-week` and `calendar freebusy --today` honor the
       same windows; freebusy's default (today) still works with no flags.
 - [ ] `drive activity <id> --since today` resolves to local midnight and the output echoes
-      the resolved `range:`.
-- [ ] `calendar events --help`, `calendar search --help`, `calendar freebusy --help`, and
+      the resolved `range:`. *(Boundary resolution verified; the `range:` echo could not be
+      exercised — see Notes.)*
+- [x] `calendar events --help`, `calendar search --help`, `calendar freebusy --help`, and
       `calendar --help` all show the shortcuts in the flags/examples blocks with correct
       `flags[N]` counts.
-- [ ] Every `range:` echo renders local-offset ISO, no `Z`/`.000Z` form.
+- [x] Every `range:` echo renders local-offset ISO, no `Z`/`.000Z` form. *(Verified live on
+      events / search / freebusy; `drive activity`'s echo by inspection only — see Notes.)*
 
 ## Risks / unknowns
 
@@ -220,8 +223,50 @@ All helpers take an injectable `now`, so every case is deterministic without fak
 
 ## Notes
 
-(Populated at closeout.)
+- **The originating bug, before and after.** `--from 2026-08-26 --to 2026-08-26` went from
+  `count: 0` / `events: no events found in the given time range` to `count: 7` with
+  `range: 2026-08-26T00:00:00-04:00 → 2026-08-27T00:00:00-04:00`. The UTC `range:` echo was
+  part of what made the zero-width window invisible: `…T04:00:00.000Z → …T04:00:00.000Z`
+  reads like a real range unless you compare the two halves character by character.
+- **`weekStart` reversed an earlier decision, and the reversal was right.** The spec first
+  fixed the week to Monday on determinism grounds. The counter-argument — someone asking
+  their own calendar "what's this week" means the week their calendar draws — wins, because
+  the determinism concern was really a *disclosure* concern, and the `range:` echo plus
+  `week_start: <day> (<source>)` answers it without a constant. Verified live that the
+  existing `calendar` scope already authorizes `settings.get`, so this cost no re-auth.
+- **`settings.json` is a deliberate sibling of `profile.json`, not a section inside it.**
+  `src/auth/loopback.ts` rewrites `profile.json` wholesale from the id_token on every
+  login; a cached API preference stored there would vanish on re-auth. Confirmed by
+  inspection that nothing outside `week-start.ts` touches `settings.json`.
+- **`Number("") === 0` bit us.** An empty `weekStart` value parsed to a *valid* day (Sunday)
+  rather than failing, so the fallback never engaged. Caught by the new tests, fixed in
+  d5bd070. Worth remembering wherever a numeric enum's zero value is meaningful.
+- **freebusy's default day shifted by a millisecond-ish.** It used to end at
+  `23:59:59.999`; it now ends at the next local midnight, matching `--today` and the
+  half-open contract. Behaviorally equivalent apart from an event starting exactly at
+  midnight, which now correctly belongs to the following day.
+- **`drive activity` could not be exercised end to end** — `driveactivity.googleapis.com`
+  is not enabled on this account's project (`API_NOT_ENABLED`). Flag resolution was verified
+  through the error path (`--since D --until D` passes validation and reaches the API;
+  inverted bounds fail first with `--since`/`--until` named correctly), but the `range:`
+  echo in a successful response is unverified.
+- **Tests inject `now` everywhere** rather than faking timers, so the DST cases are readable
+  and the suite doesn't depend on the wall clock. The DST assertions do assume the repo's
+  `America/New_York` zone; everything else is zone-agnostic.
+
 
 ## Follow-ups
 
-(Populated at closeout.)
+- Issue — verify `drive activity`'s `range:` echo once `driveactivity.googleapis.com` is
+  enabled on the project. Purely a display path; the boundary logic it reports is covered by
+  `dateish.test.ts`.
+- Tracked as: weekday-name tokens (`next-monday` / `last-monday` spellings) if range queries
+  start wanting them — deliberately omitted here because bare `monday` can't be resolved
+  without guessing.
+- Tracked as: `--tomorrow` / `--next-week` / `--this-month` shortcuts. Reachable today via
+  tokens (`--from tomorrow --to tomorrow`); add only if usage shows they're common enough to
+  earn flag surface.
+- Issue [#63](https://github.com/JarvusInnovations/gws-axi/issues/63) — timed starts print
+  the zone's standard offset year-round. Untouched here, but this plan's local-calendar
+  arithmetic is the precondition for fixing it, and `settings.list` also exposes the
+  account's `timezone`, which that fix will likely want.
