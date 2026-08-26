@@ -94,7 +94,11 @@ export async function resolveWeekStart(account: string): Promise<WeekStart> {
   try {
     const api = await calendarClient(account);
     const res = await api.settings.get({ setting: "weekStart" });
-    const day = Number(res.data.value);
+    const raw = res.data.value;
+    // Guard the empty string explicitly: Number("") is 0, which is a valid
+    // day, so an absent value would silently read as Sunday.
+    if (typeof raw !== "string" || raw.trim() === "") return fallback();
+    const day = Number(raw);
     if (!Number.isInteger(day) || day < 0 || day > 6) return fallback();
     writeCache(account, day);
     return { day, label: labelFor(day), source: "account" };
