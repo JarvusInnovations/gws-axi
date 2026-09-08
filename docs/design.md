@@ -36,6 +36,8 @@ All user state lives under `$XDG_CONFIG_HOME/gws-axi/` (default `~/.config/gws-a
 
 Rationale: XDG-compliant, easy to reset (`rm -rf ~/.config/gws-axi && gws-axi auth setup`), single location for all auth state. Per-account subdirectories support multi-account use from a single OAuth client.
 
+Pointing `XDG_CONFIG_HOME` at a dir holding only one account's tokens is also how you give an agent a hard account boundary — see [Environment pin](#environment-pin-gws_axi_account).
+
 ## Authentication model (v1 — BYO)
 
 Each user creates their own Google Cloud project and OAuth client. `gws-axi` walks them through the parts that can be automated (project creation, API enablement via `gcloud` if installed) and deep-links for the parts that cannot (Desktop OAuth client creation, consent screen configuration).
@@ -92,11 +94,26 @@ First account authenticated auto-promotes to default. Single-account users don't
 When 2+ accounts are authenticated:
 
 - **Reads** use the default account if `--account` is not provided
-- **Writes** REQUIRE `--account <email>` — `ACCOUNT_REQUIRED` error otherwise
+- **Writes** REQUIRE an explicit account — `--account <email>`, or a `GWS_AXI_ACCOUNT` pin (below). `ACCOUNT_REQUIRED` error otherwise.
 
 When 1 account is authenticated: no requirement, sole account is always used.
 
 This prevents the "Agent A reads personal calendar, Agent B switches default to work, Agent A writes to work by accident" failure mode when parallel agent sessions share the same config.
+
+### Environment pin (`GWS_AXI_ACCOUNT`)
+
+`--account` is a per-call choice the caller makes; `default_account` is mutable global state any parallel session can flip. Neither can express "this environment acts as this account, period" — which is what constraining an agent session requires. `GWS_AXI_ACCOUNT` is that pin:
+
+- Beats `default_account`; the on-disk default is never rewritten.
+- **Satisfies write-protection** — a mutation under a pin needs no `--account`. The environment already made the explicit choice the rule demands, and unlike the default, no other session can change it.
+- A conflicting `--account <other>` is refused with `ACCOUNT_LOCKED`, not honored. A pin that could be argued out of by a flag would not be a constraint.
+- A pin naming an unauthenticated account raises `ACCOUNT_LOCK_INVALID` on every command rather than falling back to the default — silent fallback is exactly what the pin was set to prevent. `doctor` counts this as a failing check and `--summary` names it.
+- Disclosed as `account_source: env` on every response, and as `account_lock:` in the home view, `auth accounts`, `auth status`, and `doctor`. An environment variable is invisible in an agent transcript, so the response is the only place a reader can learn the session was pinned.
+- `auth` subcommands are **not** pinned — they operate on the account *store*, not *as* an account, so `auth login --account <other>` still adds accounts. `auth login` with no `--account` re-authenticates the pin.
+
+It is an **accident boundary, not a security boundary**: anything that can run `gws-axi` can unset the variable. For a real boundary, point `XDG_CONFIG_HOME` at a config dir containing only the intended account's tokens. The two compose — the config dir bounds what is *reachable*, the pin bounds what is *used*.
+
+`XDG_CONFIG_HOME` and `GWS_AXI_ACCOUNT` are the only environment variables gws-axi reads, and that ceiling is deliberate: env vars may pin ambient context but never unlock capability (`specs/principles.md#env-pins-context-never-expands-capability`).
 
 Mutations marked per subcommand in each service's dispatcher map:
 
@@ -275,7 +292,7 @@ gws-axi drive ... [--account <email>]        # Drive subcommands
 gws-axi slides ... [--account <email>]       # Slides subcommands
 ```
 
-`--account` is required for write operations when 2+ accounts are authenticated; see the Multi-account model section.
+`--account` (or a `GWS_AXI_ACCOUNT` pin) is required for write operations when 2+ accounts are authenticated; see the Multi-account model section.
 
 ### Per-service surface
 
