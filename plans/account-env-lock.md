@@ -1,11 +1,12 @@
 ---
-status: in-progress
+status: done
 depends: []
 specs:
   - specs/api/conventions.md
   - specs/architecture.md
   - specs/principles.md
 issues: []
+pr: 67
 ---
 
 # Plan: `GWS_AXI_ACCOUNT` — pin a session to one account via the environment
@@ -199,34 +200,34 @@ pattern already used for `XDG_CONFIG_HOME`, over a temp config dir.
 
 ## Validation
 
-- [ ] `bun run build` (tsc) passes; `bun run test` green including the new `account.test.ts`.
-- [ ] With 2 accounts authenticated and no pin, account *resolution* is unchanged (reads
+- [x] `bun run build` (tsc) passes; `bun run test` green including the new `account.test.ts`.
+- [x] With 2 accounts authenticated and no pin, account *resolution* is unchanged (reads
       use the default, writes still raise `ACCOUNT_REQUIRED`), and the only output change is
       the newly-emitted `account_source: default` line. **Amended** from "behavior is
       byte-identical to before": `account_source` turned out never to have been wired (see
       below), and emitting it is a spec-conformance fix this plan cannot avoid making, since
       the pin's disclosure rides the same mechanism.
-- [ ] `GWS_AXI_ACCOUNT=<b> gws-axi calendar events --today` acts as `<b>` while
+- [x] `GWS_AXI_ACCOUNT=<b> gws-axi calendar events --today` acts as `<b>` while
       `default_account` is `<a>`, emits `account_source: env`, and leaves `config.json`
       unmodified.
-- [ ] A mutation under a pin with 2+ accounts and no `--account` succeeds — verified on a
+- [x] A mutation under a pin with 2+ accounts and no `--account` succeeds — verified on a
       real write (`calendar create` into a scratch event, then `calendar delete`).
-- [ ] `GWS_AXI_ACCOUNT=<b> gws-axi calendar events --account <a>` → `ACCOUNT_LOCKED`, and
+- [x] `GWS_AXI_ACCOUNT=<b> gws-axi calendar events --account <a>` → `ACCOUNT_LOCKED`, and
       the message names both accounts and the variable.
-- [ ] `GWS_AXI_ACCOUNT=<b> gws-axi calendar events --account <b>` succeeds (agreement is
+- [x] `GWS_AXI_ACCOUNT=<b> gws-axi calendar events --account <b>` succeeds (agreement is
       not conflict).
-- [ ] `GWS_AXI_ACCOUNT=nobody@example.com gws-axi calendar events` → `ACCOUNT_LOCK_INVALID`
+- [x] `GWS_AXI_ACCOUNT=nobody@example.com gws-axi calendar events` → `ACCOUNT_LOCK_INVALID`
       with an `unset GWS_AXI_ACCOUNT` suggestion — **not** a silent fall back to the default.
-- [ ] `GWS_AXI_ACCOUNT= gws-axi calendar events` (empty value) behaves exactly as unset.
-- [ ] `account_source: env` appears with only one account authenticated.
-- [ ] `gws-axi --summary`, `gws-axi auth accounts`, `gws-axi auth status`, and
+- [x] `GWS_AXI_ACCOUNT= gws-axi calendar events` (empty value) behaves exactly as unset.
+- [x] `account_source: env` appears with only one account authenticated.
+- [x] `gws-axi --summary`, `gws-axi auth accounts`, `gws-axi auth status`, and
       `gws-axi doctor` each report `account_lock: <email> (GWS_AXI_ACCOUNT)` under a pin,
       and none of them claims writes still require `--account`.
-- [ ] `gws-axi auth use <a>` under a pin to `<b>` writes the default and says the pin
+- [x] `gws-axi auth use <a>` under a pin to `<b>` writes the default and says the pin
       overrides it here.
-- [ ] `GWS_AXI_ACCOUNT=<b> gws-axi auth login --no-wait` targets `<b>` without `--account`,
+- [x] `GWS_AXI_ACCOUNT=<b> gws-axi auth login --no-wait` targets `<b>` without `--account`,
       and `auth login --account <a> --no-wait` under that pin is still allowed.
-- [ ] `gws-axi auth --help` documents the variable, and every **write** command's
+- [x] `gws-axi auth --help` documents the variable, and every **write** command's
       `--account` help line no longer claims the flag is unconditionally REQUIRED.
       **Amended** from "`gws-axi calendar events --help` and `gws-axi auth --help` document
       the variable" — read-command help is deliberately left alone; see Approach § 4.
@@ -269,8 +270,66 @@ pattern already used for `XDG_CONFIG_HOME`, over a temp config dir.
 
 ## Notes
 
-(Populated at closeout.)
+- **`account_source` had never been emitted, by anything.** `accountHeaderFields` computed
+  the line and had zero production call sites: dispatchers hand handlers only
+  `resolution.account` (a string), handlers render `account:` themselves, and the
+  `AccountResolution` never left the dispatcher. So
+  [principles.md#self-describing-account-header](../specs/principles.md#self-describing-account-header)
+  was unimplemented from the day it was written, and nobody noticed because the missing line
+  looks exactly like the (correct) single-account case. Found only because the pin's own
+  disclosure rides the same mechanism. `specs/architecture.md` credited
+  `accountHeaderFields` for the behavior and has been corrected to describe
+  `withAccountSource`. **Lesson worth generalizing: a spec clause whose absence is invisible
+  in the common case needs a test, not a reviewer.**
+- **The splice, not a signature change.** Fixing it "properly" meant threading an
+  `AccountResolution` through ~50 handlers. `withAccountSource(resolution, output)` inserts
+  the line after the rendered `account:` line at the dispatcher instead — six call sites, no
+  handler churn. It matches on `startsWith("account:")` rather than a substring so a
+  `help[]` line mentioning `--account:` can't be mistaken for the header, and prepends when a
+  handler renders no account line at all.
+- **`account_source: default` is new user-visible output** on implicit 2+-account reads. It
+  is what the spec always required, but it is a change to every such response, and worth
+  knowing if any downstream parser assumed a fixed header shape.
+- **The pin is checked before `--account` validation**, so under a pin an unauthenticated
+  `--account` reports `ACCOUNT_LOCKED`, not `ACCOUNT_NOT_FOUND`. Deliberate: the lock is the
+  governing fact and the flag would have been refused either way. Covered by a test named for
+  the precedence so a future reorder trips it.
+- **A broken pin shows no `account:` line in the home view.** The first cut printed the
+  default account beside the "NOT AUTHENTICATED" warning, which reads as a working
+  fallback — the precise misreading the loud-failure rule exists to prevent. It now reports
+  the lock and `authenticated_accounts[]` only.
+- **`gws-axi --summary` is rejected by the SDK arg parser** ("Flags must come after the
+  command") — pre-existing, unrelated to this work. The SessionStart hook actually runs bare
+  `gws-axi` (the home view), which does report the pin; `doctor --summary` is the other
+  summary path and also reports it. `specs/architecture.md` and `docs/design.md` both say the
+  hook runs `gws-axi --summary`; see Follow-ups.
+- **`doctor --summary` exits 0 even on a failing check**, including a broken pin, because
+  summary mode returns before `process.exitCode` is set. Pre-existing and plausibly
+  deliberate (a SessionStart hook shouldn't fail a session); left alone. Full `doctor` does
+  exit 1 on a broken pin, verified.
+- **Verified live against two real accounts** (`chris@jarv.us` default, `themightychris@gmail.com`
+  pinned), including a real `calendar create` under a pin with no `--account` — the write
+  landed on the non-default account and was deleted afterward. `config.json` confirmed
+  unmodified throughout.
+- **`account_source: env` with exactly one account authenticated is unit-verified only** —
+  this machine has two accounts. The path is account-count-independent by construction
+  (`accountSourceLabel` returns `"env"` on source alone), and both `accountHeaderFields` and
+  `withAccountSource` are tested at `totalAccounts: 1`.
 
 ## Follow-ups
 
-(Populated at closeout.)
+- Issue — `specs/architecture.md` § SessionStart hook and `docs/design.md` both state the hook
+  runs `gws-axi --summary`, but that invocation is rejected by the SDK arg parser and the
+  installed hook runs bare `gws-axi`. Spec drift predating this plan; not touched here
+  because it belongs to the `setup hooks` surface, not account resolution.
+- Issue — `doctor --summary` returns exit 0 regardless of failing checks (summary mode returns
+  before `process.exitCode` is set). Worth an explicit decision recorded in
+  `specs/commands/setup.md`: either it is deliberate (hooks must not fail sessions) and the
+  spec should say so, or it is a bug.
+- Tracked as: a scoped-`XDG_CONFIG_HOME` recipe for provisioning an agent's config dir with a
+  single account's tokens. Documented conceptually in README and `docs/design.md`, but there
+  is no command that *builds* such a directory — today it is a manual copy. Add one only if
+  the pattern gets used enough to earn the surface.
+- Tracked as: no per-service pin (`GWS_AXI_CALENDAR_ACCOUNT`) and no third environment
+  variable, by design — `principles.md#env-pins-context-never-expands-capability` caps the
+  surface at two, and raising the cap is a spec change first.
