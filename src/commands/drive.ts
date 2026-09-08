@@ -1,5 +1,5 @@
 import { AxiError } from "axi-sdk-js";
-import { resolveAccount } from "../google/account.js";
+import { resolveAccount, withAccountSource } from "../google/account.js";
 import { notImplemented, renderAlternatives, withInstead } from "./stub-signposts.js";
 import { docsDownloadCommand } from "./docs/download.js";
 import { driveGetCommand, GET_HELP } from "./drive/get.js";
@@ -199,5 +199,5 @@ export async function driveCommand(args: string[]): Promise<string> {
     throw notImplemented("drive", sub, resolution.account, def.instead);
   }
 
-  return def.handler(resolution.account, remaining);
+  return withAccountSource(resolution, await def.handler(resolution.account, remaining));
 }
