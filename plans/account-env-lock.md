@@ -30,6 +30,9 @@ refused rather than honored.
   (pin names an unauthenticated account).
 - The pin satisfies write-protection — a mutation under a pin needs no `--account`.
 - `account_source: env` in every command header, including the single-account case.
+- **Wiring `account_source` at all** (discovered mid-plan — see the amendment note under
+  Validation): `accountHeaderFields` had zero production call sites, so no `account_source`
+  line has ever been emitted. Fixed via `withAccountSource` at the dispatcher.
 - Pin disclosure on the state surfaces: home view / `--summary`, `auth accounts`,
   `auth status`, `doctor`, and a note on `auth use`.
 - `auth login` with no `--account` falls back to the pinned account.
@@ -187,8 +190,12 @@ pattern already used for `XDG_CONFIG_HOME`, over a temp config dir.
 ## Validation
 
 - [ ] `bun run build` (tsc) passes; `bun run test` green including the new `account.test.ts`.
-- [ ] With 2 accounts authenticated and no pin, behavior is byte-identical to before
-      (reads use the default, writes still raise `ACCOUNT_REQUIRED`).
+- [ ] With 2 accounts authenticated and no pin, account *resolution* is unchanged (reads
+      use the default, writes still raise `ACCOUNT_REQUIRED`), and the only output change is
+      the newly-emitted `account_source: default` line. **Amended** from "behavior is
+      byte-identical to before": `account_source` turned out never to have been wired (see
+      below), and emitting it is a spec-conformance fix this plan cannot avoid making, since
+      the pin's disclosure rides the same mechanism.
 - [ ] `GWS_AXI_ACCOUNT=<b> gws-axi calendar events --today` acts as `<b>` while
       `default_account` is `<a>`, emits `account_source: env`, and leaves `config.json`
       unmodified.
@@ -224,6 +231,16 @@ pattern already used for `XDG_CONFIG_HOME`, over a temp config dir.
   field is removed; a stale `.explicit` would silently read `undefined` (falsy) and
   mislabel headers rather than failing to compile — check for `explicit` in destructuring
   patterns, not just property access.
+- **`account_source` was dead code, discovered mid-plan.** `accountHeaderFields` computed
+  the line but nothing called it: every dispatcher hands its handler only
+  `resolution.account` (a string), and handlers render the `account:` line themselves, so
+  the resolution never left the dispatcher.
+  [principles.md#self-describing-account-header](../specs/principles.md#self-describing-account-header)
+  has been unimplemented since it was written. The pin's disclosure requirement cannot be met
+  without fixing it, so this plan does — via `withAccountSource` splicing the line into the
+  handler's rendered output at the dispatcher, rather than threading an `AccountResolution`
+  through ~50 handler signatures. Side effect: `account_source: default` now appears for the
+  first time on implicit 2+-account reads, which is what the spec always required.
 - **Disclosure surfaces are hand-maintained.** Six places must learn about the pin, and a
   missed one becomes a surface that confidently reports the *wrong* account context — worse
   than not mentioning it. Mitigated by making the check one exported helper call, not
