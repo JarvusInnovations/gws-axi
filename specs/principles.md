@@ -79,15 +79,25 @@ Stdout is exclusively AXI-structured output. Never leak dependency chatter (`gcl
 
 ## self-describing-account-header
 
-Every command echoes `account: <email>` in its output, and adds `account_source: default` when 2+ accounts are authenticated and the default was used implicitly.
+Every command echoes `account: <email>` in its output. It adds `account_source: env` whenever a `GWS_AXI_ACCOUNT` pin decided the account, and `account_source: default` when 2+ accounts are authenticated and the default was used implicitly. An account named by `--account` needs no source line — it is already on the command line.
 
-> **Why:** Parallel agent sessions share one config file. The response must state which account it acted as, so a default changed by another session never silently misleads the reader.
+> **Why:** Parallel agent sessions share one config file. The response must state which account it acted as, so a default changed by another session never silently misleads the reader. The `env` source matters for the opposite reason: an environment pin is *invisible* on the command line, so the response is the only place a reader can learn the session was constrained ([env-pins-context-never-expands-capability](#env-pins-context-never-expands-capability)).
 
 ## write-protection-requires-explicit-account
 
-With 2+ accounts authenticated, **write** operations REQUIRE explicit `--account <email>` (error `ACCOUNT_REQUIRED` otherwise); reads fall back to the configured default. With exactly 1 account, neither requires a flag.
+With 2+ accounts authenticated, **write** operations REQUIRE an explicit account choice; reads fall back to the configured default. With exactly 1 account, neither requires one.
 
-> **Why:** In shared-config parallel sessions, one session flipping the default must never cause another's write to land on the wrong account. A little friction on writes buys zero silent wrong-account mutations. Reads are reversible, so they keep the convenience.
+"Explicit" means the caller named the account for this invocation — `--account <email>` — or the environment pins it for every invocation via `GWS_AXI_ACCOUNT` (see [env-pins-context-never-expands-capability](#env-pins-context-never-expands-capability)). Both are deliberate acts by whoever runs the command; what write-protection forbids is the *implicit* path, where a mutation silently inherits a `default_account` another session may have just changed. Absent either, the error is `ACCOUNT_REQUIRED`.
+
+> **Why:** In shared-config parallel sessions, one session flipping the default must never cause another's write to land on the wrong account. A little friction on writes buys zero silent wrong-account mutations. Reads are reversible, so they keep the convenience. An environment pin satisfies the rule rather than bypassing it: it is set once, out of band, by the operator configuring the session — and unlike the default, no other session can change it.
+
+## env-pins-context-never-expands-capability
+
+An environment variable may only **pin ambient context** the operator has already decided out of band — which account to act as, where config lives. It never enables a capability, unlocks a behavior unreachable by flag, or turns something on as a side effect. And every choice an env var makes is echoed in the output that acted on it (`account_source: env`), so the reader can see it.
+
+The corollary is a ceiling on how much env vars may ever do here: `GWS_AXI_ACCOUNT` and `XDG_CONFIG_HOME` are the whole surface. There is deliberately no env toggle for hook installation (`specs/commands/setup.md`), no env-selected output format, no env flag that turns a refusal into a success.
+
+> **Why:** An agent inherits its environment silently and never sees it in the transcript. That property is exactly what makes env vars right for a pin — an operator constrains a session once, and no prompt injection or flag guess undoes it — and exactly what makes them wrong for capability. A behavior reachable *only* through an invisible variable is a behavior nobody reviewing the command line can audit, and the failure mode is discovering after the fact that a session's environment, not its instructions, decided what it could do. Pinning is the safe half: it can only narrow what happens, and the echo makes even that narrowing visible in the response.
 
 ## authoritative-identity-from-id-token
 
