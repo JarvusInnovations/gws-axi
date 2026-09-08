@@ -8,7 +8,7 @@ args[1]:
   <name>               REQUIRED — the folder name
 flags[2]:
   --parent <folder-id> Parent folder ID (default: My Drive root)
-  --account <email>    REQUIRED when 2+ accounts are authenticated
+  --account <email>    REQUIRED when 2+ accounts are authenticated (or set GWS_AXI_ACCOUNT)
 examples:
   gws-axi drive mkdir "Q2 Reports"
   gws-axi drive mkdir Invoices --parent 1AbC...

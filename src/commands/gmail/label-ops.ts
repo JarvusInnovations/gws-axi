@@ -7,7 +7,7 @@ import { fetchLabels } from "./labels-shared.js";
 export const LABEL_CREATE_HELP = `usage: gws-axi gmail label-create --name <text> [flags]
 flags[2]:
   --name <text>        REQUIRED — label name. Use "Parent/Child" for nesting
-  --account <email>    REQUIRED when 2+ accounts are authenticated
+  --account <email>    REQUIRED when 2+ accounts are authenticated (or set GWS_AXI_ACCOUNT)
 examples:
   gws-axi gmail label-create --name Receipts
   gws-axi gmail label-create --name "Work/Clients"
@@ -22,7 +22,7 @@ args[1]:
   <label-id|name>      Existing label to rename (id or current name)
 flags[2]:
   --name <new-name>    REQUIRED — the new label name
-  --account <email>    REQUIRED when 2+ accounts are authenticated
+  --account <email>    REQUIRED when 2+ accounts are authenticated (or set GWS_AXI_ACCOUNT)
 examples:
   gws-axi gmail label-update Receipts --name "Receipts/2026"
   gws-axi gmail label-update Label_42 --name Archive
@@ -35,7 +35,7 @@ export const LABEL_DELETE_HELP = `usage: gws-axi gmail label-delete <label-id|na
 args[1]:
   <label-id|name>      Label to delete (id or name)
 flags[2]:
-  --account <email>    REQUIRED when 2+ accounts are authenticated
+  --account <email>    REQUIRED when 2+ accounts are authenticated (or set GWS_AXI_ACCOUNT)
   --yes                Reserved (no-op) — writes are already explicit
 examples:
   gws-axi gmail label-delete Receipts

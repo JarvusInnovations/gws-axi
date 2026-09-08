@@ -18,7 +18,7 @@ flags[13]:
   --recurrence <rrule>   RFC 5545 RRULE (e.g. "RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR")
   --send-updates <mode>  none | all | externalOnly (default: none — agent-safe)
   --calendar <id>        Calendar to write to (default: primary)
-  --account <email>      REQUIRED when 2+ accounts are authenticated
+  --account <email>      REQUIRED when 2+ accounts are authenticated (or set GWS_AXI_ACCOUNT)
 examples:
   gws-axi calendar create --summary "Team sync" --start 2026-04-22T14:00 --duration 30m
   gws-axi calendar create --summary "Holiday" --start 2026-05-26 --all-day

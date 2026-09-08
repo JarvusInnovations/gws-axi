@@ -175,4 +175,16 @@ describe("resolveLoginAccount", () => {
       expect((err as AxiError).suggestions.join("\n")).toContain("--account c@d.com");
     }
   });
+
+  // A pinned session must be able to refresh its own credentials without
+  // naming itself, and the ambiguity that normally forces --account is gone.
+  it("falls back to a GWS_AXI_ACCOUNT pin instead of ACCOUNT_REQUIRED", () => {
+    expect(resolveLoginAccount(undefined, ["a@b.com", "c@d.com"], "c@d.com")).toBe("c@d.com");
+  });
+
+  it("still lets --account name another account under a pin (auth is not pinned)", () => {
+    // `auth` operates on the account STORE, not *as* an account
+    // (specs/api/conventions.md#environment), so no ACCOUNT_LOCKED here.
+    expect(resolveLoginAccount("a@b.com", ["a@b.com", "c@d.com"], "c@d.com")).toBe("a@b.com");
+  });
 });

@@ -44,7 +44,7 @@ action (>=1 required):
   --forward <email>      Forward matching mail to this address (must be a
                          verified forwarding address in Gmail settings)
 flags:
-  --account <email>      REQUIRED when 2+ accounts are authenticated
+  --account <email>      REQUIRED when 2+ accounts are authenticated (or set GWS_AXI_ACCOUNT)
 examples:
   gws-axi gmail filter-create --from newsletters@x.com --remove-label INBOX --add-label News
   gws-axi gmail filter-create --subject "[ALERT]" --add-label STARRED --add-label IMPORTANT
@@ -57,7 +57,7 @@ export const FILTER_DELETE_HELP = `usage: gws-axi gmail filter-delete <filter-id
 args[1]:
   <filter-id>          Filter ID (from \`gws-axi gmail filter-list\`)
 flags[1]:
-  --account <email>    REQUIRED when 2+ accounts are authenticated
+  --account <email>    REQUIRED when 2+ accounts are authenticated (or set GWS_AXI_ACCOUNT)
 notes:
   Idempotent: deleting an unknown filter id returns \`action: noop\`.
   ${SCOPE_NOTE}

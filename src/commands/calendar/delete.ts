@@ -8,7 +8,7 @@ args[1]:
 flags[4]:
   --calendar <id>        Calendar containing the event (default: primary)
   --send-updates <mode>  none | all | externalOnly (default: none)
-  --account <email>      REQUIRED when 2+ accounts are authenticated
+  --account <email>      REQUIRED when 2+ accounts are authenticated (or set GWS_AXI_ACCOUNT)
   --yes                  Don't warn; just delete (no-op currently — writes
                          are already explicit via --account + this command)
 examples:

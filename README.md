@@ -273,6 +273,29 @@ gws-axi calendar create --summary "..."         # write: ACCOUNT_REQUIRED error
 gws-axi calendar create --account chris@jarv.us --summary "..."  # OK
 ```
 
+### Pinning an agent to one account
+
+`GWS_AXI_ACCOUNT` pins every command in an environment to one authenticated account. Unlike the default account, nothing inside that environment can change it, and unlike `--account`, the agent doesn't get to choose per call:
+
+```bash
+export GWS_AXI_ACCOUNT=chris@jarv.us
+
+gws-axi calendar events                          # acts as chris@jarv.us
+gws-axi calendar create --summary "..."          # OK — no --account needed
+gws-axi calendar events --account other@x.com    # ACCOUNT_LOCKED — refused, not overridden
+```
+
+The pin beats `default_account`, and it **satisfies write protection**: it is already the explicit account choice, made once by whoever configured the environment. Every response says so with `account_source: env`. A pin naming an account that isn't authenticated fails every command with `ACCOUNT_LOCK_INVALID` rather than quietly falling back — a typo must not become "acted as somebody else."
+
+This is an **accident boundary, not a security boundary** — anything that can run `gws-axi` can also `unset GWS_AXI_ACCOUNT`. For a real boundary, give the agent a config directory holding only that account's tokens, and use both together:
+
+```bash
+export XDG_CONFIG_HOME=/srv/agent-home/config   # bounds which accounts exist at all
+export GWS_AXI_ACCOUNT=chris@jarv.us            # bounds which one is used
+```
+
+These two are the only environment variables gws-axi reads.
+
 ### Example output
 
 ```
