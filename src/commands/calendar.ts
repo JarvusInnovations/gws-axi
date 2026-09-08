@@ -1,5 +1,5 @@
 import { AxiError } from "axi-sdk-js";
-import { resolveAccount } from "../google/account.js";
+import { resolveAccount, withAccountSource } from "../google/account.js";
 import { calendarCalendarsCommand, CALENDARS_HELP } from "./calendar/calendars.js";
 import { calendarCreateCommand, CREATE_HELP } from "./calendar/create.js";
 import { calendarDeleteCommand, DELETE_HELP } from "./calendar/delete.js";
@@ -109,5 +109,5 @@ export async function calendarCommand(args: string[]): Promise<string> {
     ]);
   }
 
-  return def.handler(resolution.account, remaining);
+  return withAccountSource(resolution, await def.handler(resolution.account, remaining));
 }

@@ -5,7 +5,7 @@ The contracts every `gws-axi` command honors. A command spec in `commands/` only
 ## Invocation shape
 
 - `gws-axi <service> <subcommand> [positional] [--flags]`.
-- Account selection: `--account <email>` on any command. Resolution and write-protection follow [principles.md#write-protection-requires-explicit-account](../principles.md#write-protection-requires-explicit-account) and the `resolveAccount` rules in [architecture.md](../architecture.md#account-resolution--write-protection-srcgoogleaccountts).
+- Account selection: `--account <email>` on any command, or a `GWS_AXI_ACCOUNT` pin for the whole environment (see [Environment](#environment)). Resolution and write-protection follow [principles.md#write-protection-requires-explicit-account](../principles.md#write-protection-requires-explicit-account) and the `resolveAccount` rules in [architecture.md](../architecture.md#account-resolution--write-protection-srcgoogleaccountts).
 - `<service> <sub> --help` prints that subcommand's `<SUB>_HELP` (for services with a real dispatcher).
 
 ## Output envelope
@@ -145,6 +145,78 @@ A subcommand may be **scaffolded** (listed, `--help`-documented, no handler — 
   wholesale-replace substitutes for a granular edit
   ([principles.md#surface-completeness-limits](../principles.md#surface-completeness-limits)).
 - When no alternative exists, say so explicitly rather than omitting the block.
+
+## Environment
+
+Two environment variables configure gws-axi. Both only **pin ambient context**; neither enables a
+behavior unreachable by flag ([principles.md#env-pins-context-never-expands-capability](../principles.md#env-pins-context-never-expands-capability)).
+There are no others, and adding one is a spec change, not an implementation detail.
+
+| Variable | Effect |
+| --- | --- |
+| `GWS_AXI_ACCOUNT` | Pins every command in this environment to one authenticated account. |
+| `XDG_CONFIG_HOME` | Relocates the config dir to `$XDG_CONFIG_HOME/gws-axi/` (standard XDG behavior; see [architecture.md](../architecture.md#config-layout-xdg)). |
+
+An empty or whitespace-only value is treated as **unset**, never as a meaningful value.
+
+### `GWS_AXI_ACCOUNT` pins the account
+
+Set it to an authenticated account's email and every command acts as that account:
+
+```sh
+GWS_AXI_ACCOUNT=alice@example.com gws-axi calendar events --today
+```
+
+Its purpose is to constrain an agent session — an operator configures the environment once, and the
+account cannot then drift with a shared `default_account` or a guessed flag. It is therefore a
+**pin, not a default**:
+
+| Situation | Result |
+| --- | --- |
+| Pin set, no `--account` | Acts as the pinned account, for reads *and* writes. |
+| Pin set, `--account <same email>` | Fine. Agreement, not conflict. |
+| Pin set, `--account <different email>` | `ACCOUNT_LOCKED` — refused, never silently overridden. |
+| Pin names an unauthenticated account | `ACCOUNT_LOCK_INVALID` on every command that resolves an account. |
+| Pin set alongside a different `default_account` | The pin wins; the default is untouched on disk. |
+
+The pin **satisfies write-protection**: with 2+ accounts authenticated, a mutation under a pin needs
+no `--account`, because the environment already made the explicit choice write-protection exists to
+demand ([principles.md#write-protection-requires-explicit-account](../principles.md#write-protection-requires-explicit-account)).
+A pinned session that could still be talked into `--account someone-else@example.com` would not be a
+constraint at all, which is why the conflict is an error rather than an override.
+
+A pin naming an account that isn't authenticated fails loudly on every command rather than falling
+back to the default. Silent fallback is precisely the outcome the pin was set to prevent, so a typo
+in the variable must not degrade into "acted as somebody else."
+
+### The pin is disclosed everywhere it applies
+
+- Every command emits `account_source: env` in its header whenever the pin decided the account —
+  including the single-account case, where no other `account_source` line would appear
+  ([principles.md#self-describing-account-header](../principles.md#self-describing-account-header)).
+- The home view (`gws-axi` / `--summary`), `auth accounts`, `auth status`, and `doctor` report the
+  pin as `account_lock: <email> (GWS_AXI_ACCOUNT)`. Where those surfaces report write-protection,
+  they say it is satisfied by the pin rather than claiming writes still require `--account`.
+- `auth use <email>` still writes `default_account` while a pin is active — it is a legitimate
+  change for other sessions — but its output states that the pin overrides it here.
+
+### Auth commands are not pinned
+
+`auth` subcommands operate on the account *store*, not *as* an account, so the pin does not gate
+them: `auth login --account <other>` may still add an account, and `auth revoke` may still remove
+one. The pin's guarantee is about which account service commands act as, and adding a second account
+to the store does not weaken it — the pinned session still cannot use it.
+
+One convenience follows: `auth login` with no `--account` and a pin set re-authenticates the pinned
+account, so a locked session can refresh its own credentials without naming itself.
+
+### What the pin is not
+
+It is an **accident boundary, not a security boundary**. Anything that can run `gws-axi` can also
+unset the variable ([principles.md#surface-completeness-limits](../principles.md#surface-completeness-limits)
+applies to our own guarantees too). For an actual boundary, point `XDG_CONFIG_HOME` at a config dir
+containing only the intended account's tokens — then no other account's credentials exist to use.
+The two compose: the config dir bounds what is *reachable*, the pin bounds what is *used*.
 
 ## Error envelope
 

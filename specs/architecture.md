@@ -55,33 +55,45 @@ All state under `$XDG_CONFIG_HOME/gws-axi/` (default `~/.config/gws-axi/`):
 
 Reset = remove the config dir (or `auth reset`).
 
+`XDG_CONFIG_HOME` and `GWS_AXI_ACCOUNT` are the only environment variables gws-axi reads
+([api/conventions.md § Environment](api/conventions.md#environment)).
+
 ## Output system (TOON) — `src/output/`
 
 - All output is TOON via `@toon-format/toon` `encode()`. Builders in `schema.ts`, renderers in `render.ts`, re-exported from `index.js`.
 - **Schema builders** produce `FieldDef = { name, extract(item) }`: `field(name)`, `lower(name)`, `pluck(parent, child, alias?)`, `mapEnum(name, mapping, fallback, alias?)`, `computed(name, fn)`, `truncated(name, max, alias?)`. Missing values coerce to `""`.
 - **Renderers**: `renderList(name, items, schema)` → `name[N]{cols}:` table; `renderObject(value)` → key/value; `renderHelp(suggestions)` → `help[N]:` block (`""` if empty); `joinBlocks(...)` → join non-empty blocks; `renderListResponse({header?, summary?, name, items, schema, suggestions?, emptyMessage?})` → composes header + summary + list (or empty scalar) + help.
 - **Canonical empty-list shape**: empty `items` collapses to `{ [name]: emptyMessage ?? "0 <name> found" }`. Handlers not using `renderListResponse` replicate this by hand. (See [principles.md#canonical-empty-list-shape](principles.md#canonical-empty-list-shape).)
-- **Self-describing header**: output includes `account: <email>`; `account_source: default` is added when 2+ accounts and the default was used implicitly (`accountHeaderFields`).
+- **Self-describing header**: output includes `account: <email>`; `account_source: env` is added whenever a `GWS_AXI_ACCOUNT` pin decided the account, and `account_source: default` when 2+ accounts and the default was used implicitly. Handlers render `account:` themselves but receive only the resolved email string, so the **dispatcher** splices the source line in via `withAccountSource(resolution, output)` — inserted after the `account:` line, or prepended when a handler renders none. `accountSourceLabel` holds the rule; `accountHeaderFields` is the object-shaped form for handlers that build a header map.
 - `--json` exists on `doctor` only.
 
 ## Error model
 
 - All errors are `AxiError(message, code, suggestions[])` on **stdout**; unrecoverable → non-zero exit, idempotent no-ops → exit 0.
 - `translateGoogleError(err, { account, operation })` maps Google errors to `AxiError`: 401/`UNAUTHENTICATED` → `TOKEN_INVALID` (+ publish nudge when not published); 403/`PERMISSION_DENIED` insufficient-scope branch; 404 → `NOT_FOUND`, which handlers re-wrap into domain codes (e.g. `DOCUMENT_NOT_FOUND`) with access-check suggestions.
-- Validation failures throw `AxiError(..., "VALIDATION_ERROR", [usage])`. Account-resolution codes: `NO_ACCOUNTS`, `ACCOUNT_NOT_FOUND`, `ACCOUNT_REQUIRED`, `NO_DEFAULT_ACCOUNT`, `ACCOUNT_MISMATCH`.
+- Validation failures throw `AxiError(..., "VALIDATION_ERROR", [usage])`. Account-resolution codes: `NO_ACCOUNTS`, `ACCOUNT_NOT_FOUND`, `ACCOUNT_REQUIRED`, `NO_DEFAULT_ACCOUNT`, `ACCOUNT_MISMATCH`, `ACCOUNT_LOCKED`, `ACCOUNT_LOCK_INVALID`.
 - `doctor` exit codes: `0` ok (incl. warnings), `1` failing check, `2` usage error.
 
 ## Account resolution & write-protection (`src/google/account.ts`)
 
-`resolveAccount(requestedAccount, { mutation, commandName })` is the single source of truth:
+`resolveAccount(requestedAccount, { mutation, commandName })` is the single source of truth, in order:
 
 - 0 accounts → `NO_ACCOUNTS`.
+- `GWS_AXI_ACCOUNT` set (non-empty after trim) → the **pin**, checked before anything else:
+  - names an unauthenticated account → `ACCOUNT_LOCK_INVALID`.
+  - `--account` names a different account → `ACCOUNT_LOCKED`.
+  - otherwise → use the pinned account with `source: "env"`, which counts as explicit and so
+    satisfies the `mutation` branch below.
 - explicit `--account` → validate authenticated (`ACCOUNT_NOT_FOUND` else).
 - exactly 1 account → use it (no flag needed).
-- 2+ accounts + `mutation: true` + no `--account` → `ACCOUNT_REQUIRED`.
-- 2+ accounts + read + no `--account` → use default; if none set → `NO_DEFAULT_ACCOUNT`.
+- 2+ accounts + `mutation: true` + no explicit account → `ACCOUNT_REQUIRED`.
+- 2+ accounts + read + no explicit account → use default; if none set → `NO_DEFAULT_ACCOUNT`.
 
-The `mutation` flag is declared per subcommand in each service's dispatcher.
+The resolution carries a `source` of `"env" | "flag" | "single" | "default"`; `accountHeaderFields`
+turns it into the `account_source` line. The `mutation` flag is declared per subcommand in each
+service's dispatcher. `auth` subcommands do not route through `resolveAccount` and are not pinned —
+they read `GWS_AXI_ACCOUNT` only as a fallback for `auth login`'s missing `--account`. Full contract:
+[api/conventions.md § Environment](api/conventions.md#environment).
 
 ## --help routing
 

@@ -1,5 +1,5 @@
 import { AxiError } from "axi-sdk-js";
-import { resolveAccount } from "../google/account.js";
+import { resolveAccount, withAccountSource } from "../google/account.js";
 import { notImplemented, renderAlternatives, withInstead } from "./stub-signposts.js";
 import { docsCommentsCommand } from "./docs/comments.js";
 import { GET_HELP, slidesGetCommand } from "./slides/get.js";
@@ -158,5 +158,5 @@ export async function slidesCommand(args: string[]): Promise<string> {
     throw notImplemented("slides", sub, resolution.account, def.instead);
   }
 
-  return def.handler(resolution.account, remaining);
+  return withAccountSource(resolution, await def.handler(resolution.account, remaining));
 }

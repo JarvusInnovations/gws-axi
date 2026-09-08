@@ -13,7 +13,7 @@ flags[5]:
   --remove-label <name>  Label to remove. Repeatable; same name rules as above
   --thread               Treat <message-id> as a THREAD id and modify every
                          message in the thread
-  --account <email>      REQUIRED when 2+ accounts are authenticated
+  --account <email>      REQUIRED when 2+ accounts are authenticated (or set GWS_AXI_ACCOUNT)
   --yes                  Reserved (no-op) — writes are already explicit
 examples:
   gws-axi gmail modify 1899abcd --remove-label INBOX          # archive

@@ -103,6 +103,24 @@ export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
+/**
+ * The `GWS_AXI_ACCOUNT` pin — an account every command in this environment is
+ * locked to — normalized, or `undefined` when unset.
+ *
+ * A blank value counts as UNSET, never as a pin matching no account: an
+ * exported-but-empty `GWS_AXI_ACCOUNT=` would otherwise brick every command
+ * with ACCOUNT_LOCK_INVALID. (Same class of bug as `Number("") === 0` in
+ * week-start.ts — an empty value parsing as *valid* rather than absent.)
+ *
+ * Read from `process.env` per call, never cached at module load, so tests and
+ * long-lived processes see the current environment.
+ */
+export function getAccountLock(): string | undefined {
+  const raw = process.env.GWS_AXI_ACCOUNT;
+  if (!raw || !raw.trim()) return undefined;
+  return normalizeEmail(raw);
+}
+
 // Setup state ──────────────────────────────────────────────────────
 export function defaultSetupState(): SetupState {
   return {

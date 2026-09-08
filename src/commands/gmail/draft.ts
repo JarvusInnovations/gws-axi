@@ -17,7 +17,7 @@ flags[9]:
   --thread <thread-id> Attach the draft to an existing thread (reply draft)
   --plain              Treat the body as LITERAL text, not markdown. Use when
                        *, _, # or backticks must reach the reader as typed
-  --account <email>    REQUIRED when 2+ accounts are authenticated
+  --account <email>    REQUIRED when 2+ accounts are authenticated (or set GWS_AXI_ACCOUNT)
 examples:
   gws-axi gmail draft --to alice@x.com --subject "Re: budget" --body "Looks good — approving."
   gws-axi gmail draft --to a@x.com,b@x.com --subject Hi --body-file ./note.txt

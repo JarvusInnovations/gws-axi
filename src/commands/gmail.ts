@@ -1,5 +1,5 @@
 import { AxiError } from "axi-sdk-js";
-import { resolveAccount } from "../google/account.js";
+import { resolveAccount, withAccountSource } from "../google/account.js";
 import { gmailBatchModifyCommand, BATCH_MODIFY_HELP } from "./gmail/batch-modify.js";
 import { gmailDownloadCommand, DOWNLOAD_HELP } from "./gmail/download.js";
 import { gmailDraftCommand, DRAFT_HELP, SEND_HELP } from "./gmail/draft.js";
@@ -177,5 +177,5 @@ export async function gmailCommand(args: string[]): Promise<string> {
     ]);
   }
 
-  return def.handler(resolution.account, remaining);
+  return withAccountSource(resolution, await def.handler(resolution.account, remaining));
 }
