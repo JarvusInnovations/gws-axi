@@ -3,6 +3,7 @@ import { existsSync, accessSync, constants } from "node:fs";
 import { homedir } from "node:os";
 import {
   configDir,
+  getAccountLock,
   getDefaultAccount,
   listAccounts,
   readSetupState,
@@ -204,7 +205,15 @@ export async function doctorCommand(args: string[]): Promise<Record<string, unkn
         })
       : [];
 
+  // A GWS_AXI_ACCOUNT pin naming an unauthenticated account is a hard failure:
+  // every service command in this environment raises ACCOUNT_LOCK_INVALID.
+  // Counted as a failing check so it reaches the exit code and --summary.
+  const lock = getAccountLock();
+  const lockValid = lock !== undefined && listAccounts().includes(lock);
+  const lockBroken = lock !== undefined && !lockValid;
+
   const failing =
+    (lockBroken ? 1 : 0) +
     prereqs.filter((r) => r.status === "fail").length +
     setupRows.filter((r) => r.status === "fail").length +
     authHealthRows.filter((r) => r.status === "fail").length +
@@ -223,6 +232,11 @@ export async function doctorCommand(args: string[]): Promise<Record<string, unkn
         status: `setup ${done}/${total} — run 'gws-axi auth setup' to continue`,
       };
     }
+    if (lockBroken) {
+      return {
+        status: `GWS_AXI_ACCOUNT pins this environment to ${lock}, which is not authenticated — every command will fail`,
+      };
+    }
     if (failing > 0) {
       return {
         status: `${failing} failing check${failing === 1 ? "" : "s"} — run 'gws-axi doctor'`,
@@ -239,8 +253,15 @@ export async function doctorCommand(args: string[]): Promise<Record<string, unkn
   if (accounts.length > 0) {
     output.accounts = accounts;
     if (defaultAccount) output.default_account = defaultAccount;
+    if (lock) {
+      output.account_lock = lockValid
+        ? `${lock} (GWS_AXI_ACCOUNT)`
+        : `${lock} (GWS_AXI_ACCOUNT) — NOT AUTHENTICATED, every command will fail`;
+    }
     if (accounts.length > 1) {
-      output.write_protection = "enabled — writes require --account";
+      output.write_protection = lockValid
+        ? "satisfied by the GWS_AXI_ACCOUNT pin (writes need no --account)"
+        : "enabled — writes require --account";
     }
   }
   if (prereqs.length > 0) output.prerequisites = prereqs;
@@ -263,6 +284,13 @@ export async function doctorCommand(args: string[]): Promise<Record<string, unkn
   output.summary = `${failing} failing, ${warning} warning`;
 
   const help: string[] = [];
+  if (lockBroken) {
+    help.push(
+      `GWS_AXI_ACCOUNT pins this environment to ${lock}, which is not authenticated — every service command will fail with ACCOUNT_LOCK_INVALID:`,
+    );
+    help.push(`  gws-axi auth login --account ${lock} --no-wait`);
+    help.push("  (or clear the pin for this shell: `unset GWS_AXI_ACCOUNT`)");
+  }
   const setupFailing = setupRows.some((r) => r.status === "fail");
   const tokenFailures = runtimeRows.filter(
     (r) => r.status === "fail" && /401|revoked|refresh/i.test(r.detail),

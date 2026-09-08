@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import { AxiError } from "axi-sdk-js";
 import {
   credentialsPath,
+  getAccountLock,
   getDefaultAccount,
   hasAccount,
   listAccounts,
@@ -70,9 +71,12 @@ join flags[1]:
                               login/publish reporting reflects permanent tokens)
 login flags[3]:
   --account <email>           Authenticate or re-auth a specific account. Omit
-                              only when 0 or 1 accounts exist (1 → re-auths it);
-                              with 2+ authenticated, --account is REQUIRED so the
-                              setup page + Google login_hint name the target.
+                              only when 0 or 1 accounts exist (1 → re-auths it),
+                              or when GWS_AXI_ACCOUNT pins one (→ re-auths the
+                              pin); with 2+ authenticated and no pin, --account
+                              is REQUIRED so the setup page + Google login_hint
+                              name the target. auth acts on the account STORE,
+                              so a pin does NOT block --account here.
   --no-wait                   Prepare only and return fast (for agent flows
                               that want to relay instructions to the user
                               before binding the callback server). Pair
@@ -99,6 +103,19 @@ examples:
   gws-axi auth accounts
   gws-axi auth use chris@jarv.us
   gws-axi auth revoke chris@personal.com
+environment[2]:
+  GWS_AXI_ACCOUNT   Pin every command in this environment to one authenticated
+                    account. It beats the default account, satisfies multi-account
+                    write protection (no --account needed for writes), and REFUSES
+                    a conflicting \`--account <other>\` with ACCOUNT_LOCKED rather
+                    than honoring it. Set it to lock an agent session to one
+                    account. Blank counts as unset.
+  XDG_CONFIG_HOME   Relocates all state to ${"$"}XDG_CONFIG_HOME/gws-axi/.
+notes:
+  GWS_AXI_ACCOUNT is an accident boundary, not a security one — anything that
+  can run gws-axi can unset it. For a real boundary, point XDG_CONFIG_HOME at a
+  config dir holding only the intended account's tokens; the two compose (the
+  config dir bounds what is reachable, the pin bounds what is used).
 flow:
   Humans: \`gws-axi auth login --account <email>\` is one command that
   prepares, prints a brief instruction, and waits for the OAuth
@@ -502,15 +519,25 @@ async function runLogin(args: string[]): Promise<Record<string, unknown>> {
  * account chooser.
  *
  *   explicit --account → passes through unchanged.
+ *   no --account, GWS_AXI_ACCOUNT pinned → the pin (so a pinned session can
+ *     refresh its own credentials without naming itself).
  *   no --account, 0 accounts → first sign-in; undefined (Google shows chooser).
  *   no --account, 1 account  → re-auth it (a mismatch is still caught later).
  *   no --account, 2+ accounts → ambiguous; ACCOUNT_REQUIRED (must name which).
+ *
+ * Note `auth` operates on the account STORE, not *as* an account, so the pin
+ * does not gate it: `auth login --account <other>` stays allowed
+ * (specs/api/conventions.md#environment). The pin only supplies the
+ * *expectation* here — the ID-token identity check downstream still refuses a
+ * mismatch with ACCOUNT_MISMATCH.
  */
 export function resolveLoginAccount(
   account: string | undefined,
   existing: string[],
+  lock?: string,
 ): string | undefined {
   if (account) return account;
+  if (lock) return lock;
   if (existing.length === 1) return existing[0];
   if (existing.length >= 2) {
     throw new AxiError(
@@ -536,7 +563,7 @@ async function prepareLogin(account: string | undefined): Promise<Record<string,
 
   // Resolve which account this login targets so the setup.html prompt and the
   // Google login_hint can name it (see resolveLoginAccount).
-  account = resolveLoginAccount(account, listAccounts());
+  account = resolveLoginAccount(account, listAccounts(), getAccountLock());
 
   // Pre-flight typo check: if --account is close to (but not exactly) an
   // existing authenticated account, abort before burning an OAuth round-
@@ -649,6 +676,7 @@ async function blockOnCallback(): Promise<Record<string, unknown>> {
 interface AccountSummary {
   email: string;
   default: boolean;
+  pinned?: boolean;
   name?: string;
   obtained_at?: string;
   scopes?: number;
@@ -663,8 +691,10 @@ function runAccounts(): Record<string, unknown> {
     };
   }
   const defaultAccount = getDefaultAccount();
+  const lock = getAccountLock();
   const summaries: AccountSummary[] = emails.map((email) => {
     const summary: AccountSummary = { email, default: email === defaultAccount };
+    if (lock) summary.pinned = email === lock;
     try {
       const profile = JSON.parse(readFileSync(profilePathForAccount(email), "utf-8")) as {
         name?: string;
@@ -685,16 +715,32 @@ function runAccounts(): Record<string, unknown> {
     }
     return summary;
   });
-  return {
+  const result: Record<string, unknown> = {
     count: emails.length,
     accounts: summaries,
     default: defaultAccount,
-    help: [
-      "Run `gws-axi auth use <email>` to change default",
-      "Run `gws-axi auth login --account <email>` to add another",
-      "Run `gws-axi auth revoke <email>` to remove one",
-    ],
   };
+  const help: string[] = [];
+  if (lock) {
+    result.account_lock = emails.includes(lock)
+      ? `${lock} (GWS_AXI_ACCOUNT)`
+      : `${lock} (GWS_AXI_ACCOUNT) — NOT AUTHENTICATED, every command will fail`;
+    // The pin beats default_account, so pointing at `auth use` here would be a
+    // dead suggestion in this environment.
+    help.push(
+      `Commands in this environment act as ${lock}; \`auth use\` changes the default for OTHER environments only`,
+    );
+    if (!emails.includes(lock)) {
+      help.push(`Authenticate it: \`gws-axi auth login --account ${lock}\``);
+      help.push("Or clear the pin for this shell: `unset GWS_AXI_ACCOUNT`");
+    }
+  } else {
+    help.push("Run `gws-axi auth use <email>` to change default");
+  }
+  help.push("Run `gws-axi auth login --account <email>` to add another");
+  help.push("Run `gws-axi auth revoke <email>` to remove one");
+  result.help = help;
+  return result;
 }
 
 function runUse(args: string[]): Record<string, unknown> {
@@ -712,11 +758,23 @@ function runUse(args: string[]): Record<string, unknown> {
     ]);
   }
   setDefaultAccount(email);
-  return {
-    status: "ok",
-    default: normalizeEmail(email),
-    help: [`Commands without --account will now use ${normalizeEmail(email)}`],
-  };
+  const normalized = normalizeEmail(email);
+  const lock = getAccountLock();
+  const result: Record<string, unknown> = { status: "ok", default: normalized };
+  if (lock) {
+    // Setting the default is still legitimate — it governs unpinned
+    // environments — but it does nothing here, and saying so beats letting the
+    // caller believe the account changed.
+    result.note = `GWS_AXI_ACCOUNT pins this environment to ${lock}; the new default applies elsewhere, not here`;
+    result.help = [
+      `Commands here still act as ${lock}`,
+      `Commands in environments without the pin will now use ${normalized}`,
+      "To use the new default here: `unset GWS_AXI_ACCOUNT`",
+    ];
+  } else {
+    result.help = [`Commands without --account will now use ${normalized}`];
+  }
+  return result;
 }
 
 function runRevoke(args: string[]): Record<string, unknown> {
@@ -764,11 +822,18 @@ function runStatus(): Record<string, unknown> {
     return { status: "broken: setup complete but no accounts authenticated" };
   }
 
-  return {
+  const lock = getAccountLock();
+  const result: Record<string, unknown> = {
     status: "ok",
     accounts_count: accounts.length,
     default: getDefaultAccount(),
   };
+  if (lock) {
+    result.account_lock = accounts.includes(lock)
+      ? `${lock} (GWS_AXI_ACCOUNT)`
+      : `${lock} (GWS_AXI_ACCOUNT) — NOT AUTHENTICATED, every command will fail`;
+  }
+  return result;
 }
 
 function runPublish(args: string[]): Record<string, unknown> {
