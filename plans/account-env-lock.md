@@ -164,9 +164,19 @@ account commands *act as*, not which accounts may exist.
 
 ### 4. Help text
 
-`--account`'s description in the shared flags blocks gains a clause about the pin, and
-`auth --help` documents `GWS_AXI_ACCOUNT` under a short `environment:` block. This is the
-only place a reader finds the variable without already knowing it exists.
+`auth --help` documents `GWS_AXI_ACCOUNT` under an `environment:` block plus a `notes:`
+block for the accident-vs-security-boundary caveat. This is the one place a reader finds the
+variable without already knowing it exists.
+
+**Amended**: there is no "shared flags block" — each of ~25 help strings is hand-written with
+its own `flags[N]` count. Editing all of them would inflate every help screen for a variable
+most callers never set, and each edit is a chance to leave a stale count (a hazard
+[`calendar-time-ranges`](calendar-time-ranges.md) already hit). Only the **write** commands'
+`--account <email>  REQUIRED when 2+ accounts are authenticated` lines are edited, because the
+pin makes that statement *false* — a correctness fix, not discoverability. Read-command help
+is left alone: under a pin, `ACCOUNT_LOCKED`'s message explains the situation at the moment
+it matters, which is the contextual-help contract
+([principles.md#contextual-help-suggestions](../specs/principles.md#contextual-help-suggestions)).
 
 ### 5. Tests — `src/google/account.test.ts` (new)
 
@@ -216,7 +226,10 @@ pattern already used for `XDG_CONFIG_HOME`, over a temp config dir.
       overrides it here.
 - [ ] `GWS_AXI_ACCOUNT=<b> gws-axi auth login --no-wait` targets `<b>` without `--account`,
       and `auth login --account <a> --no-wait` under that pin is still allowed.
-- [ ] `gws-axi calendar events --help` and `gws-axi auth --help` document the variable.
+- [ ] `gws-axi auth --help` documents the variable, and every **write** command's
+      `--account` help line no longer claims the flag is unconditionally REQUIRED.
+      **Amended** from "`gws-axi calendar events --help` and `gws-axi auth --help` document
+      the variable" — read-command help is deliberately left alone; see Approach § 4.
 
 ## Risks / unknowns
 
