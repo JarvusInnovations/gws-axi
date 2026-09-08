@@ -11,7 +11,7 @@ flags[4]:
   --comment <text>       Optional comment (visible to the organizer)
   --calendar <id>        Calendar containing the event (default: primary)
   --send-updates <mode>  none | all | externalOnly (default: all — notifies organizer)
-  --account <email>      REQUIRED when 2+ accounts are authenticated
+  --account <email>      REQUIRED when 2+ accounts are authenticated (or set GWS_AXI_ACCOUNT)
 examples:
   gws-axi calendar respond abc_123 --response accepted
   gws-axi calendar respond abc_123 --response declined --comment "Timezone conflict"

@@ -19,7 +19,7 @@ flags[12]:
   --replace-attendees <es> Comma-separated emails — REPLACES entire attendee list
   --send-updates <mode>  none | all | externalOnly (default: none)
   --calendar <id>        Calendar containing the event (default: primary)
-  --account <email>      REQUIRED when 2+ accounts are authenticated
+  --account <email>      REQUIRED when 2+ accounts are authenticated (or set GWS_AXI_ACCOUNT)
 examples:
   gws-axi calendar update abc_123 --summary "Team sync (rescheduled)"
   gws-axi calendar update abc_123 --start 2026-04-22T15:00 --duration 30m

@@ -16,7 +16,7 @@ flags[6]:
   --remove-label <name>  Label to remove from every match. Same name rules
   --limit <n>            Max messages to affect (default: 100, max: 1000)
   --include-spam-trash   Include spam/trash in the selection
-  --account <email>      REQUIRED when 2+ accounts are authenticated
+  --account <email>      REQUIRED when 2+ accounts are authenticated (or set GWS_AXI_ACCOUNT)
 examples:
   gws-axi gmail batch-modify --query "from:newsletters@x.com" --remove-label INBOX
   gws-axi gmail batch-modify --query "is:unread older_than:30d" --remove-label UNREAD

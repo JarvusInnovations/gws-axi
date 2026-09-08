@@ -68,7 +68,7 @@ flags[7]:
   --replace-all-tabs   Required to --update a Doc with 2+ tabs or a Sheet with
                        2+ sheets: the import collapses it to a single tab /
                        sheet, destroying the others.
-  --account <email>    REQUIRED when 2+ accounts are authenticated
+  --account <email>    REQUIRED when 2+ accounts are authenticated (or set GWS_AXI_ACCOUNT)
 examples:
   gws-axi drive upload ./report.pdf
   gws-axi drive upload ./report.pdf --parent 1AbC... --name "Q2 Report.pdf"
