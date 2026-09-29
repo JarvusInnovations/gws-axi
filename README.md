@@ -222,6 +222,8 @@ gws-axi drive search --query "name contains 'budget'"
 gws-axi drive permissions <fileId>                # who has access
 gws-axi drive revisions <fileId>                  # version history (any file type)
 gws-axi drive activity <itemId>                   # attributed change timeline (Drive Activity API)
+                                                  # actors are named from your own directory; outside
+                                                  # collaborators stay as people/<id>
 gws-axi drive download <fileId> --out ./file      # fetch bytes / export a native file
 ```
 
