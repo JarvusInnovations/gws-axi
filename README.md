@@ -16,7 +16,7 @@ Read coverage is complete across all seven services; write coverage is rolling o
 | **Drive** | ✅ ls · get · search · permissions · download · revisions · activity | 🟡 upload · mkdir &nbsp;·&nbsp; 🚧 create · copy · move · rename · delete |
 | **Slides** | ✅ get · page · summarize · comments | 🚧 create · update |
 | **Sheets** | ✅ read · comments | 🚧 update · append · clear · create · add-tab |
-| **Chat** | ✅ spaces · messages · search · members | ✅ send · mark-read · mark-unread |
+| **Chat** | ✅ spaces · messages · search · members · download | ✅ send · react · unreact · mark-read · mark-unread |
 
 <sub>✅ shipped · 🟡 partial · 🚧 planned · ✋ out of scope by design</sub>
 
@@ -280,17 +280,19 @@ gws-axi chat messages <space> --fields attachments,reactions
 gws-axi chat search budget --since -7d            # across every conversation
 gws-axi chat search --mentions-me --unread
 gws-axi chat members <space>
+gws-axi chat download <space> <messageId>        # save a message's attachments
 
 gws-axi chat send <space> --text "Feed is back up" --account you@example.com   # SENDS — no draft step
 gws-axi chat send <space> --thread <id> --body-file reply.md --account you@example.com
 gws-axi chat send <space> - --request-id deploy-4821 --account you@example.com  # stdin; safe to retry
+gws-axi chat react <space> <messageId> --emoji 👍 --account you@example.com  # unreact takes it back
 gws-axi chat mark-read <space> --account you@example.com
 gws-axi chat mark-unread <space> --from <messageId> --account you@example.com
 ```
 
 Conversations are addressed by id (from `chat spaces`) or by `--with <email>` — never by name, since names aren't unique and direct messages have none. Direct messages and unnamed group chats are listed under a name derived from their members.
 
-<sub>Message text is Markdown, with mentions as `@Name`. Reading never changes what is marked read. Search has gaps — it omits app messages, muted conversations, and has been seen to miss recent direct messages — and says so on every response. Attachments are listed but can't be downloaded. The new Chat scopes mean existing accounts must `gws-axi auth login` once.</sub>
+<sub>Message text is Markdown, with mentions as `@Name`. Reading never changes what is marked read. Search has gaps — it omits app messages, muted conversations, and has been seen to miss recent direct messages — and says so on every response. Uploaded attachments save with `chat download`; Drive-file ones point at `docs download`. The new Chat scopes mean existing accounts must `gws-axi auth login` once.</sub>
 
 <sub>`chat send` posts immediately to **one** conversation and can't be undone from gws-axi. The body is Markdown. Pass `--request-id` to make a send safe to retry — a second send with the same id posts nothing. Sending needs a Chat app configured on your Google Cloud project (Chat API → Configuration); its name appears beside each message. Marking read is conversation-level only: Google's API can't mark a thread read.</sub>
 
