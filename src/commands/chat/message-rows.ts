@@ -23,7 +23,8 @@ export interface MessageRow {
   thread: string;
   text: string;
   attachments: number;
-  reactions: number;
+  /** Each emoji and its count, e.g. `👍 2 · 🎉 1`; empty when there are none. */
+  reactions: string;
   edited: string;
   quoted: string;
 }
@@ -35,6 +36,20 @@ export interface AttachmentRow {
   source: "drive" | "upload";
   /** The Drive file id, for `drive get`. Empty for uploaded content. */
   drive_file: string;
+}
+
+/**
+ * A message's reactions as `👍 2 · 🎉 1`. Custom emoji show by name, since they
+ * have no character.
+ */
+export function reactionSummary(message: Message): string {
+  return (message.emojiReactionSummaries ?? [])
+    .filter((r) => (r.reactionCount ?? 0) > 0)
+    .map((r) => {
+      const emoji = r.emoji?.unicode ?? `:${r.emoji?.customEmoji?.emojiName ?? "custom"}:`;
+      return `${emoji} ${r.reactionCount}`;
+    })
+    .join(" · ");
 }
 
 /** Register everyone these messages involve, then name whoever Chat didn't. */
@@ -85,10 +100,6 @@ export function toRow(
   options: { full: boolean },
 ): MessageRow {
   const text = renderMessageText(message, (user) => ledger.label(user));
-  const reactions = (message.emojiReactionSummaries ?? []).reduce(
-    (sum, r) => sum + (r.reactionCount ?? 0),
-    0,
-  );
   return {
     space: bareId(message.space?.name),
     id: bareId(message.name),
@@ -97,7 +108,7 @@ export function toRow(
     thread: bareId(message.thread?.name),
     text: options.full ? text : truncateKeepingLinks(text, TEXT_CAP),
     attachments: message.attachment?.length ?? 0,
-    reactions,
+    reactions: reactionSummary(message),
     edited: localTime(message.lastUpdateTime),
     quoted: quotedSummary(message, ledger),
   };

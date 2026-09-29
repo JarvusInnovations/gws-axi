@@ -172,7 +172,8 @@ senders[3]{id,name,email,type}:
 - `senders[N]{id,name,email,type}` lists each distinct sender once — the handoff from a name in a
   row to an id or address another command can use. `type` is `human` or `bot`.
 - Deleted messages are excluded. System messages are excluded upstream.
-- `--fields` opts into `thread`, `attachments` (count), `reactions` (count), `edited`
+- `--fields` opts into `thread`, `attachments` (count), `reactions` (each emoji and its count,
+  e.g. `👍 2 · 🎉 1`), `edited`
   (last-edit time), and `quoted` (the quoted message's sender and text). With `attachments`, an
   `attachments[N]{message,name,type,source,drive_file}` block lists each one; `source` is
   `drive` or `upload`. When the rendered messages carry
