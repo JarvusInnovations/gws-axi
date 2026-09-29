@@ -39,7 +39,7 @@ flags[9]:
   --page <token>       Continue from a previous response's next_page — the
                        next-OLDER messages. Keep the other flags the same.
   --fields <list>      Extra columns, comma-separated: thread, attachments,
-                       reactions, edited, quoted
+                       reactions (each emoji + count), edited, quoted
   --full               Don't truncate message text (default cap: 500 chars)
   --account <email>    Account override when 2+ are configured
 examples:

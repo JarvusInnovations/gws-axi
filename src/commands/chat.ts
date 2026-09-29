@@ -9,6 +9,7 @@ import {
   MARK_UNREAD_HELP,
 } from "./chat/read-state.js";
 import { chatSearchCommand, SEARCH_HELP } from "./chat/search.js";
+import { chatReactCommand, chatUnreactCommand, REACT_HELP, UNREACT_HELP } from "./chat/react.js";
 import { chatSendCommand, SEND_HELP } from "./chat/send.js";
 import { chatSpacesCommand, SPACES_HELP } from "./chat/spaces.js";
 import { notImplemented, renderAlternatives, withInstead } from "./stub-signposts.js";
@@ -27,6 +28,8 @@ const SUBCOMMANDS: ChatSubcommand[] = [
   { name: "search", mutation: false, help: SEARCH_HELP, handler: chatSearchCommand },
   { name: "members", mutation: false, help: MEMBERS_HELP, handler: chatMembersCommand },
   { name: "send", mutation: true, help: SEND_HELP, handler: chatSendCommand },
+  { name: "react", mutation: true, help: REACT_HELP, handler: chatReactCommand },
+  { name: "unreact", mutation: true, help: UNREACT_HELP, handler: chatUnreactCommand },
   { name: "mark-read", mutation: true, help: MARK_READ_HELP, handler: chatMarkReadCommand },
   {
     name: "mark-unread",
@@ -80,6 +83,7 @@ ${renderAlternatives(SUBCOMMANDS)}subcommand help:
   gws-axi chat search --help       search messages across conversations
   gws-axi chat members --help      who is in a conversation
   gws-axi chat send --help         post a message
+  gws-axi chat react --help        add an emoji reaction (unreact removes it)
   gws-axi chat mark-read --help    mark conversations read
   gws-axi chat mark-unread --help  mark a conversation unread from a point
 examples:

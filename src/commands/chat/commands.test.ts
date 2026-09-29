@@ -217,7 +217,10 @@ describe("message rows", () => {
         createTime: "2026-09-25T17:24:15.000Z",
         formattedText: "hello",
         attachment: [{ contentName: "a.pdf" }, { contentName: "b.pdf" }],
-        emojiReactionSummaries: [{ reactionCount: 2 }, { reactionCount: 1 }],
+        emojiReactionSummaries: [
+          { emoji: { unicode: "👍" }, reactionCount: 2 },
+          { emoji: { unicode: "🎉" }, reactionCount: 1 },
+        ],
       },
       ledger,
       { full: false },
@@ -229,7 +232,7 @@ describe("message rows", () => {
       sender: "Bob Tran",
       text: "hello",
       attachments: 2,
-      reactions: 3,
+      reactions: "👍 2 · 🎉 1",
       time: toLocalOffsetISO("2026-09-25T17:24:15.000Z"),
     });
   });
