@@ -85,12 +85,12 @@ read-state no-ops; partial failure across several conversations; write-protectio
 
 - [ ] The unconfigured-project failure is recorded verbatim and `CHAT_APP_NOT_CONFIGURED`
       classifies it.
-- [ ] Each "verify live" row in `chat-send.md` and `chat-read-state.md` is resolved and the
+- [x] Each "verify live" row in `chat-send.md` and `chat-read-state.md` is resolved and the
       spec tables updated.
 
 **Build:**
 
-- [ ] `bun run build`, `bun run lint`, `bun run format:check`, `bun run test` all pass.
+- [x] `bun run build`, `bun run lint`, `bun run format:check`, `bun run test` all pass.
 
 **Live — every send verified by reading the message back *and* viewing it in the Chat UI:**
 
@@ -98,23 +98,23 @@ read-state no-ops; partial failure across several conversations; write-protectio
       `chat messages` returns the same Markdown.
 - [ ] The message is attributed to the account, with the Chat app's name shown as the spec's
       `note` describes.
-- [ ] `--thread <id>` lands inside that thread; a nonexistent thread id returns
+- [x] `--thread <id>` lands inside that thread; a nonexistent thread id returns
       `THREAD_NOT_FOUND` and **no message is created**.
 - [ ] `--thread` against a direct message is refused before sending.
-- [ ] Re-running a send with the same `--request-id` creates no second message.
+- [x] Re-running a send with the same `--request-id` creates no second message.
 - [ ] A send forced to time out returns an error whose first suggestion is the retry command
       carrying the request id, and running it yields exactly one message in the conversation.
-- [ ] With 2+ accounts and no `--account`, `chat send` returns `ACCOUNT_REQUIRED` and sends
+- [x] With 2+ accounts and no `--account`, `chat send` returns `ACCOUNT_REQUIRED` and sends
       nothing; under a `GWS_AXI_ACCOUNT` pin it sends as the pinned account.
-- [ ] A 32,001-byte body returns `MESSAGE_TOO_LARGE` without an API call.
+- [x] A 32,001-byte body returns `MESSAGE_TOO_LARGE` without an API call.
 - [ ] `chat mark-read` on an unread conversation clears it in the Chat UI; a second run reports
       `already_read` and exits 0.
 - [ ] `chat mark-unread --from <messageId>` shows that message and later ones as unread in the
       Chat UI.
-- [ ] `chat messages` run between the two leaves read state unchanged.
-- [ ] A joined install's `CHAT_APP_NOT_CONFIGURED` names the distributor and contains no Console
+- [x] `chat messages` run between the two leaves read state unchanged.
+- [x] A joined install's `CHAT_APP_NOT_CONFIGURED` names the distributor and contains no Console
       URL; `setup.html` for a joined install has no "Enable Chat sending" link.
-- [ ] Every test message sent during validation is listed in Notes with its conversation, since
+- [x] Every test message sent during validation is listed in Notes with its conversation, since
       gws-axi cannot delete them.
 
 ## Risks / unknowns
@@ -134,5 +134,38 @@ read-state no-ops; partial failure across several conversations; write-protectio
   construction. Consistent with one-destination-per-invocation.
 
 ## Notes
+
+Written while the plan is still open, so the record of what was sent exists before closeout.
+
+- **Test messages, all in "Bot testing" (`AAQAPRZPq1Y`), whose only member is the account.**
+  gws-axi cannot delete them.
+  1. `vgyelv3Ty8g.vgyelv3Ty8g` — request id `gws-axi-test-001`, the Markdown sample.
+  2. `vgyelv3Ty8g.BqI5naaWBag` — request id `gws-axi-test-002`, a reply in message 1's thread,
+     sent from stdin.
+  3. `Bck9I2Pp6z8.Bck9I2Pp6z8` — request id `gws-axi-test-004`, sent under a `GWS_AXI_ACCOUNT`
+     pin with no `--account`.
+  Request id `gws-axi-test-003` was the reply to a nonexistent thread. It was refused and
+  posted nothing; the conversation was read back to confirm three messages, not four.
+- **Its read state was moved and put back**: marked unread from message 1, then marked read.
+- **The unconfigured-project gate could not be run.** The project already had a Chat app, so
+  there was no unconfigured state to observe. `CHAT_APP_NOT_CONFIGURED` is classified from a
+  third-party description of the failure and is unverified. Its guidance, for owned and joined
+  installs, is unit-tested.
+- **Boxes left unchecked, and why:**
+  - *Renders as formatting in Chat* and *attributed with the app's name*: gws-axi cannot see the
+    Chat UI. What could be checked was: the stored message, read back in Chat's native markup,
+    carries bold, italic, strike, code, a list, a quote, and a link with its own text; and its
+    sender is the account. The UI half waits on the owner looking at the conversation.
+  - *`mark-read` / `mark-unread` reflected in the Chat UI*: same reason. At the API, an unread
+    search matched the message after `mark-unread` and the read position returned to the
+    newest message after `mark-read`.
+  - *`--thread` against a direct message*: not tested. It would mean posting in a real
+    conversation with another person.
+  - *A send forced to time out*: not forced live. The error and its retry command are
+    unit-tested, and the retry path itself — the same request id posting nothing — was run live.
+- **A replay with a different body returns the original and posts nothing.** The id names the
+  message, not its content. Found by trying it.
+- **Intraword underscores survive**: `GWS_AXI_ACCOUNT` in a Markdown body was stored literally,
+  not as italics.
 
 ## Follow-ups
