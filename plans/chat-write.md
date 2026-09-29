@@ -1,5 +1,5 @@
 ---
-status: planned
+status: in-progress
 depends: [chat-read]
 specs:
   - specs/commands/chat-send.md
