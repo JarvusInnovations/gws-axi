@@ -1,5 +1,6 @@
 import { AxiError } from "axi-sdk-js";
 import { resolveAccount, withAccountSource } from "../google/account.js";
+import { chatDownloadCommand, DOWNLOAD_HELP } from "./chat/download.js";
 import { chatMembersCommand, MEMBERS_HELP } from "./chat/members.js";
 import { chatMessagesCommand, MESSAGES_HELP } from "./chat/messages.js";
 import {
@@ -27,6 +28,7 @@ const SUBCOMMANDS: ChatSubcommand[] = [
   { name: "messages", mutation: false, help: MESSAGES_HELP, handler: chatMessagesCommand },
   { name: "search", mutation: false, help: SEARCH_HELP, handler: chatSearchCommand },
   { name: "members", mutation: false, help: MEMBERS_HELP, handler: chatMembersCommand },
+  { name: "download", mutation: false, help: DOWNLOAD_HELP, handler: chatDownloadCommand },
   { name: "send", mutation: true, help: SEND_HELP, handler: chatSendCommand },
   { name: "react", mutation: true, help: REACT_HELP, handler: chatReactCommand },
   { name: "unreact", mutation: true, help: UNREACT_HELP, handler: chatUnreactCommand },
@@ -82,6 +84,7 @@ ${renderAlternatives(SUBCOMMANDS)}subcommand help:
   gws-axi chat messages --help     read one conversation
   gws-axi chat search --help       search messages across conversations
   gws-axi chat members --help      who is in a conversation
+  gws-axi chat download --help     save a message's attachments
   gws-axi chat send --help         post a message
   gws-axi chat react --help        add an emoji reaction (unreact removes it)
   gws-axi chat mark-read --help    mark conversations read

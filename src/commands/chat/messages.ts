@@ -55,8 +55,8 @@ notes:
   a conversation. Text is Markdown; mentions read @Name.
   A \`thread\` column appears when messages in the result share a thread.
   Reading never changes what is marked read.
-  Attachments can't be downloaded through gws-axi. Ones that are Drive
-  files are listed with their file id under --fields attachments.
+  Download attachments with \`gws-axi chat download <space> <messageId>\`;
+  Drive-file ones list their file id under --fields attachments.
 `;
 
 const COMMAND = "chat messages";
@@ -262,11 +262,6 @@ export async function chatMessagesCommand(account: string, args: string[]): Prom
   const notes: string[] = [];
   if (resolution.degraded) notes.push(resolution.degraded);
   else if (unresolved > 0) notes.push(UNRESOLVED_NOTE);
-  if (showAttachments && attachments.some((a) => a.source === "upload")) {
-    notes.push(
-      "Uploaded attachments can't be retrieved through gws-axi; no command downloads them.",
-    );
-  }
   if (notes.length > 0) blocks.push(renderObject({ note: notes.join(" ") }));
 
   const help: string[] = [];
@@ -281,6 +276,12 @@ export async function chatMessagesCommand(account: string, args: string[]): Prom
     const carrying = new Set(attachments.map((a) => a.message)).size;
     help.push(
       `${carrying} message(s) carry attachments — add \`--fields attachments\` to list them`,
+    );
+  }
+  const upload = showAttachments ? attachments.find((a) => a.source === "upload") : undefined;
+  if (upload) {
+    help.push(
+      `Run \`gws-axi chat download ${spaceId} ${upload.message}\` to save a message's attachments`,
     );
   }
   const driveFile = showAttachments ? attachments.find((a) => a.drive_file) : undefined;
