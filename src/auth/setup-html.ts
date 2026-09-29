@@ -3,7 +3,10 @@ import { dirname, join } from "node:path";
 import {
   configDir,
   getDefaultAccount,
+  isJoinedInstall,
+  isStepComplete,
   listAccounts,
+  missingApis,
   profilePathForAccount,
   readSetupState,
   tokensPathForAccount,
@@ -11,7 +14,7 @@ import {
   type SetupStepKey,
 } from "../config.js";
 import { consoleUrl } from "./steps.js";
-import { REQUIRED_APIS, SERVICES } from "./scopes.js";
+import { allApis } from "./scopes.js";
 
 interface StepLink {
   label: string;
@@ -28,7 +31,11 @@ const STEP_LABELS: Record<SetupStepKey, string> = {
   tokens_obtained: "Run OAuth loopback flow to obtain tokens",
 };
 
-function linksForStep(key: SetupStepKey, projectId: string | undefined): StepLink[] {
+function linksForStep(
+  key: SetupStepKey,
+  projectId: string | undefined,
+  apis: string[],
+): StepLink[] {
   switch (key) {
     case "gcp_project":
       return [
@@ -38,9 +45,9 @@ function linksForStep(key: SetupStepKey, projectId: string | undefined): StepLin
         },
       ];
     case "apis_enabled":
-      return SERVICES.map((s) => ({
-        label: `Enable ${s}`,
-        url: consoleUrl(`/apis/library/${REQUIRED_APIS[s]}`, projectId),
+      return apis.map((api) => ({
+        label: `Enable ${api.replace(".googleapis.com", "")}`,
+        url: consoleUrl(`/apis/library/${api}`, projectId),
       }));
     case "oauth_client":
       return [
@@ -136,8 +143,8 @@ export function writeSetupHtml(options: SetupHtmlOptions = {}): string {
   const state = readSetupState();
   const projectId = state.steps.gcp_project.project_id as string | undefined;
 
-  const nextKey = SETUP_STEP_ORDER.find((k) => !state.steps[k].done);
-  const progress = SETUP_STEP_ORDER.filter((k) => state.steps[k].done).length;
+  const nextKey = SETUP_STEP_ORDER.find((k) => !isStepComplete(state, k));
+  const progress = SETUP_STEP_ORDER.filter((k) => isStepComplete(state, k)).length;
   const initialSetupDone = nextKey === undefined;
   const accounts = readAccountRows();
 
@@ -146,18 +153,20 @@ export function writeSetupHtml(options: SetupHtmlOptions = {}): string {
   // the shared GCP project and must NOT be sent to the Cloud Console, so we
   // suppress the per-step Console deep-links for joined installs (they only need
   // to authenticate). See specs/commands/auth-join.md.
-  const joined = SETUP_STEP_ORDER.some(
-    (k) => (state.steps[k] as { via?: unknown }).via === "team-join",
-  );
+  const joined = isJoinedInstall(state);
+
+  // A stale apis_enabled step links only what's missing; a fresh one links all.
+  const stale = missingApis(state);
+  const apiLinks = stale.length > 0 ? stale : allApis();
 
   const rows = SETUP_STEP_ORDER.map((key, idx) => {
-    const step = state.steps[key];
+    const complete = isStepComplete(state, key);
     const isNext = key === nextKey;
-    const status = step.done ? "✓ done" : isNext ? "→ next" : "… pending";
-    const statusClass = step.done ? "done" : isNext ? "next" : "pending";
+    const status = complete ? "✓ done" : isNext ? "→ next" : "… pending";
+    const statusClass = complete ? "done" : isNext ? "next" : "pending";
     const links = joined
       ? "<em>provisioned by your team — no Console access needed</em>"
-      : linksForStep(key, projectId)
+      : linksForStep(key, projectId, apiLinks)
           .map((l) => `<a href="${l.url}" target="_blank" rel="noopener">${l.label}</a>`)
           .join(" · ") || "<em>no external action needed</em>";
     return `<tr class="${statusClass}">
@@ -232,6 +241,23 @@ ${accounts
   </ol>
 </div>`
     : "";
+
+  // Sending Chat messages is the one capability that needs project-side
+  // configuration beyond the seven steps, and only for installs that send. It
+  // is offered, never required — and never to a joined teammate, who has no
+  // access to the project (specs/commands/chat-send.md § Chat app configuration).
+  const chatSendingBlock =
+    initialSetupDone && !joined
+      ? `<div class="add-another">
+  <h3>Optional: enable Chat sending</h3>
+  <p>Reading Google Chat needs nothing more. <strong>Sending</strong> (<code>gws-axi chat send</code>) needs a Chat app configured on this project, once.</p>
+  <ol>
+    <li>Open <a href="${consoleUrl("/apis/api/chat.googleapis.com/hangouts-chat", projectId)}" target="_blank" rel="noopener">Google Chat API → Configuration</a></li>
+    <li>Set an app name, avatar URL, and description. Interactive features can stay off.</li>
+    <li>Choose the name with care: it is shown beside every message sent.</li>
+  </ol>
+</div>`
+      : "";
 
   const footerText =
     joined && !initialSetupDone
@@ -311,6 +337,7 @@ ${pendingAuthBlock}
 </div>
 ${accountsBlock}
 ${addAnotherBlock}
+${chatSendingBlock}
 ${
   initialSetupDone
     ? `<details class="steps"><summary>Show initial setup steps (all complete)</summary>

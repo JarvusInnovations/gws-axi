@@ -46,6 +46,21 @@ The restricted `gmail.modify` scope drives the choice. Two workable setups:
 > Avoid **External + Testing**: it caps at 100 *test users you must add by hand*
 > and expires refresh tokens every 7 days. Only use it for a quick trial.
 
+## APIs and project-side settings: yours to keep current
+
+Teammates cannot enable an API or change a project setting, so when a gws-axi release adds one,
+it falls to you. `gws-axi auth setup` on your own install enables whatever is missing; a teammate
+who hits a disabled API gets an error naming you, not a Console link.
+
+- **APIs**: the Workspace APIs, plus `driveactivity.googleapis.com`, `chat.googleapis.com`, and
+  `people.googleapis.com`.
+- **Chat adds a restricted scope.** `chat.messages` is restricted, like `gmail.modify` and
+  `drive`, so it counts toward the same verification posture and user cap described above.
+- **Sending Chat messages needs a Chat app configured** on the project (Chat API →
+  Configuration: app name, avatar URL, description). Reading does not. The app name appears
+  beside every message any teammate sends, so choose it as something the whole team is happy to
+  have next to their name.
+
 ## Distribute
 
 1. Download the Desktop OAuth client JSON from the Console.

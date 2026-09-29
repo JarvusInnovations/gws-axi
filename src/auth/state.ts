@@ -1,4 +1,5 @@
 import {
+  isStepComplete,
   readSetupState,
   writeSetupState,
   type SetupState,
@@ -39,7 +40,7 @@ export function resetFrom(key: SetupStepKey | null): SetupState {
 }
 
 function updateResumeHint(state: SetupState): void {
-  const next = SETUP_STEP_ORDER.find((k) => !state.steps[k].done);
+  const next = SETUP_STEP_ORDER.find((k) => !isStepComplete(state, k));
   if (!next) {
     state.last_action = "complete";
     state.resume_hint = "Run `gws-axi doctor` to verify runtime health";

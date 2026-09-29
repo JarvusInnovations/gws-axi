@@ -1,4 +1,9 @@
-import { ADDITIONAL_SCOPE_INFO, SERVICE_SCOPES, type ServiceName } from "../auth/scopes.js";
+import {
+  ADDITIONAL_SCOPE_INFO,
+  SERVICES,
+  SERVICE_SCOPES,
+  type ServiceName,
+} from "../auth/scopes.js";
 import { getValidAccessToken, type StoredTokens } from "./tokens.js";
 
 export interface ProbeResult {
@@ -219,6 +224,30 @@ function probeSheets(ctx: ProbeContext, driveOk: boolean): ProbeResult {
 }
 
 /**
+ * Chat: listing conversations needs no known id, so unlike docs/slides/sheets
+ * this is a real call.
+ */
+async function probeChat(ctx: ProbeContext): Promise<ProbeResult> {
+  const service: ServiceName = "chat";
+  if (!hasScope(ctx.tokens, SERVICE_SCOPES.chat)) {
+    return { service, status: "fail", detail: "scope not granted" };
+  }
+  const { status, body } = await gfetch(
+    "https://chat.googleapis.com/v1/spaces?pageSize=1",
+    ctx.accessToken,
+  );
+  if (status === 200) {
+    const spaces = (body as { spaces?: unknown[] }).spaces ?? [];
+    return {
+      service,
+      status: "ok",
+      detail: spaces.length > 0 ? "conversations accessible" : "0 conversations",
+    };
+  }
+  return classifyError(service, status, body);
+}
+
+/**
  * Presence checks for each ADDITIONAL_SCOPES entry — scopes layered on top of
  * a service's representative scope that are NOT implied by it. These are a
  * cheap token-string check (no API call). Each result is keyed to its parent
@@ -257,13 +286,11 @@ export async function probeAccount(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     // token refresh failed — every service fails for this account
-    return (["gmail", "calendar", "docs", "drive", "slides", "sheets"] as ServiceName[]).map(
-      (service) => ({
-        service,
-        status: "fail" as const,
-        detail: message,
-      }),
-    );
+    return SERVICES.map((service) => ({
+      service,
+      status: "fail" as const,
+      detail: message,
+    }));
   }
 
   const ctx: ProbeContext = {
@@ -272,11 +299,12 @@ export async function probeAccount(
     accessToken: tokens.access_token,
   };
 
-  // Gmail, Calendar, Drive are independent — run in parallel.
-  const [gmail, calendar, drive] = await Promise.all([
+  // Gmail, Calendar, Drive, Chat are independent — run in parallel.
+  const [gmail, calendar, drive, chat] = await Promise.all([
     probeGmail(ctx).catch((e) => errorResult("gmail", e)),
     probeCalendar(ctx).catch((e) => errorResult("calendar", e)),
     probeDrive(ctx).catch((e) => errorResult("drive", e)),
+    probeChat(ctx).catch((e) => errorResult("chat", e)),
   ]);
 
   const driveOk = drive.status === "ok";
@@ -284,7 +312,7 @@ export async function probeAccount(
   const slides = probeSlides(ctx, driveOk);
   const sheets = probeSheets(ctx, driveOk);
 
-  return [gmail, calendar, docs, drive, slides, sheets, ...probeAdditionalScopes(ctx)];
+  return [gmail, calendar, docs, drive, slides, sheets, chat, ...probeAdditionalScopes(ctx)];
 }
 
 function errorResult(service: ServiceName, err: unknown): ProbeResult {

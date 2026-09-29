@@ -6,6 +6,7 @@ import {
   getAccountLock,
   getDefaultAccount,
   listAccounts,
+  missingApis,
   readSetupState,
   setupProgress,
   SETUP_STEP_ORDER,
@@ -101,8 +102,17 @@ function checkPrerequisites(): CheckRow[] {
 
 function checkSetup(): CheckRow[] {
   const state = readSetupState();
+  const staleApis = missingApis(state);
   return SETUP_STEP_ORDER.map((key) => {
     const step = state.steps[key];
+    if (key === "apis_enabled" && staleApis.length > 0) {
+      // Done once, but a later release added APIs this install never enabled.
+      return {
+        check: key,
+        status: "fail" as const,
+        detail: `stale — added since setup ran, not yet confirmed enabled: ${staleApis.join(", ")}; run \`gws-axi auth setup\``,
+      };
+    }
     if (step.done) {
       return {
         check: key,
