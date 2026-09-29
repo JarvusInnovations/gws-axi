@@ -16,7 +16,7 @@ Read coverage is complete across all seven services; write coverage is rolling o
 | **Drive** | ✅ ls · get · search · permissions · download · revisions · activity | 🟡 upload · mkdir &nbsp;·&nbsp; 🚧 create · copy · move · rename · delete |
 | **Slides** | ✅ get · page · summarize · comments | 🚧 create · update |
 | **Sheets** | ✅ read · comments | 🚧 update · append · clear · create · add-tab |
-| **Chat** | ✅ spaces · messages · search · members | ✅ send · mark-read · mark-unread |
+| **Chat** | ✅ spaces · messages · search · members | ✅ send · react · unreact · mark-read · mark-unread |
 
 <sub>✅ shipped · 🟡 partial · 🚧 planned · ✋ out of scope by design</sub>
 
@@ -284,6 +284,7 @@ gws-axi chat members <space>
 gws-axi chat send <space> --text "Feed is back up" --account you@example.com   # SENDS — no draft step
 gws-axi chat send <space> --thread <id> --body-file reply.md --account you@example.com
 gws-axi chat send <space> - --request-id deploy-4821 --account you@example.com  # stdin; safe to retry
+gws-axi chat react <space> <messageId> --emoji 👍 --account you@example.com  # unreact takes it back
 gws-axi chat mark-read <space> --account you@example.com
 gws-axi chat mark-unread <space> --from <messageId> --account you@example.com
 ```
