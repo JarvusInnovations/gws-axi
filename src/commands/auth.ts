@@ -40,6 +40,7 @@ import {
   probeRestrictedScope,
   summarizeAccountHealth,
 } from "../auth/health.js";
+import { allApis } from "../auth/scopes.js";
 import { readTokens } from "../google/tokens.js";
 import { getValidAccessToken } from "../google/tokens.js";
 import { findLikelyTypo } from "../util/typo.js";
@@ -63,7 +64,7 @@ setup flags[6]:
   --project-name <name>       Display name when creating (step 1)
   --credentials-json <path>   Path to downloaded OAuth client JSON (step 4)
   --test-user <email>         Record test user email (step 6 metadata)
-  --confirm-step <step>       Mark a manual step done (consent_screen, test_user_added)
+  --confirm-step <step>       Mark a manual step done (apis_enabled, consent_screen, test_user_added)
 join flags[1]:
   --published                 Assert the shared client's consent screen is
                               already published to Production (opt-in — join
@@ -233,6 +234,12 @@ async function runSetup(args: string[]): Promise<Record<string, unknown>> {
     const extra: Record<string, unknown> = {};
     if (confirmStep === "test_user_added" && flags.testUserEmail) {
       extra.email = flags.testUserEmail;
+    }
+    if (confirmStep === "apis_enabled") {
+      // Confirming asserts the CURRENT list is enabled. Without recording it
+      // the step would read as stale the moment it was confirmed.
+      extra.apis = allApis();
+      extra.via = "manual-confirm";
     }
     markStepDone(confirmStep, extra);
   }

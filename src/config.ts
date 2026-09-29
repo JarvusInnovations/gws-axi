@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { allApis } from "./auth/scopes.js";
 
 export const SETUP_VERSION = 1;
 export const CONFIG_VERSION = 1;
@@ -154,6 +155,49 @@ export function writeSetupState(state: SetupState): void {
   writeFileSync(setupStatePath(), `${JSON.stringify(state, null, 2)}\n`);
 }
 
+/**
+ * Did this install adopt a shared OAuth client via `auth join`? A joined
+ * teammate has no access to the shared GCP project, so nothing may send them to
+ * the Cloud Console or to `auth setup` for project-side work.
+ */
+export function isJoinedInstall(state: SetupState): boolean {
+  return SETUP_STEP_ORDER.some((key) => state.steps[key]?.via === "team-join");
+}
+
+/**
+ * APIs a completed `apis_enabled` step has gone stale on — in `allApis()` now,
+ * but absent from the list the step recorded when it ran. Empty when the step
+ * is current, and empty when it isn't done at all (that is "incomplete", which
+ * `done` already says).
+ *
+ * A joined step asserted its APIs rather than recording them and can't enable
+ * one anyway, so it is never stale; a missing API reaches a joined install as
+ * a runtime API_NOT_ENABLED instead. An owned step with no recorded list
+ * (written before the list existed, or confirmed by hand) is stale on every
+ * API — the list is the only evidence there is.
+ *
+ * See specs/architecture.md § Auth model.
+ */
+export function missingApis(state: SetupState): string[] {
+  const step = state.steps.apis_enabled;
+  if (!step?.done || step.via === "team-join") return [];
+  const recorded = Array.isArray(step.apis)
+    ? step.apis.filter((api): api is string => typeof api === "string")
+    : [];
+  return allApis().filter((api) => !recorded.includes(api));
+}
+
+/**
+ * Whether a setup step counts as complete. Every reader of step completion
+ * routes through this rather than `steps[key].done`, so a stale `apis_enabled`
+ * is incomplete everywhere at once.
+ */
+export function isStepComplete(state: SetupState, key: SetupStepKey): boolean {
+  if (!state.steps[key]?.done) return false;
+  if (key === "apis_enabled") return missingApis(state).length === 0;
+  return true;
+}
+
 export function setupProgress(state: SetupState): {
   done: number;
   total: number;
@@ -162,7 +206,7 @@ export function setupProgress(state: SetupState): {
   let done = 0;
   let nextStep: SetupStepKey | null = null;
   for (const key of SETUP_STEP_ORDER) {
-    if (state.steps[key].done) {
+    if (isStepComplete(state, key)) {
       done++;
     } else if (nextStep === null) {
       nextStep = key;

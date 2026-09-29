@@ -1,6 +1,6 @@
 import { copyFileSync, existsSync, readFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { credentialsPath, type SetupState, type SetupStepKey } from "../config.js";
+import { credentialsPath, missingApis, type SetupState, type SetupStepKey } from "../config.js";
 import { markStepDone, updateStepMetadata } from "./state.js";
 import {
   createProject,
@@ -10,7 +10,7 @@ import {
   listEnabledApis,
   listProjects,
 } from "./gcloud.js";
-import { allApis, REQUIRED_APIS, SERVICES } from "./scopes.js";
+import { allApis } from "./scopes.js";
 
 export interface SetupFlags {
   projectId?: string;
@@ -183,14 +183,17 @@ export async function advanceApisEnabled(
   }
 
   if (!isGcloudInstalled()) {
+    // A stale step names only what a later release added; a first run names all.
+    const stale = missingApis(state);
+    const needed = stale.length > 0 ? stale : allApis();
     return {
       step,
       advanced: false,
       title: "Step 2 of 7: Enable required APIs",
       instructions: [
-        "In your gws-axi setup page tab, click each 'Enable <service>' button to enable these APIs:",
-        ...SERVICES.map((s) => `  - ${s} (${REQUIRED_APIS[s]})`),
-        "Then re-run: `gws-axi auth setup`",
+        "In your gws-axi setup page tab, click each 'Enable' button to enable these APIs:",
+        ...needed.map((api) => `  - ${api}`),
+        "Then confirm: `gws-axi auth setup --confirm-step apis_enabled`",
       ],
     };
   }
