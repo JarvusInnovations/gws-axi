@@ -1,5 +1,5 @@
 ---
-status: planned
+status: in-progress
 depends: [api-enablement-drift]
 specs:
   - specs/commands/chat-read.md
