@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: done
 depends: [chat-write]
 specs:
   - specs/commands/chat-react.md
@@ -34,14 +34,14 @@ specs:
 
 ## Validation
 
-- [ ] `bun run build`, `lint`, `format:check`, `test` pass.
-- [ ] Live, in "Bot testing": react 👍 → `reacted`; again → `already_reacted`; via the
+- [x] `bun run build`, `lint`, `format:check`, `test` pass.
+- [x] Live, in "Bot testing": react 👍 → `reacted`; again → `already_reacted`; via the
       `client-gws-axi-test-001` id → works; `unreact` → `unreacted`; again → `not_reacted`.
-- [ ] A skin-tone variant is a distinct reaction, and `unreact` of the plain emoji leaves it.
-- [ ] `--emoji :thumbsup:` and `--emoji hello` are refused before any call.
-- [ ] Without `--account` (2+ accounts) both return `ACCOUNT_REQUIRED`.
-- [ ] `chat messages --fields reactions` shows the emoji and counts.
-- [ ] No test reaction is left on any message afterwards.
+- [x] A skin-tone variant is a distinct reaction, and `unreact` of the plain emoji leaves it.
+- [x] `--emoji :thumbsup:` and `--emoji hello` are refused before any call.
+- [x] Without `--account` (2+ accounts) both return `ACCOUNT_REQUIRED`.
+- [x] `chat messages --fields reactions` shows the emoji and counts.
+- [x] No test reaction is left on any message afterwards.
 
 ## Risks / unknowns
 
@@ -50,4 +50,14 @@ specs:
 
 ## Notes
 
+- **Verified live in "Bot testing"** on gws-axi's own test message: react, repeat, react by
+  `client-` id, a skin-tone variant alongside the plain emoji, then each removed; a second
+  `unreact` was `not_reacted`. The message ended with no reactions.
+- **Reading reactions was verified on a real conversation** (Pan-SLA Tech), read-only at the
+  owner's direction: nothing was posted or reacted there.
+- The API behavior the spec relies on was probed before the spec was written, so the spec
+  records observations rather than assumptions.
+
 ## Follow-ups
+
+- Tracked as: custom emoji and `:shortcode:` aliases.
