@@ -17,8 +17,8 @@ Stand up the `chat` service and ship its read commands: `spaces`, `messages`, `s
 
 **In scope:**
 
-- Service scaffold: scopes, APIs, `chatClient`, live doctor probe with the
-  not-available classification, dispatcher, `cli.ts` registration.
+- Service scaffold: scopes, APIs, `chatClient`, live doctor probe, dispatcher, `cli.ts`
+  registration.
 - The four read commands and the shared conversation-address parser.
 - The identity renderer, including the disclosure when the response names no one.
 - `send`, `mark-read`, `mark-unread` registered as scaffolded stubs with signposts, so the
@@ -36,7 +36,7 @@ Stand up the `chat` service and ship its read commands: `spaces`, `messages`, `s
 
 - `specs/commands/chat-read.md` — all of it.
 - `specs/architecture.md` — `chat` top-level command; `chatClient`; Chat's scopes and the
-  broad-`chat.messages` rule; the not-available probe status.
+  broad-`chat.messages` rule.
 - `specs/api/conventions.md` — `chat messages` / `chat search` as range-flag commands; service
   availability vs. scope gaps.
 
@@ -78,8 +78,7 @@ and run the full suite before building on it.
 
 ### 3. Probe and availability
 
-A live conversation-list probe. Add the not-available status to the probe result and teach
-`doctor`'s tally, exit code, re-auth hints, and additional-scope rows to honor it. The service
+A live conversation-list probe. The service
 list in the token-refresh-failure fallback is a hard-coded array — derive it from `SERVICES`.
 
 ### 4. Shared helpers
@@ -148,8 +147,8 @@ each error classification; each empty-list scalar; and the dispatcher emitting `
       `--fields thread` restores it.
 - [ ] `chat search` with `--since`/`--until` returns matches inside the window and echoes
       `range:` in local-offset ISO.
-- [ ] `gws-axi doctor` shows a live `chat` row for the Workspace account, and for a consumer
-      account reports Chat as not available with exit code unaffected and no re-auth suggestion.
+- [ ] `gws-axi doctor` shows a live `chat` row, passing, for both the Workspace account and the
+      consumer account.
 - [ ] With 2+ accounts and no `--account`, every chat read emits `account_source: default`.
 - [ ] `chat send --help` and the `NOT_IMPLEMENTED` error both signpost per
       `specs/api/conventions.md` § Unimplemented and unsupported surfaces.
@@ -163,8 +162,8 @@ each error classification; each empty-list scalar; and the dispatcher emitting `
 - **The token can edit and delete messages; no command does.** That boundary is code, not scope.
   Anything added to the chat surface later inherits the capability without a consent prompt to
   mark the moment.
-- **Consumer accounts and single-consent sign-in** — gated in step 0; the fallback is a spec
-  change, not a workaround.
+- **Consumer accounts work**, against expectation — one was observed signing in and using Chat
+  fully. The not-available handling was dropped from the spec as unneeded.
 - **Workspace admins can restrict third-party access to Chat.** A Workspace account may fail for
   policy reasons that look like neither a scope gap nor an unavailable service. Classify what is
   observed; do not guess at a code for it in advance.
