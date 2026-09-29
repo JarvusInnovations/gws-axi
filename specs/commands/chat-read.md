@@ -20,13 +20,38 @@ against real data before the dependent behavior ships, amending this spec first 
 
 | Fact | Status |
 | --- | --- |
-| Read calls under user auth need only the API enabled and an OAuth client — no configured Chat app | Documented (Chat API configuration guide; release note 2026-07-17) |
-| `sender`, `member`, and mention users carry only `name` + `type` under user auth | Documented (Message / Membership reference) |
+| Read calls under user auth need only the API enabled and an OAuth client — no configured Chat app | **Observed 2026-09-28.** Every read below succeeded on a project with no Chat app configured |
+| `sender`, `member`, and mention users carry only `name` + `type` under user auth | **Documented, and contradicted by observation.** See below |
 | `users/{id}` is the same identifier as People API `people/{id}` | Documented (User reference) |
-| `spaces.messages.search` searches across conversations under user auth | Documented (GA 2026-07-30) — verify live |
-| `markupSyntax: MARKUP_SYNTAX_MARKDOWN` returns `formattedText` as Markdown | Documented (GA 2026-08-07) — verify live |
-| `directory.readonly` alone resolves in-domain `people/{id}` to name + email | Verify live |
+| `spaces.messages.search` searches across conversations under user auth | **Observed.** `POST spaces/-/messages:search` with a JSON body; results are `results[].message` |
+| `markupSyntax: MARKUP_SYNTAX_MARKDOWN` returns `formattedText` as Markdown | **Observed** on list and search. Links arrive as `[text](url)`; a mention arrives as an empty `<chat-user data-user="users/{id}"></chat-user>` tag |
+| `directory.readonly` alone resolves in-domain `people/{id}` to name + email | **Observed, partially.** Of two members the Chat API had already named, the People API resolved one and returned an empty person for the other |
 | What a non-Workspace (consumer) account receives from the Chat API, and whether requesting Chat scopes changes its sign-in | Verify live |
+
+### Observed against a Workspace account, 2026-09-28
+
+Sampled: 180 conversations listed; 266 messages across 29 of them; 49 memberships across 12.
+
+- **The Chat API returns names and emails itself.** All 25 distinct senders carried
+  `displayName`; 23 of 24 human senders carried `email`, 17 of them outside the account's
+  domain. All 49 members carried both. Mention annotations carry the same full user object.
+  This contradicts Google's reference, which says user auth populates only `name` and `type`.
+- **Threading state does not say whether a conversation has threads.** Direct messages and
+  group chats report `THREADED_MESSAGES`, yet in every sampled conversation each message was its
+  own thread and `threadReply` was never true.
+- **Direct messages and group chats have no `displayName`**: 0 of 26 and 0 of 5.
+- **A mention's text lives in `text`, not in the Markdown tag.** The annotation's `startIndex`
+  and `length` index into `text`, where the mention reads `@Name`.
+- **Search filters are not spelled the way the reference spells them.** The time field is
+  `create_time`, quoted, in UTC `Z` form; `createTime` is rejected in every form tried.
+  `space.name = spaces/{id}` works; `space.name:` does not. `sender.name` matched by
+  `users/{email}` and returned nothing by `users/{id}`.
+- **Search appears to omit recent direct messages.** Ordered newest-first, the newest direct
+  message search returned was from 2025-10-06, while the same account's direct messages were
+  active on 2026-09-28. Cause unknown. `chat messages <space>` read those messages normally.
+- **`findDirectMessage` by email works**, returns `404` when no such conversation exists, and
+  `400 INVALID_ARGUMENT` when the address is not a user.
+- **Attachments are mostly Drive files**: 102 `DRIVE_FILE` to 8 `UPLOADED_CONTENT`.
 
 ## Addressing a conversation
 
