@@ -393,6 +393,12 @@ function handlerFor(
 
 function summarizeDetail(detail: Record<string, unknown> | undefined): string {
   if (!detail) return "";
+  if (Array.isArray(detail.enabled_now) && detail.enabled_now.length > 0) {
+    return `enabled ${detail.enabled_now.join(", ")} on ${String(detail.project_id)}`;
+  }
+  if (Array.isArray(detail.enabled_now) && typeof detail.project_id === "string") {
+    return `all ${Array.isArray(detail.apis) ? detail.apis.length : ""} APIs already enabled on ${detail.project_id}`;
+  }
   if (typeof detail.project_id === "string") return detail.project_id;
   if (typeof detail.path === "string") return collapseHome(detail.path);
   if (Array.isArray(detail.apis)) return `${detail.apis.length} APIs enabled`;

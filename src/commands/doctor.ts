@@ -110,7 +110,7 @@ function checkSetup(): CheckRow[] {
       return {
         check: key,
         status: "fail" as const,
-        detail: `stale — not enabled: ${staleApis.join(", ")}; run \`gws-axi auth setup\``,
+        detail: `stale — added since setup ran, not yet confirmed enabled: ${staleApis.join(", ")}; run \`gws-axi auth setup\``,
       };
     }
     if (step.done) {

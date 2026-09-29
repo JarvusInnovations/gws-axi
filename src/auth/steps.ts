@@ -224,7 +224,9 @@ export async function advanceApisEnabled(
     step,
     advanced: true,
     title: "APIs enabled",
-    detail: { apis: allApis(), project_id: projectId },
+    // `enabled_now` is what this run turned on, which on a stale re-run is the
+    // only part the caller didn't already know.
+    detail: { apis: allApis(), project_id: projectId, enabled_now: missing },
   };
 }
 
