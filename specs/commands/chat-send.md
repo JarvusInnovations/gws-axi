@@ -29,7 +29,7 @@ a relaxation — see [Why Chat sends when Gmail does not](#why-chat-sends-when-g
 | Creating a message under user auth requires a Chat app configured on the Cloud project | Documented (Chat API configuration guide). Every send here ran on a project that had one |
 | The response when no Chat app is configured | **Cannot be observed here** — the project already had a Chat app when this was built. Classified from a third-party report of a 404 "Google Chat app not found"; unverified |
 | The message is attributed to the user | **Observed 2026-09-29**: read back with the account as `sender`, type `HUMAN` |
-| The Chat app's name is displayed beside the message | Documented. Visible only in the Chat UI, which gws-axi cannot see — not verified |
+| The Chat app's name is displayed beside the message | **Observed by the owner in the Chat UI, 2026-09-29**: each test message showed both the account's name and the Chat app's name. This is Chat's own disclosure that an app posted on the user's behalf; the API offers no way to suppress it |
 | `markupSyntax: MARKUP_SYNTAX_MARKDOWN` on create renders standard Markdown | **Observed**: a Markdown body was stored as Chat's own formatting — bold, italic, strike, code, a list, a quote, and a link with its own text |
 | A message may carry a client-assigned id (`client-…`), unique within its conversation, under user auth | **Observed**: accepted, returned as `clientAssignedMessageId`, and usable in place of the system id to fetch the message |
 | Creating a message whose client-assigned id already exists is refused, and creates nothing | **Observed**: refused with a conflict, for the same body and for a different one; the conversation still held one message |

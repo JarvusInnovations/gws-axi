@@ -96,7 +96,7 @@ read-state no-ops; partial failure across several conversations; write-protectio
 
 - [ ] A body with bold, a list, inline code, and a link renders as formatting in Chat, and
       `chat messages` returns the same Markdown.
-- [ ] The message is attributed to the account, with the Chat app's name shown as the spec's
+- [x] The message is attributed to the account, with the Chat app's name shown as the spec's
       `note` describes.
 - [x] `--thread <id>` lands inside that thread; a nonexistent thread id returns
       `THREAD_NOT_FOUND` and **no message is created**.
@@ -152,10 +152,9 @@ Written while the plan is still open, so the record of what was sent exists befo
   third-party description of the failure and is unverified. Its guidance, for owned and joined
   installs, is unit-tested.
 - **Boxes left unchecked, and why:**
-  - *Renders as formatting in Chat* and *attributed with the app's name*: gws-axi cannot see the
-    Chat UI. What could be checked was: the stored message, read back in Chat's native markup,
-    carries bold, italic, strike, code, a list, a quote, and a link with its own text; and its
-    sender is the account. The UI half waits on the owner looking at the conversation.
+  - *Renders as formatting in Chat*: gws-axi cannot see the Chat UI. What could be checked was
+    the stored message, read back in Chat's native markup: it carries bold, italic, strike,
+    code, a list, a quote, and a link with its own text. The UI half waits on the owner.
   - *`mark-read` / `mark-unread` reflected in the Chat UI*: same reason. At the API, an unread
     search matched the message after `mark-unread` and the read position returned to the
     newest message after `mark-read`.
@@ -163,6 +162,10 @@ Written while the plan is still open, so the record of what was sent exists befo
     conversation with another person.
   - *A send forced to time out*: not forced live. The error and its retry command are
     unit-tested, and the retry path itself — the same request id posting nothing — was run live.
+- **Attribution was confirmed by the owner, in the Chat UI**: each test message showed both the
+  account's name and the Chat app's name. The owner's first reaction was to ask why both
+  appear, which is worth remembering — the double attribution is surprising to the person whose
+  name it is, and `--help` and the README should keep saying so plainly.
 - **A replay with a different body returns the original and posts nothing.** The id names the
   message, not its content. Found by trying it.
 - **Intraword underscores survive**: `GWS_AXI_ACCOUNT` in a Markdown body was stored literally,
