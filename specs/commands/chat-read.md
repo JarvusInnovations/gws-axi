@@ -50,6 +50,13 @@ Sampled: 180 conversations listed; 266 messages across 29 of them; 49 membership
 - **`findDirectMessage` by email works**, returns `404` when no such conversation exists, and
   `400 INVALID_ARGUMENT` when the address is not a user.
 - **Attachments are mostly Drive files**: 102 `DRIVE_FILE` to 8 `UPLOADED_CONTENT`.
+- **Markdown arrives wrapped and escaped.** `formattedText` in the Markdown syntax is wrapped at
+  80 columns, turns each single line break in the original into a paragraph gap, and
+  backslash-escapes punctuation. The legacy syntax and the plain `text` do neither.
+- **An app has no name as a member, only as a sender.** The member list returns an app as
+  `name` and `type` alone; its messages carry its display name.
+- **Some direct messages refuse to describe themselves.** One returned `403` to both
+  `spaces.get` and `members.list` while listing and serving its messages normally.
 
 ### Observed against a consumer account, 2026-09-29
 
@@ -92,7 +99,8 @@ spaces[50]{id,type,name,last_active}:
   CCCCdef,group,"Bob Tran, Carol Wu, +2",2026-09-26T09:12:45-04:00
 ```
 
-- `type` is `space` (named space), `group` (group chat), or `dm` (direct message).
+- `type` is `space` (named space), `group` (group chat), or `dm` (direct message) — or `unknown`
+  for a conversation Chat refuses to describe while still serving its messages.
 - **Sorted by `last_active`, newest first.** The sort applies to the account's full conversation
   set, not to one upstream page — a list truncated by `--limit` is the *most recently active* N,
   never an arbitrary N.
@@ -105,6 +113,10 @@ spaces[50]{id,type,name,last_active}:
   a group, the first two names plus `+N`. When any rendered name was derived, the summary carries
   `names_derived: <n>` so a reader knows those labels are gws-axi's, not Google's. A derived name
   whose members the response did not name renders the raw `users/{id}` — never blank.
+- **A conversation with an app is named after the app**, taken from a message it sent, because
+  the member list names no app. One that has never sent anything renders `bot users/{id}`.
+- **A conversation whose member list is refused** is named from the senders of its recent
+  messages, and `(members not visible)` when that yields nobody.
 - Upstream omits direct messages and group chats that have never had a message sent; a `help[]`
   line states this.
 
@@ -145,21 +157,30 @@ senders[3]{id,name,email,type}:
   brings it back. A conversation's threading state cannot decide this — direct messages report
   as threaded while every message in them is its own thread.
 - `time` renders in local-offset ISO, matching the `range:` echo.
-- `text` is the message's formatted content as **Markdown**, with links inline as
-  `[text](url)` and user mentions rendered as `@<name>` (raw `@users/{id}` when the
-  response names no one). Truncated to 500 chars unless `--full`; truncation never splits a Markdown link.
+- `text` is the message's formatted content as **Markdown**. A link with its own text is
+  `[text](url)`; a bare URL is a Markdown autolink, `<https://…>`. User mentions render as
+  `@<name>` (raw `@users/{id}` when nobody could name them). Truncated to 500 chars unless
+  `--full`; truncation never splits a link of either form.
+- **Upstream's line wrapping is removed.** The Markdown form arrives wrapped at 80 columns. A
+  renderer would read those breaks as spaces, but this text is read as-is and carried elsewhere,
+  so they are joined back into their sentences. Breaks that carry meaning are kept: paragraph
+  gaps, list items, quotes, headings, hard breaks, and everything inside a code fence. Markdown
+  escapes (`\!`, `\#`) are left as they arrive — they are correct Markdown, and removing them
+  could turn literal punctuation into structure.
 - `sender` is the display name. When two senders in one response share a display name,
   their rows render `name <email>` so the column stays unambiguous.
 - `senders[N]{id,name,email,type}` lists each distinct sender once — the handoff from a name in a
   row to an id or address another command can use. `type` is `human` or `bot`.
 - Deleted messages are excluded. System messages are excluded upstream.
-- `--fields` opts into `attachments` (count), `reactions` (count), `edited` (last-edit time),
-  and `quoted` (the quoted message's sender and text). When the rendered messages carry
+- `--fields` opts into `thread`, `attachments` (count), `reactions` (count), `edited`
+  (last-edit time), and `quoted` (the quoted message's sender and text). With `attachments`, an
+  `attachments[N]{message,name,type,source,drive_file}` block lists each one; `source` is
+  `drive` or `upload`. When the rendered messages carry
   attachments and the column was not requested, a `help[]` line reports how many and names the
   flag.
-- **Attachments are not downloadable through gws-axi.** An attachment that is a Drive file is
-  surfaced with its file id and a `drive get <id>` suggestion; for uploaded attachments the output
-  says no gws-axi command retrieves them.
+- **Attachments are not downloadable through gws-axi.** An attachment that is a Drive file
+  carries its file id in `drive_file`, with a `drive get <id>` suggestion; for uploaded
+  attachments the output says no gws-axi command retrieves them.
 
 ## `chat search`
 
@@ -182,6 +203,8 @@ senders[6]{id,name,email,type}:
   `VALIDATION_ERROR` naming `chat spaces` and `chat messages <space>` as the browsing commands.
 - `--limit` defaults to 25, maximum 100 (the upstream ceiling). `--page` and the `next_page`
   echo behave as in `chat messages`.
+- Rows render newest first, and `order: newest → oldest` says so. Search results are separate
+  hits, not a conversation, so there is nothing to read in sequence.
 - `--since` / `--until` follow the same range contract.
 - `spaces[N]` and `senders[N]` are legends: each conversation and sender in the result appears
   once, so rows stay narrow while every id remains resolvable.
