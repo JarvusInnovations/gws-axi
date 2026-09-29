@@ -1,9 +1,10 @@
 ---
-status: in-progress
+status: done
 depends: []
 specs:
   - specs/architecture.md
 issues: [71]
+pr: 72
 ---
 
 # Plan: Re-enable APIs when a release adds one
@@ -57,21 +58,21 @@ affected since it shipped — reaches existing installs.
 
 ## Validation
 
-- [ ] `bun run build`, `bun run lint`, `bun run format:check`, `bun run test` all pass.
-- [ ] On this machine's real config — whose `apis_enabled` records five APIs from April —
+- [x] `bun run build`, `bun run lint`, `bun run format:check`, `bun run test` all pass.
+- [x] On this machine's real config — whose `apis_enabled` records five APIs from April —
       `gws-axi doctor --check setup` reports `apis_enabled` failing and names every missing API.
-- [ ] `gws-axi auth setup` on that config enables the missing APIs and reports
+- [x] `gws-axi auth setup` on that config enables the missing APIs and reports
       `7 of 7 steps complete`, with `setup.json` recording the full current list.
-- [ ] After that run, every account's tokens are untouched (`tokens.json` mtime unchanged) and
+- [x] After that run, every account's tokens are untouched (`tokens.json` mtime unchanged) and
       `consent_screen`, `test_user_added`, and `tokens_obtained` keep their original `at`
       timestamps.
-- [ ] `gws-axi drive activity <id>` succeeds end to end for the first time, and its `range:`
+- [x] `gws-axi drive activity <id>` succeeds end to end for the first time, and its `range:`
       echo renders in local-offset ISO — closing the follow-up left open by
       [`calendar-time-ranges`](calendar-time-ranges.md).
-- [ ] A state file with `apis_enabled: { done: true, via: "team-join" }` is reported complete,
+- [x] A state file with `apis_enabled: { done: true, via: "team-join" }` is reported complete,
       and `API_NOT_ENABLED` against it names the distributor and contains no Console URL and no
       `auth setup` suggestion.
-- [ ] A second `auth setup` immediately afterwards is a no-op that reports complete.
+- [x] A second `auth setup` immediately afterwards is a no-op that reports complete.
 
 ## Risks / unknowns
 
@@ -87,4 +88,41 @@ affected since it shipped — reaches existing installs.
 
 ## Notes
 
+- **Verified live on the real config.** `doctor --check setup` reported `apis_enabled` failing
+  and named `sheets.googleapis.com` and `driveactivity.googleapis.com`. `auth setup` then
+  reported 7 of 7 and recorded all seven APIs. Every other step kept its April `at` timestamp,
+  all four accounts' `tokens.json` mtimes were unchanged, and a second run was a no-op that did
+  not rewrite the step.
+- **Only one API was actually off.** The recorded list lagged the project: Sheets had been
+  enabled by hand at some point and was merely unrecorded, so the run enabled Drive Activity
+  alone. That is why `doctor` says stale APIs are "not yet confirmed enabled" rather than "not
+  enabled" — the record is evidence about what setup did, not about the project.
+- **`drive activity` ran end to end for the first time**, three and a half months after it
+  shipped, with `range: 2026-09-21T00:00:00-04:00 → 2026-09-29T00:00:00-04:00` for
+  `--since -7d --until today`. This closes the follow-up left open by
+  [`calendar-time-ranges`](calendar-time-ranges.md).
+- **The joined criterion is verified in two halves.** A `team-join` state file was run live
+  against a temporary config dir: `doctor` reported the step ok and the home view 7 of 7. The
+  `API_NOT_ENABLED` half is verified by unit test only — triggering it live needs a joined
+  install calling an API that is disabled on its shared project.
+- **Hand-confirming the step would have made it permanently stale.** `--confirm-step
+  apis_enabled` recorded no list, and an owned step with no list is stale on every API. It now
+  records the list it is asserting, tagged `via: "manual-confirm"`. The no-`gcloud`
+  instructions also told the user to re-run `auth setup`, which without `gcloud` could only
+  print the same instructions again; they now name the confirm command.
+- **`setup.html` and the no-`gcloud` instructions omitted `ADDITIONAL_APIS`.** Both built their
+  list from the per-service map, so Drive Activity was never offered to anyone enabling by
+  hand. Both now list what is needed.
+- **Every existing install drops to 6 of 7 on upgrade** until its owner runs `auth setup`. That
+  is the intended signal and belongs in the release notes.
+- **Two copies of the `team-join` check** (`loopback.ts`, `setup-html.ts`) were replaced by
+  `isJoinedInstall()`.
+
 ## Follow-ups
+
+- Tracked as: `drive activity`'s `time` column renders UTC (`…Z`) while the `range:` line above
+  it renders local-offset ISO. Seen on the first successful run. `specs/commands/chat-read.md`
+  already requires local-offset times for chat; `drive-activity.md` is silent on the column.
+- Tracked as: the People API is not enabled on the project yet. It is added to
+  `ADDITIONAL_APIS` by [`chat-read`](chat-read.md), at which point this plan's staleness check
+  is what gets it enabled — the first real "a release added an API" run.
