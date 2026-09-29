@@ -36,7 +36,7 @@ Stand up the `chat` service and ship its read commands: `spaces`, `messages`, `s
 
 - `specs/commands/chat-read.md` — all of it.
 - `specs/architecture.md` — `chat` top-level command; `chatClient` / `peopleClient`; Chat's
-  scopes and the narrow-scope rule; `people.json` cache; the not-available probe status.
+  scopes and the broad-`chat.messages` rule; `people.json` cache; the not-available probe status.
 - `specs/api/conventions.md` — `chat messages` / `chat search` as range-flag commands; service
   availability vs. scope gaps.
 
@@ -66,7 +66,7 @@ discovered at closeout — `drive activity` shipped unverified for exactly that 
 
 ### 1. Scopes and APIs
 
-`SERVICE_SCOPES.chat`, the five `ADDITIONAL_SCOPE_INFO` entries (parent service `chat`), `chat`
+`SERVICE_SCOPES.chat`, the four `ADDITIONAL_SCOPE_INFO` entries (parent service `chat`), `chat`
 in `SERVICES`, `REQUIRED_APIS.chat`, `people.googleapis.com` in `ADDITIONAL_APIS`.
 
 ### 2. Client library
@@ -115,7 +115,7 @@ dispatcher emitting `account_source`.
 
 **Gates (step 0):**
 
-- [ ] Workspace account re-authenticated; token carries all six new scopes.
+- [ ] Workspace account re-authenticated; token carries all five new scopes.
 - [ ] Consumer-account sign-in with the full scope set recorded, and Gmail, Calendar, and Drive
       confirmed still working for that account afterwards.
 - [ ] Each "verify live" row in `specs/commands/chat-read.md` is resolved, and the spec's table
@@ -155,10 +155,13 @@ dispatcher emitting `account_source`.
 
 ## Risks / unknowns
 
-- **Message reads require a restricted scope.** `chat.messages.readonly` is restricted, like
-  `gmail.modify` and `drive`. It adds lines to a consent screen that is already in restricted
-  territory, and for a shared client it counts toward the same verification posture. Note it in
-  the onboarding runbook.
+- **Message access requires a restricted scope.** `chat.messages` is restricted, like
+  `gmail.modify` and `drive` — and so is its read-only variant, so there was no lighter option.
+  It adds a line to a consent screen that is already in restricted territory, and for a shared
+  client it counts toward the same verification posture. Note it in the onboarding runbook.
+- **The token can edit and delete messages; no command does.** That boundary is code, not scope.
+  Anything added to the chat surface later inherits the capability without a consent prompt to
+  mark the moment.
 - **Consumer accounts and single-consent sign-in** — gated in step 0; the fallback is a spec
   change, not a workaround.
 - **Workspace admins can restrict third-party access to Chat.** A Workspace account may fail for
