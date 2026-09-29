@@ -182,18 +182,8 @@ output shape is unchanged by this spec.
   follow-up edit/delete.
 - [minimal-default-schemas](../principles.md#minimal-default-schemas) — the response carries only
   what's needed to find and act on the new draft.
-
-**Local:**
-
-- **Composed output is wire-final.** When gws-axi composes content a human will send or forward
-  without re-authoring it, the command is responsible for the representation that reaches the
-  *recipient* — not merely for content that looks right in the intermediate UI. Choose the wire
-  format whose rendering this tool controls, and never rely on the sending client to infer
-  structure from unstructured text.
-
-  > **Why:** The human's review step reads as a safety check, which makes it tempting to treat
-  > anything the composer displays correctly as correct. It isn't: the composer shows the draft,
-  > while the recipient sees whatever the send path produced from it. Single-part `text/plain`
-  > was exactly this trap — correct in the compose window, mangled on arrival, with no signal in
-  > between. Promote this to `principles.md` if a second composing surface (calendar invite
-  > bodies, Docs/Slides content writes) needs the same rule.
+- [composed-output-is-wire-final](../principles.md#composed-output-is-wire-final) — originated
+  here and promoted once `chat send` needed the same rule. For a draft, the intermediate step is
+  the compose window: the human's review reads as a safety check, which makes it tempting to
+  treat anything the composer displays correctly as correct. The recipient sees whatever the send
+  path produced from the draft, so the draft's wire form is what this command answers for.

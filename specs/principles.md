@@ -134,3 +134,11 @@ Cross-cutting rules live in exactly one place and every call site routes through
 Gmail `send` is intentionally NOT implemented — it short-circuits with `NOT_SUPPORTED`, redirecting to `draft`. This is a product boundary enforced in code, not a token limitation (the granted `gmail.modify` token *is* send-capable). Do not "implement" send.
 
 > **Why:** No Gmail scope grants drafting + label edits while withholding send, so the safety boundary "agent composes, human sends" can't be drawn with scopes — it's drawn in code instead. Crossing it would let an agent send mail unsupervised.
+
+This is a rule about Gmail, where a draft exists for the human to review and release — not a general "gws-axi never sends". `chat send` is implemented, deliberately, because Google Chat has no draft to stop at; the reasoning and the safeguards that replace the review step are in [commands/chat-send.md](commands/chat-send.md#why-chat-sends-when-gmail-does-not). Neither command is to be "aligned" with the other.
+
+## composed-output-is-wire-final
+
+When gws-axi composes content that reaches another person — a draft a human will send without re-authoring, or a message gws-axi sends itself — the command is responsible for the representation that reaches the **recipient**, not merely for content that looks right at an intermediate step. Choose the wire format whose rendering this tool controls, never rely on the receiving or sending client to infer structure from unstructured text, and verify against the delivered artifact rather than the request or the compose view.
+
+> **Why:** Every composing surface has a point where the content looks correct and is not yet what the recipient will see. For Gmail it was the compose window: single-part `text/plain` was correct there and hard-wrapped on arrival, with no signal in between. For Chat it is the request body: markup is interpreted on the way in, and only the stored message shows what it became. A check made at the intermediate step passes on exactly the defects this rule exists to catch.
