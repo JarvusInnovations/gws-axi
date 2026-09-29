@@ -1,6 +1,6 @@
 ---
 status: in-progress
-depends: [api-enablement-drift]
+depends: [api-enablement-drift, people-resolver]
 specs:
   - specs/commands/chat-read.md
   - specs/architecture.md
@@ -13,14 +13,17 @@ issues: [71]
 ## Scope
 
 Stand up the `chat` service and ship its read commands: `spaces`, `messages`, `search`,
-`members`, rendering people as the Chat API names them.
+`members`, rendering people as the Chat API names them and falling back to the shared people
+resolver for anyone it does not.
 
 **In scope:**
 
 - Service scaffold: scopes, APIs, `chatClient`, live doctor probe, dispatcher, `cli.ts`
   registration.
 - The four read commands and the shared conversation-address parser.
-- The identity renderer, including the disclosure when the response names no one.
+- The identity renderer: Chat's names first, the shared resolver from
+  [`people-resolver`](people-resolver.md) as fallback, and the disclosure when neither names
+  someone.
 - `send`, `mark-read`, `mark-unread` registered as scaffolded stubs with signposts, so the
   surface is visible while [`chat-write`](chat-write.md) is pending.
 
@@ -28,8 +31,8 @@ Stand up the `chat` service and ship its read commands: `spaces`, `messages`, `s
 
 - Sending and read state — [`chat-write`](chat-write.md).
 - Downloading message attachments. No plan yet.
-- Resolving `drive activity`'s raw `people/{id}` actors. The Drive Activity API returns no names,
-  and the People API lookup that would have served both was dropped from this plan.
+- Naming `drive activity`'s actors, and the resolver itself —
+  [`people-resolver`](people-resolver.md).
 - Reactions, editing or deleting messages, creating conversations.
 
 ## Implements
@@ -84,8 +87,9 @@ list in the token-refresh-failure fallback is a hard-coded array — derive it f
 ### 4. Shared helpers
 
 - Conversation-address parser: `spaces/ID`, bare id, URL, and the `--with` exclusivity rule.
-- Identity renderer: name and email from the response's user objects, `users/{id}` and the
-  `unnamed:` disclosure when absent, bot handling, same-name disambiguation, and mentions
+- Identity renderer: name and email from the response's user objects, the shared resolver for
+  anyone the response does not name, `users/{id}` and the `unresolved:` disclosure when neither
+  does, bot handling, same-name disambiguation, and mentions
   rendered from `text` by annotation offsets. Member lookups for derived names go through
   `withRateLimitRetry`.
 - Chat error classifier, applied before `translateGoogleError`.
@@ -107,7 +111,7 @@ must enable).
 
 Address parsing; range-to-filter construction; newest-selected / oldest-rendered ordering;
 mention and link rendering; link-safe truncation; same-name sender disambiguation; derived
-conversation names; the unnamed-identity fallback and its disclosure; the thread-column rule;
+conversation names; the resolver fallback and the unresolved disclosure; the thread-column rule;
 each error classification; each empty-list scalar; and the dispatcher emitting `account_source`.
 
 ## Validation
@@ -141,8 +145,9 @@ each error classification; each empty-list scalar; and the dispatcher emitting `
       coverage `note`; a query with no matches returns the scalar empty shape **with** the note.
 - [ ] `chat members <space>` shows names, emails, and roles.
 - [ ] People outside the account's domain render by name and email, as the response gives them.
-- [ ] An identity the response does not name renders as `users/{id}` with `unnamed:` and the
-      explanatory note. Verified by unit test if no such identity exists in live data.
+- [ ] An identity the response does not name is looked up, and one that still has no name
+      renders as `users/{id}` with `unresolved:` and the explanatory note. Verified by unit test
+      if no such identity exists in live data.
 - [ ] A conversation where every message is its own thread omits the `thread` column, and
       `--fields thread` restores it.
 - [ ] `chat search` with `--since`/`--until` returns matches inside the window and echoes
@@ -170,8 +175,8 @@ each error classification; each empty-list scalar; and the dispatcher emitting `
 - **Names arrive against the letter of Google's reference.** The plan builds on observed
   behavior the documentation says should not occur. If it stops, output degrades to ids with a
   disclosure; it does not fail.
-- **Deriving names costs a members lookup per unnamed conversation**, every time — there is no
-  cache. Bounded by labeling only the rows rendered, except under `--name`, which must label
+- **Deriving names costs a members lookup per unnamed conversation**, every time — conversation
+  names are not cached. Bounded by labeling only the rows rendered, except under `--name`, which must label
   everything it filters.
 - **Search omits recent direct messages**, cause unknown. Disclosed in output; not worked
   around.
