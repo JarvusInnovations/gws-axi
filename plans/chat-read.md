@@ -52,9 +52,9 @@ accounts, and the spec is amended **before** code if any answer differs.
 These need the account owner at a browser, so they are scheduled at the start rather than
 discovered at closeout — `drive activity` shipped unverified for exactly that reason.
 
-1. Land the scope and API changes (step 1 below) and run `auth setup` so both APIs enable.
-2. Re-authenticate the Workspace account and confirm the token carries every Chat scope and
-   read-state scope.
+1. Land the scope and API changes (step 1 below) and run `auth setup` so the Chat API is
+   recorded as enabled.
+2. Re-authenticate the Workspace account and confirm the token carries every Chat scope.
 3. **Consumer-account gate.** All scopes are requested in one consent. Re-authenticate one
    `@gmail.com` account and record: whether consent completes, which scopes the token is granted,
    whether Gmail/Calendar/Drive still work for it afterwards, and what a Chat call returns. If
