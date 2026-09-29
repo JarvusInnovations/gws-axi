@@ -242,6 +242,23 @@ ${accounts
 </div>`
     : "";
 
+  // Sending Chat messages is the one capability that needs project-side
+  // configuration beyond the seven steps, and only for installs that send. It
+  // is offered, never required — and never to a joined teammate, who has no
+  // access to the project (specs/commands/chat-send.md § Chat app configuration).
+  const chatSendingBlock =
+    initialSetupDone && !joined
+      ? `<div class="add-another">
+  <h3>Optional: enable Chat sending</h3>
+  <p>Reading Google Chat needs nothing more. <strong>Sending</strong> (<code>gws-axi chat send</code>) needs a Chat app configured on this project, once.</p>
+  <ol>
+    <li>Open <a href="${consoleUrl("/apis/api/chat.googleapis.com/hangouts-chat", projectId)}" target="_blank" rel="noopener">Google Chat API → Configuration</a></li>
+    <li>Set an app name, avatar URL, and description. Interactive features can stay off.</li>
+    <li>Choose the name with care: it is shown beside every message sent.</li>
+  </ol>
+</div>`
+      : "";
+
   const footerText =
     joined && !initialSetupDone
       ? `This client was provisioned by your team — you only need to authenticate. If you ever land on a Google Cloud Console "You need additional access" page, ignore it: you don't need GCP project access. Regenerated every time a gws-axi auth command runs.`
@@ -320,6 +337,7 @@ ${pendingAuthBlock}
 </div>
 ${accountsBlock}
 ${addAnotherBlock}
+${chatSendingBlock}
 ${
   initialSetupDone
     ? `<details class="steps"><summary>Show initial setup steps (all complete)</summary>
