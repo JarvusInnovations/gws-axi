@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AxiError } from "axi-sdk-js";
+import { toLocalOffsetISO } from "../calendar/dateish.js";
 import { toMemberRow } from "./members.js";
 import { IdentityLedger } from "./identity.js";
 import { attachmentRows, messageSchema, threadsCarryInformation, toRow } from "./message-rows.js";
@@ -8,9 +9,13 @@ import { buildSearchFilter, parseSearchFlags } from "./search.js";
 import { byLastActive, parseSpacesFlags } from "./spaces.js";
 import { chatError, kindOf } from "./shared.js";
 
-// A fixed "now" keeps range tokens deterministic; assertions that name local
-// boundaries assume the repo's America/New_York zone, as dateish.test.ts does.
+// A fixed "now" keeps range tokens deterministic. Expected boundaries are built
+// from local-calendar dates rather than written out, so the suite passes in
+// whatever zone it runs in.
 const NOW = new Date("2026-09-29T15:00:00-04:00");
+
+/** Local midnight on a September 2026 day, as the resolver produces it. */
+const sept = (day: number): string => new Date(2026, 8, day).toISOString();
 
 function errorFrom(fn: () => unknown): AxiError {
   try {
@@ -28,9 +33,13 @@ describe("chat messages flags", () => {
       ["AAAA", "--since", "2026-09-25", "--until", "2026-09-25"],
       NOW,
     );
+    expect(flags.since).toBe(sept(25));
+    expect(flags.until).toBe(sept(26));
     expect(rangeEcho(flags.since, flags.until)).toBe(
-      "2026-09-25T00:00:00-04:00 → 2026-09-26T00:00:00-04:00",
+      `${toLocalOffsetISO(sept(25))} → ${toLocalOffsetISO(sept(26))}`,
     );
+    // Local-offset form, never UTC.
+    expect(rangeEcho(flags.since, flags.until)).not.toContain("Z");
   });
 
   it("refuses an empty window instead of returning an empty list", () => {
@@ -102,7 +111,7 @@ describe("chat search", () => {
       NOW,
     );
     expect(buildSearchFilter(flags)).toBe(
-      'budget AND space.name = "spaces/AAAA" AND sender.name = "users/bob@example.com" AND create_time >= "2026-09-25T04:00:00.000Z"',
+      `budget AND space.name = "spaces/AAAA" AND sender.name = "users/bob@example.com" AND create_time >= "${sept(25)}"`,
     );
   });
 
@@ -221,7 +230,7 @@ describe("message rows", () => {
       text: "hello",
       attachments: 2,
       reactions: 3,
-      time: "2026-09-25T13:24:15-04:00",
+      time: toLocalOffsetISO("2026-09-25T17:24:15.000Z"),
     });
   });
 
