@@ -179,27 +179,9 @@ senders[3]{id,name,email,type}:
   `drive` or `upload`. When the rendered messages carry
   attachments and the column was not requested, a `help[]` line reports how many and names the
   flag.
-- **Attachments are not downloadable through gws-axi.** An attachment that is a Drive file
-  carries its file id in `drive_file`, with a `drive get <id>` suggestion; for uploaded
-  attachments the output says no gws-axi command retrieves them.
-
-## `chat search`
-
-`gws-axi chat search [<keywords>] [--space <space>] [--from <email>] [--type <space|group|dm>] [--unread] [--mentions-me] [--has-link] [--has-attachment] [--since <t>] [--until <t>] [--limit <n>] [--page <token>] [--full]`
-
-Searches messages **across every conversation** the account can see, newest first.
-
-```
-account: alice@example.com
-count: 25 (more available)
-messages[25]{space,id,time,sender,text}:
-  AAAAxyz,Hk2…,2026-09-27T15:58:03-04:00,Bob Tran,"Feed is back up…"
-spaces[4]{id,type,name}:
-  AAAAxyz,space,Transit Data
-senders[6]{id,name,email,type}:
-  users/1123…,Bob Tran,bob@example.com,human
-```
-
+- **Attachments download with [`chat download`](chat-download.md).** Uploaded files are saved
+  locally; one that is a Drive file carries its file id in `drive_file`, with a
+  `docs download <id>` suggestion.
 - At least one of `<keywords>` or a filter flag is required; a bare `chat search` is a
   `VALIDATION_ERROR` naming `chat spaces` and `chat messages <space>` as the browsing commands.
 - `--limit` defaults to 25, maximum 100 (the upstream ceiling). `--page` and the `next_page`

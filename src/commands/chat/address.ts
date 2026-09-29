@@ -86,3 +86,48 @@ export function resolveSpaceTarget(
   }
   return { kind: "space", id: parseSpaceId(positional) };
 }
+
+const MESSAGE_NAME = /^spaces\/([A-Za-z0-9_-]+)\/messages\/([A-Za-z0-9_.-]+)$/;
+
+/**
+ * Resolve a command that names one message: `<space> <message>`, a full
+ * `spaces/…/messages/…` resource name alone, or `--with <email>` plus a
+ * message. The message id may be a client-assigned `client-…` id; callers
+ * that need the system id fetch the message.
+ */
+export function parseMessageTarget(
+  positionals: string[],
+  withEmail: string | undefined,
+  usage: string,
+): { target: SpaceTarget; message: string } {
+  const full =
+    positionals.length === 1 && withEmail === undefined ? MESSAGE_NAME.exec(positionals[0]) : null;
+  if (full) return { target: { kind: "space", id: full[1] }, message: full[2] };
+
+  const expected = withEmail === undefined ? 2 : 1;
+  if (positionals.length !== expected) {
+    throw new AxiError(
+      positionals.length < expected
+        ? "Missing conversation or message"
+        : `Too many arguments: ${positionals.join(" ")}`,
+      "VALIDATION_ERROR",
+      [usage, "Get message ids from `gws-axi chat messages <space>`"],
+    );
+  }
+  const target = resolveSpaceTarget(
+    { positional: withEmail === undefined ? positionals[0] : undefined, withEmail },
+    usage,
+  );
+  const raw = positionals[positionals.length - 1];
+  const nested = MESSAGE_NAME.exec(raw);
+  if (nested && target.kind === "space" && nested[1] !== target.id) {
+    throw new AxiError(`Message ${raw} is not in conversation ${target.id}`, "VALIDATION_ERROR", [
+      usage,
+    ]);
+  }
+  const message = nested ? nested[2] : (raw.split("/").pop() ?? "");
+  if (!/^[A-Za-z0-9_.-]+$/.test(message)) {
+    throw new AxiError(`Not a message id: ${raw}`, "VALIDATION_ERROR", [usage]);
+  }
+  return { target, message };
+}

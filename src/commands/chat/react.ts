@@ -2,12 +2,7 @@ import { AxiError } from "axi-sdk-js";
 import type { chat_v1 } from "googleapis";
 import { chatClient } from "../../google/client.js";
 import { joinBlocks, renderHelp, renderObject } from "../../output/index.js";
-import {
-  parseSpaceId,
-  resolveSpaceTarget,
-  spaceResourceName,
-  type SpaceTarget,
-} from "./address.js";
+import { parseMessageTarget, spaceResourceName, type SpaceTarget } from "./address.js";
 import { parseArgs } from "./flags.js";
 import { reactionSummary } from "./message-rows.js";
 import { bareId, chatError, resolveSpace, retryingChat, selfUserRef } from "./shared.js";
@@ -54,8 +49,6 @@ interface Flags {
   emoji: string;
 }
 
-const MESSAGE_NAME = /^spaces\/([A-Za-z0-9_-]+)\/messages\/([A-Za-z0-9_.-]+)$/;
-
 /**
  * Refuse what is plainly not an emoji before asking Chat. Anything subtler is
  * left to Chat, whose refusal becomes INVALID_EMOJI.
@@ -87,43 +80,7 @@ export function parseReactFlags(args: string[], verb: "react" | "unreact"): Flag
   const withEmail = parsed.values["--with"];
   const positionals = parsed.positionals;
 
-  let target: SpaceTarget;
-  let message: string;
-  const full =
-    positionals.length === 1 && withEmail === undefined ? MESSAGE_NAME.exec(positionals[0]) : null;
-  if (full) {
-    target = { kind: "space", id: full[1] };
-    message = full[2];
-  } else {
-    const expected = withEmail === undefined ? 2 : 1;
-    if (positionals.length !== expected) {
-      throw new AxiError(
-        positionals.length < expected
-          ? "Missing conversation or message"
-          : `Too many arguments: ${positionals.join(" ")}`,
-        "VALIDATION_ERROR",
-        [usage, "Get message ids from `gws-axi chat messages <space>`"],
-      );
-    }
-    target = resolveSpaceTarget(
-      { positional: withEmail === undefined ? positionals[0] : undefined, withEmail },
-      usage,
-    );
-    const rawMessage = positionals[positionals.length - 1];
-    const nested = MESSAGE_NAME.exec(rawMessage);
-    if (nested && target.kind === "space" && nested[1] !== target.id) {
-      throw new AxiError(
-        `Message ${rawMessage} is not in conversation ${target.id}`,
-        "VALIDATION_ERROR",
-        [usage],
-      );
-    }
-    message = nested ? nested[2] : bareId(rawMessage);
-    if (!/^[A-Za-z0-9_.-]+$/.test(message)) {
-      throw new AxiError(`Not a message id: ${rawMessage}`, "VALIDATION_ERROR", [usage]);
-    }
-  }
-  if (target.kind === "space") parseSpaceId(target.id);
+  const { target, message } = parseMessageTarget(positionals, withEmail, usage);
   return { target, message, emoji: checkEmoji(parsed.values["--emoji"], usage) };
 }
 
@@ -143,7 +100,7 @@ type Chat = chat_v1.Chat;
  * The message, fetched by whatever id was given. Also turns a client-assigned
  * id into the system id, which is the only form the reactions endpoint takes.
  */
-async function fetchMessage(
+export async function fetchMessage(
   api: Chat,
   account: string,
   spaceName: string,
