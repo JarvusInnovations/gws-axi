@@ -7,6 +7,9 @@ export const SERVICE_SCOPES = {
   drive: "https://www.googleapis.com/auth/drive",
   slides: "https://www.googleapis.com/auth/presentations",
   sheets: "https://www.googleapis.com/auth/spreadsheets",
+  // Read-only, and the scope the doctor probe's conversation-list call needs.
+  // Message access is the additional `chat.messages` scope below.
+  chat: "https://www.googleapis.com/auth/chat.spaces.readonly",
 } as const;
 
 export type ServiceName = keyof typeof SERVICE_SCOPES;
@@ -40,11 +43,46 @@ export const ADDITIONAL_SCOPE_INFO: AdditionalScope[] = [
     service: "drive",
     capability: "drive activity timeline",
   },
+  {
+    // One broad scope for reading, searching, and sending, rather than pairing
+    // chat.messages.readonly with chat.messages.create. It also permits editing
+    // and deleting messages, which no command does — that boundary is held in
+    // code (specs/architecture.md § Scope model).
+    scope: "https://www.googleapis.com/auth/chat.messages",
+    service: "chat",
+    capability: "read, search, and send chat messages",
+  },
+  {
+    scope: "https://www.googleapis.com/auth/chat.memberships.readonly",
+    service: "chat",
+    capability: "list chat members and name direct messages",
+  },
+  {
+    scope: "https://www.googleapis.com/auth/chat.users.readstate",
+    service: "chat",
+    capability: "mark chat conversations read or unread",
+  },
+  {
+    // Drive Activity returns people/{id} and no names; this names them through
+    // the People API. Coverage is the account's own directory — see
+    // specs/api/conventions.md § People.
+    scope: "https://www.googleapis.com/auth/directory.readonly",
+    service: "drive",
+    capability: "naming the people behind ids",
+  },
 ];
 
 export const ADDITIONAL_SCOPES = ADDITIONAL_SCOPE_INFO.map((s) => s.scope);
 
-export const SERVICES: ServiceName[] = ["gmail", "calendar", "docs", "drive", "slides", "sheets"];
+export const SERVICES: ServiceName[] = [
+  "gmail",
+  "calendar",
+  "docs",
+  "drive",
+  "slides",
+  "sheets",
+  "chat",
+];
 
 export const REQUIRED_APIS: Record<ServiceName, string> = {
   gmail: "gmail.googleapis.com",
@@ -53,12 +91,13 @@ export const REQUIRED_APIS: Record<ServiceName, string> = {
   drive: "drive.googleapis.com",
   slides: "slides.googleapis.com",
   sheets: "sheets.googleapis.com",
+  chat: "chat.googleapis.com",
 };
 
-// APIs required beyond the per-service REQUIRED_APIS map. The Drive Activity
-// API is a distinct service backing the `drive activity` command — it must be
-// enabled separately from the Drive API.
-export const ADDITIONAL_APIS = ["driveactivity.googleapis.com"] as const;
+// APIs that back a capability rather than a service. The Drive Activity API is
+// a distinct service behind `drive activity`, enabled separately from the Drive
+// API. The People API names the people behind ids.
+export const ADDITIONAL_APIS = ["driveactivity.googleapis.com", "people.googleapis.com"] as const;
 
 export function allScopes(): string[] {
   return [...BASE_SCOPES, ...Object.values(SERVICE_SCOPES), ...ADDITIONAL_SCOPES];

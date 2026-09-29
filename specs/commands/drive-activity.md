@@ -24,6 +24,7 @@ Requires a new read-only scope, so it ships behind a one-time re-auth.
 
 - Drive Activity API v2 `activity.query` (POST `https://driveactivity.googleapis.com/v2/activity:query`). Body: `itemName: "items/<id>"` OR `ancestorName: "items/<id>"`, optional `filter` (`time` + `detail.action_detail_case`), `pageSize`, `pageToken`.
 - **New scope** `https://www.googleapis.com/auth/drive.activity.readonly` — read-only, NOT implied by `auth/drive`. Added to `ADDITIONAL_SCOPES` in `src/auth/scopes.ts` (same pattern as `gmail.settings.basic`). Pre-existing accounts must re-auth once; the scope is incremental on the already-restricted `auth/drive` footprint so it doesn't worsen the consent/verification posture.
+- **Naming actors** needs the `directory.readonly` scope and `people.googleapis.com`, through the shared resolver ([conventions.md § People](../api/conventions.md#people)). Without either, the timeline still renders, with raw ids and a note naming the fix.
 - Required API: `driveactivity.googleapis.com` — added to `ADDITIONAL_APIS`, so `allApis()` includes it and the `auth setup` API-enablement step enables/checks it alongside the per-service APIs. (An api-not-enabled 403 at call time is translated to `API_NOT_ENABLED` with enablement guidance.)
 - **Doctor scope check**: `doctor`'s runtime tier checks presence of every `ADDITIONAL_SCOPES` entry (described by `ADDITIONAL_SCOPE_INFO`), including `drive.activity.readonly`, grouped under its parent service (`drive`). A missing one is a `fail` row whose detail contains the word "scope" (so it rolls into the scope-gap re-auth hint) and names the unavailable capability. This means a not-yet-granted additional scope is surfaced by `doctor` directly, not only when the dependent command is run.
 
@@ -39,8 +40,20 @@ activities[N]{time,action,actor,target}
 
 - `time` — the activity timestamp (or the end of its `timeRange`).
 - `action` — the primary action type, normalized to a short label. Filterable types: `create`, `edit`, `move`, `rename`, `delete`, `restore`, `permission_change`, `comment`. Additional labels surfaced in output but not selectable via `--action`: `dlp_change`, `reference`, `settings_change`, `applied_label_change`. An activity bundling multiple actions lists the primary one.
-- `actor` — best-effort identity. The API returns `actor.user.knownUser.personName` = `people/<id>`, not an email; v1 emits that raw `people/<id>` string as the stable identifier (no People API round-trip — resolving to email is out of scope, see below). Other actor types map to stable labels: `deleted-user`, `unknown-user`, `anonymous`, `impersonation`, `administrator`, `system`. Never blank, never fabricated.
+- `actor` — who did it, by name. The API returns `actor.user.knownUser.personName` =
+  `people/<id>` and no name, so known users are resolved through the shared resolver
+  ([conventions.md § People](../api/conventions.md#people)). An actor who does not resolve
+  renders as the raw `people/<id>`. Other actor types map to stable labels: `deleted-user`,
+  `unknown-user`, `anonymous`, `impersonation`, `administrator`, `system`. Never blank, never
+  fabricated.
 - `target` — the affected item, rendered `"<title> (<id>)"` when both are known, else whichever is present. The item id (`driveItem.name` → `<id>`) is always kept reachable per [principles.md#ids-are-first-class](../principles.md#ids-are-first-class); never truncated.
+
+### `actors[N]{id,name,email}`
+
+Each distinct known-user actor in the result appears once, resolved or not, so the id behind
+every name in the `actor` column stays reachable. Unresolved actors have empty `name` and
+`email`. When any actor did not resolve, the summary carries `unresolved: <n>` and a `note` says
+they are outside the account's directory.
 
 ### Visibility disclosure (required)
 
@@ -65,14 +78,14 @@ New `drive` read subcommand `{ name: "activity", mutation: false }`. Read-only.
 
 ## Out of scope (v1)
 
-- Resolving every actor to a verified email (People API resolution is best-effort; consumer/anonymous actors may be unresolvable).
+- Naming actors outside the account's directory. The resolver's coverage is the directory (see [conventions.md § People](../api/conventions.md#people)); external collaborators stay as ids.
 - Org-wide audit across users (that needs admin-only Reports API; out of reach on a single consented account — see [project: exploration track]).
 
 ## Principles
 
 **Inherited:**
 
-- [ids-are-first-class](../principles.md#ids-are-first-class) — target ids are the handoff to `drive get` / `docs download`; never truncate.
+- [ids-are-first-class](../principles.md#ids-are-first-class) — target ids are the handoff to `drive get` / `docs download`; never truncate. Actor ids stay reachable in `actors[]` once names replace them in rows.
 - [surface-completeness-limits](../principles.md#surface-completeness-limits) — state the per-account visibility ceiling explicitly.
 - [read-only-stays-read-only](../principles.md#read-only-stays-read-only) — querying activity is pure; the scope requested is `.readonly`.
 - [contextual-help-suggestions](../principles.md#contextual-help-suggestions) — suggest the narrowing/cross-referencing next steps with real ids.

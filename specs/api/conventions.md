@@ -26,10 +26,10 @@ Every successful command emits TOON ([principles.md#toon-over-json](../principle
 ## Time ranges
 
 Commands that filter by time take a pair of **range flags** — `--from`/`--to` (`calendar events`,
-`calendar search`, `calendar freebusy`) or `--since`/`--until` (`drive activity`). Every such pair
-honors the rules below. Flags that name a single moment rather than bound a range
-(`calendar create --start/--end`, `calendar update --start/--end`) are **not** range flags and are
-parsed literally.
+`calendar search`, `calendar freebusy`) or `--since`/`--until` (`drive activity`, `chat messages`,
+`chat search`). Every such pair honors the rules below. Flags that name a single moment rather
+than bound a range (`calendar create --start/--end`, `calendar update --start/--end`,
+`chat mark-unread --at`) are **not** range flags and are parsed literally.
 
 Ranges are half-open: `[from, to)`. This is already what both upstream APIs do — Calendar's
 `timeMax` is an exclusive upper bound, and `drive activity` builds `time >= from and time < to`.
@@ -119,6 +119,32 @@ in **local-offset ISO** (`2026-08-26T00:00:00-04:00`), never UTC `Z` form
 ([principles.md#provenance-by-default](../principles.md#provenance-by-default)). The echo is what
 makes tokens and shortcuts auditable — the caller can always see the window it actually got, without
 re-deriving it.
+
+## People
+
+Some upstream APIs identify a person only by id — Drive Activity returns `people/{id}` and never
+a name; Chat returns `users/{id}`, the same identifier, and usually a name beside it. Every
+command that has to turn such an id into a person does it through **one shared resolver**
+([principles.md#single-source-of-truth-helpers](../principles.md#single-source-of-truth-helpers)).
+
+- Resolution is a People API lookup, batched, under the `directory.readonly` scope.
+- **Coverage is the account's own directory, and the output says so.** Measured against a
+  Workspace account on 2026-09-29, the resolver named 8 of 8 people inside the account's domain
+  and 0 of 4 outside it; of 11 distinct Drive Activity actors it named 5. A consumer account has
+  no directory. This is a property of the scope, not a defect to retry around
+  ([principles.md#surface-completeness-limits](../principles.md#surface-completeness-limits)).
+- A person who does not resolve renders as the raw id — never blank, never guessed. When any
+  did not, the summary carries `unresolved: <n>` and a `note` says they are outside the
+  account's directory.
+- **Resolution can never fail the command it decorates.** If the People API is not enabled, the
+  scope was not granted, or the lookup errors, the command returns its content with raw ids and a
+  `note` naming the specific fix.
+- Resolved people are **cached per account** with a fetch timestamp and an expiry. A missing,
+  corrupt, or expired cache is a cache miss. An empty name from upstream is a failed resolution,
+  not a name to cache. Ids that did not resolve are not cached.
+- The account's own identity resolves from its stored profile, with no lookup.
+- Wherever a name replaces an id in a row, the id stays reachable in a legend block
+  ([principles.md#ids-are-first-class](../principles.md#ids-are-first-class)).
 
 ## Completeness & fidelity disclosure
 

@@ -2,14 +2,16 @@ import { AxiError } from "axi-sdk-js";
 import {
   google,
   type calendar_v3,
+  type chat_v1,
   type docs_v1,
   type drive_v3,
   type gmail_v1,
+  type people_v1,
   type sheets_v4,
   type slides_v1,
 } from "googleapis";
 import { OAuth2Client } from "google-auth-library";
-import { readSetupState } from "../config.js";
+import { isJoinedInstall, readSetupState } from "../config.js";
 import { getValidAccessToken } from "./tokens.js";
 
 /**
@@ -61,6 +63,17 @@ export async function sheetsClient(email: string): Promise<sheets_v4.Sheets> {
   return google.sheets({ version: "v4", auth });
 }
 
+export async function chatClient(email: string): Promise<chat_v1.Chat> {
+  const auth = await oauthClientForAccount(email);
+  return google.chat({ version: "v1", auth });
+}
+
+/** Not a service of its own — backs the shared people resolver (people.ts). */
+export async function peopleClient(email: string): Promise<people_v1.People> {
+  const auth = await oauthClientForAccount(email);
+  return google.people({ version: "v1", auth });
+}
+
 interface GoogleApiErrorShape {
   code?: number;
   message?: string;
@@ -97,6 +110,30 @@ function extractError(err: unknown): ExtractedError {
 }
 
 /**
+ * Who can fix a disabled API depends on who owns the project. An owned install
+ * re-runs `auth setup`, which re-enables anything a release added. A joined
+ * teammate has no access to the shared project, so they're pointed at the
+ * distributor — never at `auth setup` or the Cloud Console.
+ */
+function apiNotEnabledSuggestions(operation: string): string[] {
+  let joined = false;
+  try {
+    joined = isJoinedInstall(readSetupState());
+  } catch {
+    // Unreadable setup state: fall through to the owned-install advice.
+  }
+  if (joined) {
+    return [
+      `Ask whoever distributed your gws-axi credentials to enable the API behind ${operation} on the shared project`,
+      "You don't need Google Cloud Console access — this is a project-side setting only they can change",
+    ];
+  }
+  return [
+    "Run `gws-axi auth setup` — it enables any API this project is missing and leaves your accounts signed in",
+  ];
+}
+
+/**
  * Translate a Google API error into an AxiError with actionable suggestions.
  * Caller context (account, operation name) improves the suggestions.
  */
@@ -126,10 +163,13 @@ export function translateGoogleError(
   }
 
   if (code === 403 || status === "PERMISSION_DENIED") {
+    // Key on Google's reason, or on wording that says the scope is
+    // insufficient. A message that merely mentions "scope" isn't a scope
+    // failure, and re-auth advice can't fix whatever it actually is.
     if (
       reason === "insufficientPermissions" ||
       reason === "ACCESS_TOKEN_SCOPE_INSUFFICIENT" ||
-      /insufficient scope|scope/i.test(message)
+      /insufficient[\w\s]*\bscopes?\b/i.test(message)
     ) {
       return new AxiError(
         `Insufficient scope for ${operation} — this account needs to re-consent`,
@@ -144,7 +184,7 @@ export function translateGoogleError(
       return new AxiError(
         `API not enabled in the GCP project backing this OAuth client`,
         "API_NOT_ENABLED",
-        ["Re-run `gws-axi auth setup` — the step 2 API-enable flow will fix this"],
+        apiNotEnabledSuggestions(operation),
       );
     }
     return new AxiError(`Forbidden: ${message}`, "FORBIDDEN", reason ? [`Reason: ${reason}`] : []);

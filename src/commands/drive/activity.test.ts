@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { AxiError } from "axi-sdk-js";
 import {
   buildFilter,
+  nameActors,
   parseFlags,
   primaryActionLabel,
   primaryActor,
@@ -98,5 +99,47 @@ describe("activity field extraction", () => {
   it("falls back to the bare id when title is absent", () => {
     const activity = { targets: [{ driveItem: { name: "items/1V09rp" } }] };
     expect(primaryTarget(activity)).toBe("1V09rp");
+  });
+});
+
+describe("nameActors", () => {
+  const rows = [
+    { time: "t1", action: "edit", actor: "people/1", target: "Doc (a)" },
+    { time: "t2", action: "edit", actor: "people/2", target: "Doc (a)" },
+    { time: "t3", action: "comment", actor: "people/1", target: "Doc (a)" },
+    { time: "t4", action: "create", actor: "system", target: "Doc (a)" },
+  ];
+  const resolution = {
+    people: new Map([["1", { id: "1", name: "Bob Tran", email: "bob@example.com" }]]),
+  };
+
+  it("names resolved actors in rows and leaves unresolved ones as ids", () => {
+    const { rows: named } = nameActors(rows, resolution);
+    expect(named.map((r) => r.actor)).toEqual(["Bob Tran", "people/2", "Bob Tran", "system"]);
+  });
+
+  it("lists each known-user actor once, resolved or not, with its id", () => {
+    const { actors } = nameActors(rows, resolution);
+    expect(actors).toEqual([
+      { id: "people/1", name: "Bob Tran", email: "bob@example.com" },
+      { id: "people/2", name: "", email: "" },
+    ]);
+  });
+
+  it("keeps label actors out of the legend and the unresolved count", () => {
+    const { actors, unresolved } = nameActors(rows, resolution);
+    expect(actors.some((a) => a.id.includes("system"))).toBe(false);
+    expect(unresolved).toBe(1);
+  });
+
+  it("changes nothing when no actor resolved", () => {
+    const { rows: named, unresolved } = nameActors(rows, { people: new Map() });
+    expect(named.map((r) => r.actor)).toEqual(rows.map((r) => r.actor));
+    expect(unresolved).toBe(2);
+  });
+
+  it("does not mutate the rows it was given", () => {
+    nameActors(rows, resolution);
+    expect(rows[0].actor).toBe("people/1");
   });
 });

@@ -6,6 +6,7 @@ import { dirname } from "node:path";
 import { URL } from "node:url";
 import {
   credentialsPath,
+  isJoinedInstall,
   listAccounts,
   normalizeEmail,
   profilePathForAccount,
@@ -291,8 +292,7 @@ function errorPage(message: string): string {
  */
 export function wasJoinedSetup(): boolean {
   try {
-    const steps = readSetupState().steps;
-    return Object.values(steps).some((s) => (s as { via?: unknown }).via === "team-join");
+    return isJoinedInstall(readSetupState());
   } catch {
     return false;
   }

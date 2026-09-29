@@ -1,5 +1,11 @@
 import { AxiError } from "axi-sdk-js";
 import { oauthClientForAccount, translateGoogleError } from "../../google/client.js";
+import {
+  OUTSIDE_DIRECTORY_NOTE,
+  personId,
+  resolvePeople,
+  type PeopleResolution,
+} from "../../google/people.js";
 import { field, joinBlocks, renderHelp, renderList, renderObject } from "../../output/index.js";
 import { resolveWindow, toLocalOffsetISO } from "../calendar/dateish.js";
 
@@ -29,15 +35,17 @@ examples:
   gws-axi drive activity 1V09rp... --since today
 output:
   An \`item{id,scope}\` header followed by an \`activities[N]{time,action,actor,target}\`
-  list, newest first. Actions cover create/edit/move/rename/delete/restore,
-  permission changes, and comments — richer than \`drive revisions\` (content
-  versions only).
+  list, newest first, then an \`actors[N]{id,name,email}\` legend. Actions cover
+  create/edit/move/rename/delete/restore, permission changes, and comments —
+  richer than \`drive revisions\` (content versions only).
 notes:
   Requires the drive.activity.readonly scope (read-only). Accounts authorized
   before this command shipped must re-auth once: \`gws-axi auth login --account
   <email>\`. Results are limited to activity visible to the authenticated
-  account — items never shared with it contribute no history. Actors are
-  reported best-effort; some (anonymous/deleted/unknown) cannot be identified.
+  account — items never shared with it contribute no history.
+  Actors are named from this account's own directory (directory.readonly).
+  People outside it are shown as people/<id>, and \`unresolved: N\` counts
+  them. Anonymous, deleted, and unknown actors cannot be identified at all.
 `;
 
 const DEFAULT_LIMIT = 50;
@@ -236,6 +244,36 @@ interface ActivityRow {
   target: string;
 }
 
+export interface ActorRow {
+  /** `people/<id>`, as the API returned it. */
+  id: string;
+  name: string;
+  email: string;
+}
+
+/**
+ * Replace the ids in the `actor` column with names, and build the legend that
+ * keeps every id reachable. Actors that are labels rather than people
+ * (`system`, `anonymous`, …) pass through and stay out of the legend.
+ */
+export function nameActors<T extends { actor: string }>(
+  rows: T[],
+  resolution: PeopleResolution,
+): { rows: T[]; actors: ActorRow[]; unresolved: number } {
+  const actors = new Map<string, ActorRow>();
+  const named = rows.map((row) => {
+    const id = personId(row.actor);
+    if (!id) return row;
+    const person = resolution.people.get(id);
+    if (!actors.has(id)) {
+      actors.set(id, { id: `people/${id}`, name: person?.name ?? "", email: person?.email ?? "" });
+    }
+    return person ? { ...row, actor: person.name } : row;
+  });
+  const legend = [...actors.values()];
+  return { rows: named, actors: legend, unresolved: legend.filter((a) => !a.name).length };
+}
+
 export async function driveActivityCommand(account: string, args: string[]): Promise<string> {
   const flags = parseFlags(args);
 
@@ -281,14 +319,22 @@ export async function driveActivityCommand(account: string, args: string[]): Pro
     });
   }
 
-  const rows: ActivityRow[] = activities.slice(0, flags.limit).map((a) => ({
+  const rawRows: ActivityRow[] = activities.slice(0, flags.limit).map((a) => ({
     time: activityTime(a),
     action: primaryActionLabel(a),
     actor: primaryActor(a),
     target: primaryTarget(a),
   }));
   // Newest-first.
-  rows.sort((a, b) => (Date.parse(b.time) || 0) - (Date.parse(a.time) || 0));
+  rawRows.sort((a, b) => (Date.parse(b.time) || 0) - (Date.parse(a.time) || 0));
+
+  // The API names nobody, so known users go through the shared resolver. It
+  // never throws: a lookup that can't happen leaves ids in place with a note.
+  const resolution = await resolvePeople(
+    account,
+    rawRows.map((r) => r.actor),
+  );
+  const { rows, actors, unresolved } = nameActors(rawRows, resolution);
 
   const blocks: string[] = [];
   blocks.push(renderObject({ account }));
@@ -304,6 +350,7 @@ export async function driveActivityCommand(account: string, args: string[]): Pro
               }`,
             }
           : {}),
+        ...(unresolved > 0 ? { unresolved } : {}),
       },
     }),
   );
@@ -321,11 +368,22 @@ export async function driveActivityCommand(account: string, args: string[]): Pro
     );
   }
 
-  blocks.push(
-    renderObject({
-      note: "Limited to activity visible to this account — items never shared with it contribute no history. Actors are best-effort; some cannot be identified.",
-    }),
-  );
+  if (actors.length > 0) {
+    blocks.push(
+      renderList("actors", actors as unknown as Array<Record<string, unknown>>, [
+        field("id"),
+        field("name"),
+        field("email"),
+      ]),
+    );
+  }
+
+  const notes = [
+    "Limited to activity visible to this account — items never shared with it contribute no history.",
+  ];
+  if (resolution.degraded) notes.push(resolution.degraded);
+  else if (unresolved > 0) notes.push(OUTSIDE_DIRECTORY_NOTE);
+  blocks.push(renderObject({ note: notes.join(" ") }));
 
   const suggestions: string[] = [];
   if (flags.folder) {
