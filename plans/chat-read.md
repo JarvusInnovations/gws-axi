@@ -13,14 +13,14 @@ issues: [71]
 ## Scope
 
 Stand up the `chat` service and ship its read commands: `spaces`, `messages`, `search`,
-`members`, with identity resolution through the People API.
+`members`, rendering people as the Chat API names them.
 
 **In scope:**
 
-- Service scaffold: scopes, APIs, `chatClient` / `peopleClient`, live doctor probe with the
+- Service scaffold: scopes, APIs, `chatClient`, live doctor probe with the
   not-available classification, dispatcher, `cli.ts` registration.
 - The four read commands and the shared conversation-address parser.
-- The identity resolver and its per-account cache.
+- The identity renderer, including the disclosure when the response names no one.
 - `send`, `mark-read`, `mark-unread` registered as scaffolded stubs with signposts, so the
   surface is visible while [`chat-write`](chat-write.md) is pending.
 
@@ -28,15 +28,15 @@ Stand up the `chat` service and ship its read commands: `spaces`, `messages`, `s
 
 - Sending and read state — [`chat-write`](chat-write.md).
 - Downloading message attachments. No plan yet.
-- Adopting the identity resolver in `drive activity`, which prints raw `people/{id}` today.
-  Follow-up once the resolver has proven out.
+- Resolving `drive activity`'s raw `people/{id}` actors. The Drive Activity API returns no names,
+  and the People API lookup that would have served both was dropped from this plan.
 - Reactions, editing or deleting messages, creating conversations.
 
 ## Implements
 
 - `specs/commands/chat-read.md` — all of it.
-- `specs/architecture.md` — `chat` top-level command; `chatClient` / `peopleClient`; Chat's
-  scopes and the broad-`chat.messages` rule; `people.json` cache; the not-available probe status.
+- `specs/architecture.md` — `chat` top-level command; `chatClient`; Chat's scopes and the
+  broad-`chat.messages` rule; the not-available probe status.
 - `specs/api/conventions.md` — `chat messages` / `chat search` as range-flag commands; service
   availability vs. scope gaps.
 
@@ -54,7 +54,7 @@ discovered at closeout — `drive activity` shipped unverified for exactly that 
 
 1. Land the scope and API changes (step 1 below) and run `auth setup` so both APIs enable.
 2. Re-authenticate the Workspace account and confirm the token carries every Chat scope and
-   `directory.readonly`.
+   read-state scope.
 3. **Consumer-account gate.** All scopes are requested in one consent. Re-authenticate one
    `@gmail.com` account and record: whether consent completes, which scopes the token is granted,
    whether Gmail/Calendar/Drive still work for it afterwards, and what a Chat call returns. If
@@ -66,8 +66,8 @@ discovered at closeout — `drive activity` shipped unverified for exactly that 
 
 ### 1. Scopes and APIs
 
-`SERVICE_SCOPES.chat`, the four `ADDITIONAL_SCOPE_INFO` entries (parent service `chat`), `chat`
-in `SERVICES`, `REQUIRED_APIS.chat`, `people.googleapis.com` in `ADDITIONAL_APIS`.
+`SERVICE_SCOPES.chat`, the three `ADDITIONAL_SCOPE_INFO` entries (parent service `chat`), `chat`
+in `SERVICES`, `REQUIRED_APIS.chat`.
 
 ### 2. Client library
 
@@ -85,8 +85,9 @@ list in the token-refresh-failure fallback is a hard-coded array — derive it f
 ### 4. Shared helpers
 
 - Conversation-address parser: `spaces/ID`, bare id, URL, and the `--with` exclusivity rule.
-- Identity resolver: batch lookup, per-account cache file, self-resolution from the stored
-  profile, bot handling, and the never-fails-the-read contract. Lookups go through
+- Identity renderer: name and email from the response's user objects, `users/{id}` and the
+  `unnamed:` disclosure when absent, bot handling, same-name disambiguation, and mentions
+  rendered from `text` by annotation offsets. Member lookups for derived names go through
   `withRateLimitRetry`.
 - Chat error classifier, applied before `translateGoogleError`.
 
@@ -107,15 +108,14 @@ must enable).
 
 Address parsing; range-to-filter construction; newest-selected / oldest-rendered ordering;
 mention and link rendering; link-safe truncation; same-name sender disambiguation; derived
-conversation names; every resolver fallback and the cache lifecycle (cold, fresh, expired,
-corrupt, empty-name-not-cached); each error classification; each empty-list scalar; and the
-dispatcher emitting `account_source`.
+conversation names; the unnamed-identity fallback and its disclosure; the thread-column rule;
+each error classification; each empty-list scalar; and the dispatcher emitting `account_source`.
 
 ## Validation
 
 **Gates (step 0):**
 
-- [ ] Workspace account re-authenticated; token carries all five new scopes.
+- [ ] Workspace account re-authenticated; token carries every Chat scope.
 - [ ] Consumer-account sign-in with the full scope set recorded, and Gmail, Calendar, and Drive
       confirmed still working for that account afterwards.
 - [ ] Each "verify live" row in `specs/commands/chat-read.md` is resolved, and the spec's table
@@ -141,12 +141,13 @@ dispatcher emitting `account_source`.
 - [ ] `chat search <keyword>` returns matches from more than one conversation, with the
       coverage `note`; a query with no matches returns the scalar empty shape **with** the note.
 - [ ] `chat members <space>` shows names, emails, and roles.
-- [ ] A conversation containing someone outside the directory renders their `users/{id}`,
-      with `unresolved:` and the explanatory note.
-- [ ] With `people.json` deleted, a read repopulates it; with it present, a second read makes no
-      People API call.
-- [ ] With the People API disabled on the project, `chat messages` still returns content, with
-      raw ids and a note naming the fix.
+- [ ] People outside the account's domain render by name and email, as the response gives them.
+- [ ] An identity the response does not name renders as `users/{id}` with `unnamed:` and the
+      explanatory note. Verified by unit test if no such identity exists in live data.
+- [ ] A conversation where every message is its own thread omits the `thread` column, and
+      `--fields thread` restores it.
+- [ ] `chat search` with `--since`/`--until` returns matches inside the window and echoes
+      `range:` in local-offset ISO.
 - [ ] `gws-axi doctor` shows a live `chat` row for the Workspace account, and for a consumer
       account reports Chat as not available with exit code unaffected and no re-auth suggestion.
 - [ ] With 2+ accounts and no `--account`, every chat read emits `account_source: default`.
@@ -167,8 +168,14 @@ dispatcher emitting `account_source`.
 - **Workspace admins can restrict third-party access to Chat.** A Workspace account may fail for
   policy reasons that look like neither a scope gap nor an unavailable service. Classify what is
   observed; do not guess at a code for it in advance.
-- **Deriving names costs a members lookup per unnamed conversation** on a cold cache. Bounded by
-  labeling only the rows rendered, except under `--name`, which must label everything it filters.
+- **Names arrive against the letter of Google's reference.** The plan builds on observed
+  behavior the documentation says should not occur. If it stops, output degrades to ids with a
+  disclosure; it does not fail.
+- **Deriving names costs a members lookup per unnamed conversation**, every time — there is no
+  cache. Bounded by labeling only the rows rendered, except under `--name`, which must label
+  everything it filters.
+- **Search omits recent direct messages**, cause unknown. Disclosed in output; not worked
+  around.
 - **The per-conversation read quota is 15 requests per second**; search is 300 per minute per
   project. Both are reachable by an agent in a loop.
 - **Spec clauses whose absence is invisible.** A missing `unresolved:` line, coverage note, or
