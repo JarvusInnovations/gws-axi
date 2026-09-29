@@ -100,6 +100,14 @@ export function settingsPathForAccount(email: string): string {
   return join(accountDir(email), "settings.json");
 }
 
+/**
+ * Cache of people resolved through the People API. Its own file for the same
+ * reason settings.json is: profile.json is rewritten wholesale on every login.
+ */
+export function peoplePathForAccount(email: string): string {
+  return join(accountDir(email), "people.json");
+}
+
 export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }

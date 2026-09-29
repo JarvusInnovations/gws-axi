@@ -2,9 +2,11 @@ import { AxiError } from "axi-sdk-js";
 import {
   google,
   type calendar_v3,
+  type chat_v1,
   type docs_v1,
   type drive_v3,
   type gmail_v1,
+  type people_v1,
   type sheets_v4,
   type slides_v1,
 } from "googleapis";
@@ -59,6 +61,17 @@ export async function slidesClient(email: string): Promise<slides_v1.Slides> {
 export async function sheetsClient(email: string): Promise<sheets_v4.Sheets> {
   const auth = await oauthClientForAccount(email);
   return google.sheets({ version: "v4", auth });
+}
+
+export async function chatClient(email: string): Promise<chat_v1.Chat> {
+  const auth = await oauthClientForAccount(email);
+  return google.chat({ version: "v1", auth });
+}
+
+/** Not a service of its own — backs the shared people resolver (people.ts). */
+export async function peopleClient(email: string): Promise<people_v1.People> {
+  const auth = await oauthClientForAccount(email);
+  return google.people({ version: "v1", auth });
 }
 
 interface GoogleApiErrorShape {
