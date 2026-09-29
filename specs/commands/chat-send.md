@@ -27,10 +27,11 @@ a relaxation — see [Why Chat sends when Gmail does not](#why-chat-sends-when-g
 | Fact | Status |
 | --- | --- |
 | Creating a message under user auth requires a Chat app configured on the Cloud project | Documented (Chat API configuration guide) |
-| The response when no Chat app is configured | Verify live — reported as a 404 "Google Chat app not found", from a third-party source only |
+| The response when no Chat app is configured | **Cannot be observed here** — the project already had a Chat app when this was built. Classified from a third-party report of a 404 "Google Chat app not found"; unverified |
 | The message is attributed to the user, with the Chat app's name displayed beside it | Documented (create-messages guide) — verify live |
 | `markupSyntax: MARKUP_SYNTAX_MARKDOWN` on create renders standard Markdown | Documented (GA 2026-08-07) — verify live |
-| A repeated `requestId` returns the existing message and creates nothing | Documented — verify live, including whether a replay is distinguishable from a first send |
+| A message may carry a client-assigned id (`client-…`), unique within its conversation, under user auth | Documented — verify live |
+| Creating a message whose client-assigned id already exists is refused, and creates nothing | Documented — verify live |
 | Message size limit is 32,000 bytes | Documented |
 | Thread replies via `messageReplyOption` are supported only in named spaces | Documented — verify live what `--thread` does in a direct message |
 
@@ -65,17 +66,22 @@ response**. A caller must be able to see where a message went without trusting i
 A timed-out or failed send is the one case where an agent cannot tell whether its mutation
 happened, and a blind retry posts a duplicate that gws-axi cannot delete.
 
-- Every send carries a request id: the caller's `--request-id`, or one gws-axi generates.
+- Every send carries a request id: the caller's `--request-id`, or one gws-axi generates. A
+  caller's id is lowercase letters, digits, and hyphens, at most 56 characters.
+- **The request id becomes the message's client-assigned id.** Chat refuses a second message
+  with the same id in the same conversation, so a replay is recognized by Chat's own answer
+  rather than inferred from timing.
 - The response always echoes `request_id`.
+- **A replay is a no-op**: exit 0, the existing message returned, `action: already_sent`.
+  Nothing is posted.
 - **When a send fails after the request may have reached Google** (timeout, network error, 5xx),
   the error's first suggestion is the complete command to retry, carrying the same request id. A
   retry with that id cannot duplicate the message.
-- A send replayed with a request id that already succeeded is a no-op: exit 0, the existing
-  message returned, `action: already_sent` — provided a replay is distinguishable upstream (see
-  the table above). If it is not, the response reports `action: sent` and `--help` states that a
-  replay returns the original message either way.
+- A failure Chat answered with a refusal (4xx) did not post anything, and says so.
 - Re-running the command **without** a request id sends a second message. `--help` and the
   success response's `help[]` both say so.
+- A request id is scoped to its conversation: the same id in a different conversation is a
+  different message.
 
 ## Output
 
