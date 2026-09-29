@@ -1,11 +1,12 @@
 ---
-status: in-progress
+status: done
 depends: [api-enablement-drift, people-resolver]
 specs:
   - specs/commands/chat-read.md
   - specs/architecture.md
   - specs/api/conventions.md
 issues: [71]
+pr: 72
 ---
 
 # Plan: Chat service — reads
@@ -118,44 +119,44 @@ each error classification; each empty-list scalar; and the dispatcher emitting `
 
 **Gates (step 0):**
 
-- [ ] Workspace account re-authenticated; token carries every Chat scope.
-- [ ] Consumer-account sign-in with the full scope set recorded, and Gmail, Calendar, and Drive
+- [x] Workspace account re-authenticated; token carries every Chat scope.
+- [x] Consumer-account sign-in with the full scope set recorded, and Gmail, Calendar, and Drive
       confirmed still working for that account afterwards.
-- [ ] Each "verify live" row in `specs/commands/chat-read.md` is resolved, and the spec's table
+- [x] Each "verify live" row in `specs/commands/chat-read.md` is resolved, and the spec's table
       updated to say what was observed.
 
 **Build:**
 
-- [ ] `bun run build`, `bun run lint`, `bun run format:check`, `bun run test` all pass.
+- [x] `bun run build`, `bun run lint`, `bun run format:check`, `bun run test` all pass.
 
 **Live, against real conversations:**
 
-- [ ] `chat spaces` lists conversations newest-active first; a direct message and an unnamed
+- [x] `chat spaces` lists conversations newest-active first; a direct message and an unnamed
       group chat each show a derived name and `names_derived` counts them.
-- [ ] `chat spaces --with <email>` returns the one direct message; an address with no
+- [x] `chat spaces --with <email>` returns the one direct message; an address with no
       conversation returns `DM_NOT_FOUND`.
-- [ ] `chat messages <space>` returns the latest 50 rendered oldest-first, with `order:` and
+- [x] `chat messages <space>` returns the latest 50 rendered oldest-first, with `order:` and
       `next_page`; following the echoed command returns the next-older set with no overlap.
-- [ ] `chat messages <space> --since today` echoes `range:` in local-offset ISO;
+- [x] `chat messages <space> --since today` echoes `range:` in local-offset ISO;
       `--since D --until D` covers that whole day; inverted bounds fail with `VALIDATION_ERROR`
       naming both flags.
-- [ ] A message containing a link and a mention renders `[text](url)` and `@<name>`.
-- [ ] `chat messages <space> --thread <id>` returns only that thread.
-- [ ] `chat search <keyword>` returns matches from more than one conversation, with the
+- [x] A message containing a link and a mention renders `[text](url)` and `@<name>`.
+- [x] `chat messages <space> --thread <id>` returns only that thread.
+- [x] `chat search <keyword>` returns matches from more than one conversation, with the
       coverage `note`; a query with no matches returns the scalar empty shape **with** the note.
-- [ ] `chat members <space>` shows names, emails, and roles.
-- [ ] People outside the account's domain render by name and email, as the response gives them.
-- [ ] An identity the response does not name is looked up, and one that still has no name
+- [x] `chat members <space>` shows names, emails, and roles.
+- [x] People outside the account's domain render by name and email, as the response gives them.
+- [x] An identity the response does not name is looked up, and one that still has no name
       renders as `users/{id}` with `unresolved:` and the explanatory note. Verified by unit test
       if no such identity exists in live data.
-- [ ] A conversation where every message is its own thread omits the `thread` column, and
+- [x] A conversation where every message is its own thread omits the `thread` column, and
       `--fields thread` restores it.
-- [ ] `chat search` with `--since`/`--until` returns matches inside the window and echoes
+- [x] `chat search` with `--since`/`--until` returns matches inside the window and echoes
       `range:` in local-offset ISO.
-- [ ] `gws-axi doctor` shows a live `chat` row, passing, for both the Workspace account and the
+- [x] `gws-axi doctor` shows a live `chat` row, passing, for both the Workspace account and the
       consumer account.
-- [ ] With 2+ accounts and no `--account`, every chat read emits `account_source: default`.
-- [ ] `chat send --help` and the `NOT_IMPLEMENTED` error both signpost per
+- [x] With 2+ accounts and no `--account`, every chat read emits `account_source: default`.
+- [x] `chat send --help` and the `NOT_IMPLEMENTED` error both signpost per
       `specs/api/conventions.md` § Unimplemented and unsupported surfaces.
 
 ## Risks / unknowns
@@ -189,4 +190,50 @@ each error classification; each empty-list scalar; and the dispatcher emitting `
 
 ## Notes
 
+- **Three premises in issue #71 were false, and live checks caught all three before code was
+  built on them.** Reads need no configured Chat app. A consumer `@gmail.com` account signs in
+  and uses Chat fully. And the Chat API returns names and emails itself. Each is recorded in
+  `specs/commands/chat-read.md` with what was observed. The gates were scheduled first for this
+  reason, and earned it.
+- **Names arrive against Google's own reference, and the client library agrees with the
+  reference.** `Schema$User` has no `email` field; the API returns one anyway. `ChatUser`
+  widens the type to read it as optional.
+- **The identity decision changed twice.** The People API was the source (issue), then dropped
+  (Chat names people itself), then reinstated as the fallback once
+  [`people-resolver`](people-resolver.md) existed for `drive activity`. In this account's data
+  the fallback never fired: no human arrived unnamed. It is covered by unit tests.
+- **Upstream's Markdown is wrapped at 80 columns and escaped.** Found only by reading rendered
+  output, where sentences broke mid-line. `unwrapSoftBreaks` joins them; escapes are left, since
+  they are correct Markdown and removing them could turn punctuation into structure.
+- **`withRateLimitRetry` hid Chat's errors from their classifier.** It translates on the way
+  out, so `THREAD_NOT_FOUND` surfaced as `GOOGLE_API_ERROR_400` until the chat calls moved to
+  `retryingChat`, which rethrows untouched. Caught live, not by the unit tests, which exercised
+  `chatError` directly.
+- **Two kinds of conversation the member list cannot name**: an app (unnamed as a member, named
+  as a sender), and a direct message that returns 403 to `spaces.get` and `members.list` while
+  serving its messages. Both are named from recent senders.
+- **Search's filter language is not the one documented.** `create_time`, not `createTime`;
+  sender by `users/<email>`, not by id. `messages.list` does use `createTime`, and accepts only
+  `>` and `<`, so an inclusive lower edge is sent as strictly-after the millisecond before.
+- **Search omits recent direct messages**, cause unknown: newest-first, the newest it returned
+  was from October 2025 on an account whose direct messages were active that day. Disclosed on
+  every response.
+- **Verified live on two accounts**, one Workspace and one consumer, with read-only calls.
+  Validation printed response shapes and counts; message content was not recorded anywhere.
+- **`[text](url)` links were confirmed** in app-posted messages (99 in one conversation's
+  latest 100). Human-written messages in the sample carried bare URLs, which arrive as
+  autolinks.
+- **`googleapis` 173 → 182** was required: 173 has neither `spaces.messages.search` nor
+  `markupSyntax`. The `google-auth-library` override pin held.
+
 ## Follow-ups
+
+- Deferred to [`chat-write`](chat-write.md) — `send`, `mark-read`, `mark-unread`, currently
+  stubs. That plan already owns them; nothing to absorb.
+- Tracked as: downloading uploaded attachments. The Chat media endpoint exists; no command uses
+  it. Drive-file attachments are already reachable through `drive get`.
+- Tracked as: help lines do not carry `--account`. A read run as a non-default account suggests
+  follow-up commands that would run as the default. Pre-existing across every service — the
+  dispatcher strips the flag before the handler sees it — and wants one fix in one place.
+- Tracked as: why search omits recent direct messages. Worth a second look if Google documents
+  an indexing delay or a history setting that explains it.
