@@ -7,8 +7,9 @@ conversations, read a conversation's messages, search messages across conversati
 conversation's members. The write side is specified separately —
 [`chat send`](chat-send.md) and [`chat mark-read` / `mark-unread`](chat-read-state.md).
 
-People are rendered by name and email as the Chat API returns them, and by their `users/{id}`
-when it returns neither — see [Identities](#identities). No second API is consulted.
+People are rendered by name and email as the Chat API returns them. Anyone it does not name goes
+to the shared people resolver, and renders as `users/{id}` if that cannot name them either — see
+[Identities](#identities).
 
 ## Upstream behavior relied on
 
@@ -22,7 +23,7 @@ against real data before the dependent behavior ships, amending this spec first 
 | `sender`, `member`, and mention users carry only `name` + `type` under user auth | **Documented, and contradicted by observation.** See below |
 | `spaces.messages.search` searches across conversations under user auth | **Observed.** `POST spaces/-/messages:search` with a JSON body; results are `results[].message` |
 | `markupSyntax: MARKUP_SYNTAX_MARKDOWN` returns `formattedText` as Markdown | **Observed** on list and search. Links arrive as `[text](url)`; a mention arrives as an empty `<chat-user data-user="users/{id}"></chat-user>` tag |
-| The People API resolves `users/{id}` to a name | **Observed to add nothing.** Of two members the Chat API had already named, the People API resolved one and returned an empty person for the other. Not used |
+| The People API resolves `users/{id}` to a name | **Observed: inside the account's directory only.** 8 of 8 in-domain people resolved, 0 of 4 outside it. Used as the fallback for anyone Chat does not name |
 | A consumer (`@gmail.com`) account cannot use the Chat API | **Expected by issue #71 and by Google's guides; contradicted by observation.** See below |
 
 ### Observed against a Workspace account, 2026-09-28
@@ -213,25 +214,30 @@ members[12]{id,name,email,type,role}:
 
 ## Identities
 
-Names and emails come from the Chat API response itself — the `sender` on a message, the `member`
-on a membership, the user on a mention annotation. gws-axi requests no directory scope and calls
-no second API to resolve people.
+Names and emails come first from the Chat API response itself — the `sender` on a message, the
+`member` on a membership, the user on a mention annotation. That covers nearly everyone,
+including people outside the account's domain, whom no directory lookup can name.
 
-This departs from issue #71, which added the People API on the strength of Google's reference
-saying user authentication returns only an id. Observed behavior is otherwise (see
-[above](#observed-against-a-workspace-account-2026-09-28)), so the lookup was removed rather
-than kept as a fallback: in the one direct comparison it knew less than Chat had already said.
+This inverts what issue #71 assumed. Google's reference says user authentication returns only an
+id, which would make a lookup the primary source; observed behavior is otherwise (see
+[above](#observed-against-a-workspace-account-2026-09-28)). The lookup is therefore the
+**fallback**, not the source.
 
 - One renderer serves every identity in every chat command — senders, mentions, members, and
   derived conversation names.
-- **A missing name or email is disclosed, never invented.** A person the response names renders
-  by name; one it does not renders as `users/{id}`. When any identity in a response lacked a
-  name, the summary carries `unnamed: <n>` and a `note` says the Chat API did not provide one.
-  A missing email leaves the `email` column empty for that row.
-- **The reference says this data may be absent.** If Google's behavior comes to match its
-  documentation, every identity degrades to `users/{id}` with the disclosure above — the read
-  still succeeds, and the fix is a spec change that reintroduces a lookup, not a workaround.
-- Bots are not people and render as `bot` with their id and whatever name the response gives.
+- **Chat's answer wins.** A person the response names is rendered from the response, and is
+  never looked up.
+- **A person the response does not name goes to the shared resolver**
+  ([conventions.md § People](../api/conventions.md#people)), with everything that contract
+  carries: directory-only coverage, the cache, and never failing the read.
+- **A person neither source names is disclosed, never invented.** They render as `users/{id}`,
+  the summary carries `unresolved: <n>`, and a `note` says why a name can be missing. A missing
+  email leaves the `email` column empty for that row.
+- **The reference says Chat's names may be absent.** If Google's behavior comes to match its
+  documentation, every identity falls through to the resolver, and people outside the directory
+  degrade to ids with the disclosure above. The read still succeeds.
+- Bots are not people: they render as `bot` with their id and whatever name the response gives,
+  and are never looked up.
 - A mention is rendered from the message's `text`, where it reads `@Name`, using the
   annotation's offsets. The Markdown form carries only an empty tag holding the id.
 
@@ -264,7 +270,7 @@ is classified from what it actually returns, as a spec change, and not guessed a
 **Inherited:**
 
 - [surface-completeness-limits](../principles.md#surface-completeness-limits) — search coverage,
-  unnamed identities, derived names, and never-messaged conversations are each stated in the
+  unresolved identities, derived names, and never-messaged conversations are each stated in the
   output that is affected.
 - [ids-are-first-class](../principles.md#ids-are-first-class) — conversation, message, thread,
   and user ids are never truncated; the `senders[]` / `spaces[]` legends keep them reachable
@@ -286,7 +292,8 @@ is classified from what it actually returns, as a spec change, and not guessed a
   present.
 
   > **Why:** The Chat API's identity is the id. The name arrives today against the letter of
-  > Google's own reference, so it can stop arriving without notice. Letting names become
+  > Google's own reference, so it can stop arriving without notice, and the fallback behind it
+  > covers only the account's own directory. Letting names become
   > load-bearing — as an address, or as a condition of a read succeeding — would make every chat
   > command depend on undocumented behavior, and would send a message to whichever of two
   > same-named conversations happened to match first.

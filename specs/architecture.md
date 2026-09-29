@@ -20,7 +20,7 @@ Foundational, concrete structure and model decisions for `gws-axi`. These are fa
 
 ## Google API client layer (`src/google/`)
 
-- **`client.ts`** — per-service factory functions `calendarClient` / `gmailClient` / `docsClient` / `driveClient` / `slidesClient` / `sheetsClient` / `chatClient`, each `(email) => Promise<client>`, all built on `oauthClientForAccount(email)` which seeds a `google-auth-library` `OAuth2Client` with stored tokens (access + refresh + `expiry_date` + scope) for proactive/mid-request refresh. Also exports `translateGoogleError`.
+- **`client.ts`** — per-service factory functions `calendarClient` / `gmailClient` / `docsClient` / `driveClient` / `slidesClient` / `sheetsClient` / `chatClient`, each `(email) => Promise<client>`, all built on `oauthClientForAccount(email)` which seeds a `google-auth-library` `OAuth2Client` with stored tokens (access + refresh + `expiry_date` + scope) for proactive/mid-request refresh. `peopleClient` is a factory of the same shape for the People API, which is not a service of its own — it backs the shared people resolver ([api/conventions.md § People](api/conventions.md#people)). Also exports `translateGoogleError`.
 - **`tokens.ts`** — token lifecycle. `getValidAccessToken(email)` refreshes before expiry with a 5-minute safety buffer. Reads OAuth client creds from `credentials.json`; throws `CREDENTIALS_MISSING` if absent. Tokens written `0600`.
 - **`probe.ts`** — doctor's live per-service read probes via raw `fetch` + bearer token; classifies `ok | warn | fail`. Scope-presence checks (`hasScope`) key off the single representative scope per service.
 - **`account.ts`** — `resolveAccount` (account resolution + write-protection; single source of truth) and `accountHeaderFields`.
@@ -46,9 +46,9 @@ Foundational, concrete structure and model decisions for `gws-axi`. These are fa
 
 - `BASE_SCOPES` = `openid email profile`.
 - `SERVICE_SCOPES` = one representative scope per service: gmail→`gmail.modify`, calendar→`calendar`, docs→`documents`, drive→`drive`, slides→`presentations`, sheets→`spreadsheets`, chat→`chat.spaces.readonly`.
-- `ADDITIONAL_SCOPES` = scopes layered on top of a representative service scope but **not** implied by it, kept separate so per-service probes keep keying off the single representative scope: `gmail.settings.basic` (Gmail filter management), `drive.activity.readonly` (Drive activity timeline), and Chat's `chat.messages` (read, search, and send messages), `chat.memberships.readonly` (list members, name direct messages), and `chat.users.readstate` (mark read / unread). Adding an entry here means pre-existing accounts must re-auth once.
+- `ADDITIONAL_SCOPES` = scopes layered on top of a representative service scope but **not** implied by it, kept separate so per-service probes keep keying off the single representative scope: `gmail.settings.basic` (Gmail filter management), `drive.activity.readonly` (Drive activity timeline), and Chat's `chat.messages` (read, search, and send messages), `chat.memberships.readonly` (list members, name direct messages), `chat.users.readstate` (mark read / unread), and `directory.readonly` (name the people behind ids; parent service `drive`, whose activity timeline is its main consumer). Adding an entry here means pre-existing accounts must re-auth once.
 - **Chat messages use the one broad scope, like every other service.** `chat.messages` covers reading, searching, and sending in a single grant, rather than pairing `chat.messages.readonly` with `chat.messages.create`. It is one consent line instead of two, and later message writes need no second re-auth. The grant is wider than the command surface — the token can also edit and delete the account's messages, which no gws-axi command does — and that boundary is held in code, the same way `gmail.modify` is send-capable while `gmail send` is withheld. Spaces and memberships stay read-only because no command creates a conversation or changes who is in one.
-- `allScopes()` = base ∪ service ∪ additional, requested together at login (single consent screen). `REQUIRED_APIS` maps each service to its `*.googleapis.com` API (chat→`chat.googleapis.com`); `ADDITIONAL_APIS` holds APIs that back a capability rather than a service (`driveactivity.googleapis.com`).
+- `allScopes()` = base ∪ service ∪ additional, requested together at login (single consent screen). `REQUIRED_APIS` maps each service to its `*.googleapis.com` API (chat→`chat.googleapis.com`); `ADDITIONAL_APIS` holds APIs that back a capability rather than a service (`driveactivity.googleapis.com`, `people.googleapis.com`).
 
 ## Config layout (XDG)
 
@@ -59,7 +59,7 @@ All state under `$XDG_CONFIG_HOME/gws-axi/` (default `~/.config/gws-axi/`):
 - `credentials.json` — the user's downloaded Desktop OAuth client JSON.
 - `setup.html` — generated Console deep-link page (regenerated each `auth setup`; the only browser surface).
 - `accounts/<email>/{tokens.json,profile.json}` — per-account; `tokens.json` is `0600`.
-- `accounts/<email>/settings.json` — a per-account **cache** of remote data (the Calendar `weekStart` preference). It is its own file, carries a fetch timestamp, and expires. It does not live inside `profile.json`, which sign-in rewrites wholesale from the ID token. A missing, corrupt, or expired cache is a cache miss, never an error.
+- `accounts/<email>/settings.json` and `accounts/<email>/people.json` — per-account **caches** of remote data (the Calendar `weekStart` preference; resolved people). Each is its own file, carries fetch timestamps, and expires. Neither lives inside `profile.json`, which sign-in rewrites wholesale from the ID token. A missing, corrupt, or expired cache is a cache miss, never an error.
 
 Reset = remove the config dir (or `auth reset`).
 
