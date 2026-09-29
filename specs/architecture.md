@@ -30,6 +30,12 @@ Foundational, concrete structure and model decisions for `gws-axi`. These are fa
 - **BYO single-user OAuth**: each user creates their own GCP project + Desktop OAuth client. No shared/embedded client in v1.
 - One BYO client authenticates **multiple Google accounts**; each is added as a test user (while in Testing) and authenticates via its own loopback run.
 - **Progressive setup (steps 0–7)** driven by `setup.json`: `auth setup` finds the first incomplete step, performs it (if automatable via `gcloud`) or prints a Console deep-link + instructions, marks it done, re-invokes. Automatable: project create, API enable, credentials save, loopback token grant. Manual: Desktop OAuth client creation, consent screen, test-user add.
+- **A completed `apis_enabled` step can go stale.** The step records the list of APIs it enabled. It is complete only while that list covers every API in `allApis()`; when a release adds one, the step is **stale**, and a stale step is an incomplete step everywhere completeness is read:
+  - `auth setup` performs it as the next step, enabling only the missing APIs. Later steps keep their state — nothing is reset, and no account re-authenticates because an API was enabled.
+  - `doctor` reports it as a failing setup check that names the missing APIs.
+  - The home view's setup progress counts it as not done.
+  - A **joined** install (`via: "team-join"`) asserted its APIs rather than recording them, and has no access to enable one, so it is never computed stale. It learns of a missing API from the runtime `API_NOT_ENABLED` error, whose suggestion for a joined install names the distributor and the API — never `auth setup` and never a Console link.
+  - `API_NOT_ENABLED` on an owned install suggests `auth setup`, which is only true because of the rule above.
 - **Loopback prepare/wait split**: `auth login --account X` runs prepare + wait in one blocking command (for humans). Agents use `--no-wait` (prepare-only, fast) then `auth login --wait` in a separate turn to bind the callback server.
 - **Login account resolution**: `auth login` without `--account` resolves the target account — 0 accounts → first sign-in (Google shows its account chooser, no hint); exactly 1 account → re-auth that account; 2+ accounts → `ACCOUNT_REQUIRED` (the user must name which). The resolved account populates **both** the setup.html `authenticate as <email>` prompt **and** the Google `login_hint` (which pre-selects the account), so the user knows which browser profile/session to use. A post-OAuth mismatch is still caught by `ACCOUNT_MISMATCH`.
 - **ID-token identity**: post-OAuth the lowercased ID-token `email` claim is the authoritative storage key; a `--account` mismatch refuses tokens (`ACCOUNT_MISMATCH`).
@@ -73,6 +79,7 @@ Reset = remove the config dir (or `auth reset`).
 - `translateGoogleError(err, { account, operation })` maps Google errors to `AxiError`: 401/`UNAUTHENTICATED` → `TOKEN_INVALID` (+ publish nudge when not published); 403/`PERMISSION_DENIED` insufficient-scope branch; 404 → `NOT_FOUND`, which handlers re-wrap into domain codes (e.g. `DOCUMENT_NOT_FOUND`) with access-check suggestions.
 - Validation failures throw `AxiError(..., "VALIDATION_ERROR", [usage])`. Account-resolution codes: `NO_ACCOUNTS`, `ACCOUNT_NOT_FOUND`, `ACCOUNT_REQUIRED`, `NO_DEFAULT_ACCOUNT`, `ACCOUNT_MISMATCH`, `ACCOUNT_LOCKED`, `ACCOUNT_LOCK_INVALID`.
 - `doctor` exit codes: `0` ok (incl. warnings), `1` failing check, `2` usage error.
+- A 403 is `SCOPE_MISSING` only when Google's **reason** says the scope is insufficient, or its message says so in those words. A message that merely contains the word "scope" is not evidence of a scope problem; re-authentication advice attached to a failure it cannot fix is a dead end ([principles.md#no-dead-end-surfaces](principles.md#no-dead-end-surfaces)).
 
 ## Account resolution & write-protection (`src/google/account.ts`)
 
