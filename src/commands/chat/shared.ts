@@ -88,7 +88,7 @@ export function chatError(
   // A malformed or unknown id comes back 400; one the account isn't in, 403 or 404.
   const spaceProblem =
     status === 404 ||
-    (status === 400 && /space resource name/i.test(message)) ||
+    (status === 400 && /(space|malformed)[\w\s]*resource name/i.test(message)) ||
     (status === 403 &&
       space !== undefined &&
       !/scope|not enabled|disabled|has not been used/i.test(message));
