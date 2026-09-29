@@ -2,7 +2,14 @@ import { AxiError } from "axi-sdk-js";
 import { resolveAccount, withAccountSource } from "../google/account.js";
 import { chatMembersCommand, MEMBERS_HELP } from "./chat/members.js";
 import { chatMessagesCommand, MESSAGES_HELP } from "./chat/messages.js";
+import {
+  chatMarkReadCommand,
+  chatMarkUnreadCommand,
+  MARK_READ_HELP,
+  MARK_UNREAD_HELP,
+} from "./chat/read-state.js";
 import { chatSearchCommand, SEARCH_HELP } from "./chat/search.js";
+import { chatSendCommand, SEND_HELP } from "./chat/send.js";
 import { chatSpacesCommand, SPACES_HELP } from "./chat/spaces.js";
 import { notImplemented, renderAlternatives, withInstead } from "./stub-signposts.js";
 
@@ -14,28 +21,19 @@ interface ChatSubcommand {
   instead?: string[];
 }
 
-// Write subcommands are stubs for the next slice — kept with per-command --help
-// so agents can plan around the surface. They throw NOT_IMPLEMENTED after
-// account resolution runs. None has an alternative: nothing else in gws-axi
-// posts to Chat or changes what is marked read.
-const SEND_HELP = `usage: gws-axi chat send <space> (--text <string> | --body-file <path> | -) [--thread <id>] [--request-id <key>] [flags]
-status: planned — not yet implemented
-`;
-const MARK_READ_HELP = `usage: gws-axi chat mark-read <space> [<space>…] [flags]
-status: planned — not yet implemented
-`;
-const MARK_UNREAD_HELP = `usage: gws-axi chat mark-unread <space> (--from <messageId> | --at <time>) [flags]
-status: planned — not yet implemented
-`;
-
 const SUBCOMMANDS: ChatSubcommand[] = [
   { name: "spaces", mutation: false, help: SPACES_HELP, handler: chatSpacesCommand },
   { name: "messages", mutation: false, help: MESSAGES_HELP, handler: chatMessagesCommand },
   { name: "search", mutation: false, help: SEARCH_HELP, handler: chatSearchCommand },
   { name: "members", mutation: false, help: MEMBERS_HELP, handler: chatMembersCommand },
-  { name: "send", mutation: true, help: SEND_HELP },
-  { name: "mark-read", mutation: true, help: MARK_READ_HELP },
-  { name: "mark-unread", mutation: true, help: MARK_UNREAD_HELP },
+  { name: "send", mutation: true, help: SEND_HELP, handler: chatSendCommand },
+  { name: "mark-read", mutation: true, help: MARK_READ_HELP, handler: chatMarkReadCommand },
+  {
+    name: "mark-unread",
+    mutation: true,
+    help: MARK_UNREAD_HELP,
+    handler: chatMarkUnreadCommand,
+  },
 ];
 
 const SUB_BY_NAME: Record<string, ChatSubcommand> = Object.fromEntries(
@@ -72,15 +70,18 @@ notes:
   Conversations are addressed by id (from \`chat spaces\`), or by
   \`--with <email>\` for a 1:1 direct message — never by name.
   Reading never changes what is marked read.
-  Writes require --account <email> when 2+ accounts are authenticated.
-  Write subcommands are scaffolded for the next slice — all currently
-  throw NOT_IMPLEMENTED after account resolution runs, and nothing else
-  in gws-axi posts to Chat or changes read state.
+  Writes require --account <email> when 2+ accounts are authenticated
+  (or set GWS_AXI_ACCOUNT).
+  \`chat send\` SENDS — there is no draft step, and gws-axi can't delete
+  what it posts. It goes to one conversation per command.
 ${renderAlternatives(SUBCOMMANDS)}subcommand help:
   gws-axi chat spaces --help       list and find conversations
   gws-axi chat messages --help     read one conversation
   gws-axi chat search --help       search messages across conversations
   gws-axi chat members --help      who is in a conversation
+  gws-axi chat send --help         post a message
+  gws-axi chat mark-read --help    mark conversations read
+  gws-axi chat mark-unread --help  mark a conversation unread from a point
 examples:
   gws-axi chat spaces
   gws-axi chat messages AAAAxyz --since today
