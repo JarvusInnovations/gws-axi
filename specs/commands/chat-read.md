@@ -7,10 +7,8 @@ conversations, read a conversation's messages, search messages across conversati
 conversation's members. The write side is specified separately —
 [`chat send`](chat-send.md) and [`chat mark-read` / `mark-unread`](chat-read-state.md).
 
-Under user authentication the Chat API identifies people only as `users/{id}` — no display name,
-no email — on message senders, mentions, and members alike. Every command here therefore routes
-identities through one shared resolver ([Identity resolution](#identity-resolution)) so output
-carries real names, and says so when it cannot.
+People are rendered by name and email as the Chat API returns them, and by their `users/{id}`
+when it returns neither — see [Identities](#identities). No second API is consulted.
 
 ## Upstream behavior relied on
 
@@ -22,10 +20,9 @@ against real data before the dependent behavior ships, amending this spec first 
 | --- | --- |
 | Read calls under user auth need only the API enabled and an OAuth client — no configured Chat app | **Observed 2026-09-28.** Every read below succeeded on a project with no Chat app configured |
 | `sender`, `member`, and mention users carry only `name` + `type` under user auth | **Documented, and contradicted by observation.** See below |
-| `users/{id}` is the same identifier as People API `people/{id}` | Documented (User reference) |
 | `spaces.messages.search` searches across conversations under user auth | **Observed.** `POST spaces/-/messages:search` with a JSON body; results are `results[].message` |
 | `markupSyntax: MARKUP_SYNTAX_MARKDOWN` returns `formattedText` as Markdown | **Observed** on list and search. Links arrive as `[text](url)`; a mention arrives as an empty `<chat-user data-user="users/{id}"></chat-user>` tag |
-| `directory.readonly` alone resolves in-domain `people/{id}` to name + email | **Observed, partially.** Of two members the Chat API had already named, the People API resolved one and returned an empty person for the other |
+| The People API resolves `users/{id}` to a name | **Observed to add nothing.** Of two members the Chat API had already named, the People API resolved one and returned an empty person for the other. Not used |
 | What a non-Workspace (consumer) account receives from the Chat API, and whether requesting Chat scopes changes its sign-in | Verify live |
 
 ### Observed against a Workspace account, 2026-09-28
@@ -92,10 +89,10 @@ spaces[50]{id,type,name,last_active}:
   derived names (below).
 - `--with <email>` returns the single 1:1 direct message with that person.
 - `name` for a conversation with no display name of its own (direct messages, unnamed group
-  chats) is **derived from its other members' resolved names**: one name for a direct message; for
+  chats) is **derived from its other members' names**: one name for a direct message; for
   a group, the first two names plus `+N`. When any rendered name was derived, the summary carries
   `names_derived: <n>` so a reader knows those labels are gws-axi's, not Google's. A derived name
-  whose members could not be resolved renders the raw `users/{id}` — never blank.
+  whose members the response did not name renders the raw `users/{id}` — never blank.
 - Upstream omits direct messages and group chats that have never had a message sent; a `help[]`
   line states this.
 
@@ -133,9 +130,9 @@ senders[3]{id,name,email,type}:
   that thread their messages; rows sharing a value belong to one thread.
 - `time` renders in local-offset ISO, matching the `range:` echo.
 - `text` is the message's formatted content as **Markdown**, with links inline as
-  `[text](url)` and user mentions rendered as `@<resolved name>` (raw `@users/{id}` when
-  unresolved). Truncated to 500 chars unless `--full`; truncation never splits a Markdown link.
-- `sender` is the resolved display name. When two senders in one response share a display name,
+  `[text](url)` and user mentions rendered as `@<name>` (raw `@users/{id}` when the
+  response names no one). Truncated to 500 chars unless `--full`; truncation never splits a Markdown link.
+- `sender` is the display name. When two senders in one response share a display name,
   their rows render `name <email>` so the column stays unambiguous.
 - `senders[N]{id,name,email,type}` lists each distinct sender once — the handoff from a name in a
   row to an id or address another command can use. `type` is `human` or `bot`.
@@ -194,26 +191,29 @@ members[12]{id,name,email,type,role}:
 - `--include-invited` adds people invited but not yet joined and adds a `state` column
   (`joined` / `invited`). `--include-groups` adds Google Group memberships.
 
-## Identity resolution
+## Identities
 
-One resolver serves every identity in every chat command — senders, mentions, members, and
-derived conversation names.
+Names and emails come from the Chat API response itself — the `sender` on a message, the `member`
+on a membership, the user on a mention annotation. gws-axi requests no directory scope and calls
+no second API to resolve people.
 
-- Resolution is by People API lookup of `people/{id}`, batched, under the
-  `directory.readonly` scope.
-- The account's own identity resolves from its stored profile, with no lookup.
-- Resolved identities are **cached per account**, with a fetch timestamp and an expiry, in a file
-  of their own beside the account's tokens — not inside `profile.json`, which sign-in rewrites
-  wholesale. A corrupt or unreadable cache is a cache miss, never an error. An empty name from
-  upstream is a failed resolution, not a cached name.
-- **Resolution can never fail the read it decorates.** If the People API is unreachable, not
-  enabled, or the scope was not granted, the command still returns its content with raw
-  `users/{id}` identities and a `note` naming the specific fix (re-authenticate, or enable the
-  API).
-- **Unresolved identities are disclosed.** People outside the account's directory, deleted
-  users, and hidden profiles may not resolve. They render as `users/{id}`, and the summary carries
-  `unresolved: <n>` with a `note` explaining why a name can be missing. Bots are not people and
-  render as `bot` with their id.
+This departs from issue #71, which added the People API on the strength of Google's reference
+saying user authentication returns only an id. Observed behavior is otherwise (see
+[above](#observed-against-a-workspace-account-2026-09-28)), so the lookup was removed rather
+than kept as a fallback: in the one direct comparison it knew less than Chat had already said.
+
+- One renderer serves every identity in every chat command — senders, mentions, members, and
+  derived conversation names.
+- **A missing name or email is disclosed, never invented.** A person the response names renders
+  by name; one it does not renders as `users/{id}`. When any identity in a response lacked a
+  name, the summary carries `unnamed: <n>` and a `note` says the Chat API did not provide one.
+  A missing email leaves the `email` column empty for that row.
+- **The reference says this data may be absent.** If Google's behavior comes to match its
+  documentation, every identity degrades to `users/{id}` with the disclosure above — the read
+  still succeeds, and the fix is a spec change that reintroduces a lookup, not a workaround.
+- Bots are not people and render as `bot` with their id and whatever name the response gives.
+- A mention is rendered from the message's `text`, where it reads `@Name`, using the
+  annotation's offsets. The Markdown form carries only an empty tag holding the id.
 
 ## Errors
 
@@ -224,7 +224,7 @@ derived conversation names.
 | `THREAD_NOT_FOUND` | `--thread` names a thread not in the conversation | `chat messages <space>` to list threads |
 | `CHAT_NOT_AVAILABLE` | The account's type cannot use the Chat API | Statement that Chat needs a Workspace account, plus the other authenticated accounts |
 | `SCOPE_MISSING` | The Chat scopes were not granted | `auth login --account <email> --no-wait` |
-| `API_NOT_ENABLED` | The Chat or People API is not enabled on the project | `auth setup` for an owned install; the distributor for a joined one |
+| `API_NOT_ENABLED` | The Chat API is not enabled on the project | `auth setup` for an owned install; the distributor for a joined one |
 
 Chat-specific failures are classified **before** the generic Google error translation, so a
 Chat-unavailable or app-not-configured response is never reported as a scope problem with
@@ -246,7 +246,7 @@ Chat is the first service an authenticated account may be categorically unable t
 **Inherited:**
 
 - [surface-completeness-limits](../principles.md#surface-completeness-limits) — search coverage,
-  unresolved identities, derived names, and never-messaged conversations are each stated in the
+  unnamed identities, derived names, and never-messaged conversations are each stated in the
   output that is affected.
 - [ids-are-first-class](../principles.md#ids-are-first-class) — conversation, message, thread,
   and user ids are never truncated; the `senders[]` / `spaces[]` legends keep them reachable
@@ -258,16 +258,17 @@ Chat is the first service an authenticated account may be categorically unable t
 - [canonical-empty-list-shape](../principles.md#canonical-empty-list-shape) — every empty list
   here collapses to a scalar under its own field name.
 - [single-source-of-truth-helpers](../principles.md#single-source-of-truth-helpers) — one identity
-  resolver and one conversation-address parser, shared by every chat command.
+  renderer and one conversation-address parser, shared by every chat command.
 
 **Local:**
 
-- **Names are decoration; ids are the record.** A resolved name makes output legible, but it is
-  best-effort, cached, and possibly stale. Nothing in gws-axi accepts a display name as an
-  address, and no command's success depends on a name resolving.
+- **Names are decoration; ids are the record.** A name makes output legible, but Google documents
+  it as something user authentication does not return, and names are not unique. Nothing in
+  gws-axi accepts a display name as an address, and no command's success depends on a name being
+  present.
 
-  > **Why:** The Chat API's identity is the id; the name comes from a second system with its own
-  > visibility rules and its own failure modes. Letting names become load-bearing — as an
-  > address, or as a condition of a read succeeding — would make every chat command as reliable
-  > as its least reliable lookup, and would send a message to whichever of two same-named
-  > conversations happened to match first.
+  > **Why:** The Chat API's identity is the id. The name arrives today against the letter of
+  > Google's own reference, so it can stop arriving without notice. Letting names become
+  > load-bearing — as an address, or as a condition of a read succeeding — would make every chat
+  > command depend on undocumented behavior, and would send a message to whichever of two
+  > same-named conversations happened to match first.
