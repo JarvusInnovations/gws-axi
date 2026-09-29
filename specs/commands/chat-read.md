@@ -126,8 +126,12 @@ senders[3]{id,name,email,type}:
   edge, relative tokens, the `range:` echo in local-offset ISO, and an empty window as a
   `VALIDATION_ERROR` rather than an empty list. With neither flag there is no window and no
   `range:` line.
-- `--thread <id>` narrows to one thread. The `thread` column is present only for conversations
-  that thread their messages; rows sharing a value belong to one thread.
+- `--thread <id>` narrows to one thread.
+- The `thread` column appears when it carries information: some thread in the rendered set holds
+  more than one message, or any message is a thread reply. Rows sharing a value belong to one
+  thread. When every message is its own thread the column is omitted, and `--fields thread`
+  brings it back. A conversation's threading state cannot decide this — direct messages report
+  as threaded while every message in them is its own thread.
 - `time` renders in local-offset ISO, matching the `range:` echo.
 - `text` is the message's formatted content as **Markdown**, with links inline as
   `[text](url)` and user mentions rendered as `@<name>` (raw `@users/{id}` when the
@@ -170,9 +174,14 @@ senders[6]{id,name,email,type}:
 - `spaces[N]` and `senders[N]` are legends: each conversation and sender in the result appears
   once, so rows stay narrow while every id remains resolvable.
 - **Coverage disclosure (required).** Upstream search omits private messages, messages posted by
-  apps, app direct messages, messages from blocked users, and muted conversations. A `note` states
-  this on every response, including the empty one — `messages: no messages matched` must not read
-  as "nothing was said".
+  apps, app direct messages, messages from blocked users, and muted conversations — and was
+  observed to omit recent direct messages altogether, for reasons unknown. A `note` states this
+  on every response, including the empty one — `messages: no messages matched` must not read as
+  "nothing was said" — and names `chat messages <space>` as the way to read a conversation
+  directly.
+- `--from <email>` matches the sender by address. Search returned nothing when the same sender
+  was named by id, so the address is the only form offered.
+- The window is sent to search in UTC; the `range:` echo stays in local-offset ISO.
 
 ## `chat members`
 
