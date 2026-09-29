@@ -1,11 +1,12 @@
 ---
-status: in-progress
+status: done
 depends: [api-enablement-drift]
 specs:
   - specs/api/conventions.md
   - specs/commands/drive-activity.md
   - specs/architecture.md
 issues: [71]
+pr: 72
 ---
 
 # Plan: Shared people resolver, and named actors in `drive activity`
@@ -62,17 +63,17 @@ the only source.
 
 ## Validation
 
-- [ ] `bun run build`, `bun run lint`, `bun run format:check`, `bun run test` all pass.
-- [ ] `gws-axi auth setup` reports complete with `people.googleapis.com` recorded.
-- [ ] `gws-axi drive activity <id>` on a file edited by colleagues shows their names in `actor`
+- [x] `bun run build`, `bun run lint`, `bun run format:check`, `bun run test` all pass.
+- [x] `gws-axi auth setup` reports complete with `people.googleapis.com` recorded.
+- [x] `gws-axi drive activity <id>` on a file edited by colleagues shows their names in `actor`
       and lists them in `actors[]` with ids and emails.
-- [ ] An actor outside the directory renders as `people/<id>`, appears in `actors[]` with empty
+- [x] An actor outside the directory renders as `people/<id>`, appears in `actors[]` with empty
       name and email, and the response carries `unresolved: <n>` with the note.
-- [ ] A second run makes no People API call for people already cached.
-- [ ] With `people.json` deleted, a run repopulates it.
-- [ ] Against an account whose token lacks `directory.readonly`, the timeline still renders,
+- [x] A second run makes no People API call for people already cached.
+- [x] With `people.json` deleted, a run repopulates it.
+- [x] Against an account whose token lacks `directory.readonly`, the timeline still renders,
       with raw ids and a note naming re-authentication as the fix.
-- [ ] `gws-axi doctor` reports `directory.readonly` per account under `drive`.
+- [x] `gws-axi doctor` reports `directory.readonly` per account under `drive`.
 
 ## Risks / unknowns
 
@@ -87,4 +88,31 @@ the only source.
 
 ## Notes
 
+- **Verified live on a Workspace account.** On a document edited by colleagues, all four actors
+  resolved to names and addresses. On one shared with outside collaborators, one of three
+  resolved; the other two rendered as `people/<id>` with `unresolved: 2` and the
+  outside-directory note.
+- **Coverage, measured before the spec was written**: 8 of 8 people inside the account's domain,
+  0 of 4 outside it, and 5 of 11 distinct actors across the account's recent Drive activity.
+  Requesting all four People API read sources did not change the result.
+- **Cache verified**: a second run left `people.json` unmodified; deleting it and re-running
+  repopulated it. The file is written `0600`.
+- **The degraded path verified** against a consumer account whose token predates the scope: the
+  timeline rendered, with ids, `unresolved: 2`, and a note naming the re-auth command.
+- **`unresolved:` sits inside the `item{}` header block**, beside `scope` and `range`, rather
+  than as a sibling line — that block is `drive activity`'s summary.
+- **A scope missing from the stored token is detected before any call.** The token's own scope
+  list is authoritative and free to read, and it lets the note name re-authentication precisely
+  rather than inferring it from a 403.
+- **Three of four authenticated accounts lack the scope** and show a failing `doctor` row under
+  `drive` until they re-authenticate.
+- **`chatClient` landed in this plan's scope commit**, ahead of the chat handlers that use it.
+
 ## Follow-ups
+
+- Tracked as: feeding the cache from names other services reveal. Chat names external people the
+  directory cannot, and two of this account's unresolved Drive actors were people Chat had named.
+  It would make `drive activity` output depend on which chat commands had run before, so it
+  wants a decision, not a quiet addition.
+- Tracked as: `drive activity`'s `time` column still renders UTC while `range:` renders
+  local-offset ISO (carried from [`api-enablement-drift`](api-enablement-drift.md)).
