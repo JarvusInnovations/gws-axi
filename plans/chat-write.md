@@ -1,11 +1,12 @@
 ---
-status: in-progress
+status: done
 depends: [chat-read]
 specs:
   - specs/commands/chat-send.md
   - specs/commands/chat-read-state.md
   - specs/principles.md
 issues: [71]
+pr: 72
 ---
 
 # Plan: Chat service — send and read state
@@ -94,7 +95,7 @@ read-state no-ops; partial failure across several conversations; write-protectio
 
 **Live — every send verified by reading the message back *and* viewing it in the Chat UI:**
 
-- [ ] A body with bold, a list, inline code, and a link renders as formatting in Chat, and
+- [x] A body with bold, a list, inline code, and a link renders as formatting in Chat, and
       `chat messages` returns the same Markdown.
 - [x] The message is attributed to the account, with the Chat app's name shown as the spec's
       `note` describes.
@@ -152,16 +153,19 @@ Written while the plan is still open, so the record of what was sent exists befo
   third-party description of the failure and is unverified. Its guidance, for owned and joined
   installs, is unit-tested.
 - **Boxes left unchecked, and why:**
-  - *Renders as formatting in Chat*: gws-axi cannot see the Chat UI. What could be checked was
-    the stored message, read back in Chat's native markup: it carries bold, italic, strike,
-    code, a list, a quote, and a link with its own text. The UI half waits on the owner.
-  - *`mark-read` / `mark-unread` reflected in the Chat UI*: same reason. At the API, an unread
-    search matched the message after `mark-unread` and the read position returned to the
-    newest message after `mark-read`.
+  - *The unconfigured-project failure*: see above — there was no unconfigured project to
+    observe.
+  - *`mark-read` / `mark-unread` reflected in the Chat UI*: gws-axi cannot see the Chat UI, and
+    the owner was not asked to watch a state change before merge. At the API, an unread search
+    matched the message after `mark-unread` and the read position returned to the newest
+    message after `mark-read`.
   - *`--thread` against a direct message*: not tested. It would mean posting in a real
     conversation with another person.
   - *A send forced to time out*: not forced live. The error and its retry command are
     unit-tested, and the retry path itself — the same request id posting nothing — was run live.
+- **Formatting was confirmed by the owner, in the Chat UI**, after looking at the Markdown
+  sample in "Bot testing". At the API, the stored message read back in Chat's native markup
+  carried bold, italic, strike, code, a list, a quote, and a link with its own text.
 - **Attribution was confirmed by the owner, in the Chat UI**: each test message showed both the
   account's name and the Chat app's name. The owner's first reaction was to ask why both
   appear, which is worth remembering — the double attribution is surprising to the person whose
@@ -172,3 +176,17 @@ Written while the plan is still open, so the record of what was sent exists befo
   not as italics.
 
 ## Follow-ups
+
+- Tracked as: mention-all is unguarded. Google's hosted Chat MCP server prohibits it; here an
+  agent that writes the tag by hand notifies a whole conversation. Raised with the owner, who
+  merged without asking for a guard. Revisit if it bites.
+- Tracked as: a literal-text mode for `chat send`, for bodies whose `*`, `_`, or `#` are meant
+  literally. `gmail draft --plain` is the precedent.
+- Tracked as: `--thread` in a direct message is untested. Its behavior is unknown rather than
+  known-good; the first person to need it should verify it somewhere safe.
+- Tracked as: the setup page's "Add another Google account" block links to the Cloud Console
+  for a joined install whose setup is complete. Pre-existing, noticed while adding the Chat
+  section beside it, which is gated correctly.
+- Tracked as: issue #69's premise, met first-hand during this work. Signing in from a phone
+  needed the callback URL pasted back by hand and the 10-minute window extended by hand. A
+  supported paste-back path and a longer window would have removed both.
