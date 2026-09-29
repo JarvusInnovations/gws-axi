@@ -26,14 +26,16 @@ a relaxation — see [Why Chat sends when Gmail does not](#why-chat-sends-when-g
 
 | Fact | Status |
 | --- | --- |
-| Creating a message under user auth requires a Chat app configured on the Cloud project | Documented (Chat API configuration guide) |
+| Creating a message under user auth requires a Chat app configured on the Cloud project | Documented (Chat API configuration guide). Every send here ran on a project that had one |
 | The response when no Chat app is configured | **Cannot be observed here** — the project already had a Chat app when this was built. Classified from a third-party report of a 404 "Google Chat app not found"; unverified |
-| The message is attributed to the user, with the Chat app's name displayed beside it | Documented (create-messages guide) — verify live |
-| `markupSyntax: MARKUP_SYNTAX_MARKDOWN` on create renders standard Markdown | Documented (GA 2026-08-07) — verify live |
-| A message may carry a client-assigned id (`client-…`), unique within its conversation, under user auth | Documented — verify live |
-| Creating a message whose client-assigned id already exists is refused, and creates nothing | Documented — verify live |
-| Message size limit is 32,000 bytes | Documented |
-| Thread replies via `messageReplyOption` are supported only in named spaces | Documented — verify live what `--thread` does in a direct message |
+| The message is attributed to the user | **Observed 2026-09-29**: read back with the account as `sender`, type `HUMAN` |
+| The Chat app's name is displayed beside the message | Documented. Visible only in the Chat UI, which gws-axi cannot see — not verified |
+| `markupSyntax: MARKUP_SYNTAX_MARKDOWN` on create renders standard Markdown | **Observed**: a Markdown body was stored as Chat's own formatting — bold, italic, strike, code, a list, a quote, and a link with its own text |
+| A message may carry a client-assigned id (`client-…`), unique within its conversation, under user auth | **Observed**: accepted, returned as `clientAssignedMessageId`, and usable in place of the system id to fetch the message |
+| Creating a message whose client-assigned id already exists is refused, and creates nothing | **Observed**: refused with a conflict, for the same body and for a different one; the conversation still held one message |
+| Message size limit is 32,000 bytes | Documented. Enforced before the call, so not exercised against Chat |
+| A reply to a thread that does not exist fails | **Observed**: refused, and nothing was posted |
+| Thread replies via `messageReplyOption` are supported only in named spaces | Documented. `--thread` in a direct message was **not tested** — it would mean posting in a real conversation with someone |
 
 ## Body
 
@@ -82,6 +84,9 @@ happened, and a blind retry posts a duplicate that gws-axi cannot delete.
   success response's `help[]` both say so.
 - A request id is scoped to its conversation: the same id in a different conversation is a
   different message.
+- **A replay returns the original even if the new body differs.** The id names the message, not
+  its content. The response shows the stored text and says nothing was posted, so a caller that
+  meant to send something new can see that it has not.
 
 ## Output
 
@@ -109,6 +114,7 @@ input, so the caller sees what the markup became.
 | `DM_NOT_FOUND` | `--with <email>` has no existing conversation | Statement that no gws-axi command starts one |
 | `THREAD_NOT_FOUND` | `--thread` does not exist | `chat messages <space>` |
 | `MESSAGE_TOO_LARGE` | Body exceeds 32,000 bytes | The actual size |
+| `SEND_UNCONFIRMED` | The send got no answer, or a server error — it may or may not have posted | The complete retry command, carrying the same request id |
 | `ACCOUNT_REQUIRED` | 2+ accounts and no explicit account | One runnable line per account |
 
 ## Chat app configuration

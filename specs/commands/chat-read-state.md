@@ -13,9 +13,9 @@ state ([read-only-stays-read-only](../principles.md#read-only-stays-read-only)).
 
 | Fact | Status |
 | --- | --- |
-| A conversation's read state is one `lastReadTime`; it appears unread when that time precedes the latest message | Documented (SpaceReadState reference) |
-| Setting `lastReadTime` past the latest message is coerced to the latest message's time | Documented — verify live |
-| Conversation read state covers the top-level conversation only; thread replies are tracked separately | Documented |
+| A conversation's read state is one `lastReadTime`; it appears unread when that time precedes the latest message | **Observed 2026-09-29**: moving it before a message made that message match an unread search |
+| Setting `lastReadTime` past the latest message is coerced to the latest message's time | **Observed**: set to the current time, returned as the latest message's create time |
+| Conversation read state covers the top-level conversation only; thread replies are tracked separately | **Observed**: with the read position moved before both a message and its thread reply, an unread search returned only the top-level message |
 | Thread read state can be read but **not written** through the REST API | Documented (no update method exists) |
 | Writing read state requires the `chat.users.readstate` scope | Documented |
 
@@ -35,9 +35,13 @@ note: Thread replies are tracked separately and are not affected.
 ```
 
 - A conversation already read is a no-op reported as `already_read`; the command exits 0.
+- `action` reports the outcome, not the command: `marked_read` when any conversation changed,
+  `no_change` when none did. The same holds for `mark-unread`.
 - `last_read` is the value **read back from the response**, not the value requested.
 - Several conversations are processed independently. One failing does not stop the rest: its row
-  carries `status: failed` and a reason, and the command exits non-zero only if any row failed.
+  carries `status: failed` and a `reason` column appears, and the command exits non-zero only
+  if any row failed. A failure that would repeat for every conversation — a missing scope, an
+  invalid token — stops the command instead of filling the table with it.
 
 ## `chat mark-unread`
 
