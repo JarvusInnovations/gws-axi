@@ -62,13 +62,6 @@ export const ADDITIONAL_SCOPE_INFO: AdditionalScope[] = [
     service: "chat",
     capability: "mark chat conversations read or unread",
   },
-  {
-    // Chat identifies people only as users/{id} under user auth; this resolves
-    // them to names through the People API.
-    scope: "https://www.googleapis.com/auth/directory.readonly",
-    service: "chat",
-    capability: "resolve chat participants to names",
-  },
 ];
 
 export const ADDITIONAL_SCOPES = ADDITIONAL_SCOPE_INFO.map((s) => s.scope);
@@ -95,8 +88,8 @@ export const REQUIRED_APIS: Record<ServiceName, string> = {
 
 // APIs that back a capability rather than a service. The Drive Activity API is
 // a distinct service behind `drive activity`, enabled separately from the Drive
-// API. The People API resolves chat participants to names.
-export const ADDITIONAL_APIS = ["driveactivity.googleapis.com", "people.googleapis.com"] as const;
+// API.
+export const ADDITIONAL_APIS = ["driveactivity.googleapis.com"] as const;
 
 export function allScopes(): string[] {
   return [...BASE_SCOPES, ...Object.values(SERVICE_SCOPES), ...ADDITIONAL_SCOPES];
