@@ -1,12 +1,12 @@
 # gws-axi
 
-Agent-ergonomic CLI for Google Workspace — Gmail, Calendar, Docs, Drive, Slides, and Sheets behind a single command, built to the [AXI standard](https://axi.md): [TOON](https://toonformat.dev/)-formatted output, contextual next-step suggestions, idempotent mutations, and multi-account safety by default.
+Agent-ergonomic CLI for Google Workspace — Gmail, Calendar, Docs, Drive, Slides, Sheets, and Chat behind a single command, built to the [AXI standard](https://axi.md): [TOON](https://toonformat.dev/)-formatted output, contextual next-step suggestions, idempotent mutations, and multi-account safety by default.
 
 Designed for use by AI agents. Every response is structured, every error names a specific fix, and write operations lock to the explicit account when multiple are authenticated — so two agents in parallel sessions can't silently touch the wrong mailbox.
 
 ## Status
 
-Read coverage is complete across all six services; write coverage is rolling out service by service.
+Read coverage is complete across all seven services; write coverage is rolling out service by service.
 
 | Service | Reads | Writes |
 | --- | --- | --- |
@@ -16,6 +16,7 @@ Read coverage is complete across all six services; write coverage is rolling out
 | **Drive** | ✅ ls · get · search · permissions · download · revisions · activity | 🟡 upload · mkdir &nbsp;·&nbsp; 🚧 create · copy · move · rename · delete |
 | **Slides** | ✅ get · page · summarize · comments | 🚧 create · update |
 | **Sheets** | ✅ read · comments | 🚧 update · append · clear · create · add-tab |
+| **Chat** | ✅ spaces · messages · search · members | 🚧 send · mark-read · mark-unread |
 
 <sub>✅ shipped · 🟡 partial · 🚧 planned · ✋ out of scope by design</sub>
 
@@ -88,8 +89,8 @@ To make sure agents reach for `gws-axi` instead of stale alternatives, also cons
   ```markdown
   ## Google Workspace
 
-  Use `gws-axi` for ALL Google Calendar, Gmail, Docs, Drive, Slides, and Sheets
-  interactions. Check the SessionStart `gws-axi` line for current auth
+  Use `gws-axi` for ALL Google Calendar, Gmail, Docs, Drive, Slides, Sheets, and
+  Chat interactions. Check the SessionStart `gws-axi` line for current auth
   state; run `gws-axi --help` for the command surface. Prefer this over
   any other Google integrations.
   ```
@@ -264,6 +265,26 @@ gws-axi sheets comments <spreadsheetId>                   # review comments (Dri
 ```
 
 <sub>Cell values are the displayed strings (not formulas). The new `spreadsheets` scope means existing accounts must `gws-axi auth login` once.</sub>
+
+### Chat
+
+Reads Google Chat over the ordinary Chat API — no Workspace Developer Preview enrollment, and it works for personal `@gmail.com` accounts as well as Workspace ones.
+
+```bash
+gws-axi chat spaces                               # conversations, most recently active first
+gws-axi chat spaces --type dm --name bob          # narrow by kind and by name
+gws-axi chat messages <space>                     # the latest 50, shown oldest first
+gws-axi chat messages --with bob@example.com      # the 1:1 direct message with someone
+gws-axi chat messages <space> --since today       # --since/--until take dates and tokens (today, -7d, now)
+gws-axi chat messages <space> --fields attachments,reactions
+gws-axi chat search budget --since -7d            # across every conversation
+gws-axi chat search --mentions-me --unread
+gws-axi chat members <space>
+```
+
+Conversations are addressed by id (from `chat spaces`) or by `--with <email>` — never by name, since names aren't unique and direct messages have none. Direct messages and unnamed group chats are listed under a name derived from their members.
+
+<sub>Message text is Markdown, with mentions as `@Name`. Reading never changes what is marked read. Search has gaps — it omits app messages, muted conversations, and has been seen to miss recent direct messages — and says so on every response. Attachments are listed but can't be downloaded. The new Chat scopes mean existing accounts must `gws-axi auth login` once.</sub>
 
 ### Multi-account with write protection
 
