@@ -23,7 +23,7 @@ against real data before the dependent behavior ships, amending this spec first 
 | `spaces.messages.search` searches across conversations under user auth | **Observed.** `POST spaces/-/messages:search` with a JSON body; results are `results[].message` |
 | `markupSyntax: MARKUP_SYNTAX_MARKDOWN` returns `formattedText` as Markdown | **Observed** on list and search. Links arrive as `[text](url)`; a mention arrives as an empty `<chat-user data-user="users/{id}"></chat-user>` tag |
 | The People API resolves `users/{id}` to a name | **Observed to add nothing.** Of two members the Chat API had already named, the People API resolved one and returned an empty person for the other. Not used |
-| What a non-Workspace (consumer) account receives from the Chat API, and whether requesting Chat scopes changes its sign-in | Verify live |
+| A consumer (`@gmail.com`) account cannot use the Chat API | **Expected by issue #71 and by Google's guides; contradicted by observation.** See below |
 
 ### Observed against a Workspace account, 2026-09-28
 
@@ -49,6 +49,17 @@ Sampled: 180 conversations listed; 266 messages across 29 of them; 49 membership
 - **`findDirectMessage` by email works**, returns `404` when no such conversation exists, and
   `400 INVALID_ARGUMENT` when the address is not a user.
 - **Attachments are mostly Drive files**: 102 `DRIVE_FILE` to 8 `UPLOADED_CONTENT`.
+
+### Observed against a consumer account, 2026-09-29
+
+- **A consumer account signs in and uses Chat like any other.** One consent with the full scope
+  set completed, every requested scope was granted, and Gmail, Calendar, and Drive probed healthy
+  afterwards.
+- **Every read worked**: 204 conversations listed (161 direct messages, 38 group chats, 5
+  spaces), messages and members read, search returned results, read state was readable. Senders
+  and members carried names and emails, as for the Workspace account.
+- So requesting all scopes in one consent is sound, and no account type has been observed that
+  cannot use Chat.
 
 ## Addressing a conversation
 
@@ -231,24 +242,22 @@ than kept as a fallback: in the one direct comparison it knew less than Chat had
 | `SPACE_NOT_FOUND` | The conversation does not exist or the account is not in it | `chat spaces --name <text>` |
 | `DM_NOT_FOUND` | `--with <email>` names someone with no existing 1:1 conversation | Statement that no gws-axi command starts one |
 | `THREAD_NOT_FOUND` | `--thread` names a thread not in the conversation | `chat messages <space>` to list threads |
-| `CHAT_NOT_AVAILABLE` | The account's type cannot use the Chat API | Statement that Chat needs a Workspace account, plus the other authenticated accounts |
 | `SCOPE_MISSING` | The Chat scopes were not granted | `auth login --account <email> --no-wait` |
 | `API_NOT_ENABLED` | The Chat API is not enabled on the project | `auth setup` for an owned install; the distributor for a joined one |
 
-Chat-specific failures are classified **before** the generic Google error translation, so a
-Chat-unavailable or app-not-configured response is never reported as a scope problem with
-re-authentication advice that cannot fix it.
+Chat-specific failures are classified **before** the generic Google error translation, so an
+app-not-configured response is never reported as a scope problem with re-authentication advice
+that cannot fix it.
 
-## Service availability
+## Doctor
 
-Chat is the first service an authenticated account may be categorically unable to use.
+`doctor` probes Chat with a live conversation-list call per account, and reports a missing Chat
+scope as a failing check with the per-account re-auth command, like any other scope gap.
 
-- `doctor` probes Chat with a live conversation-list call per account.
-- An account that cannot use Chat is reported as **not available**. That is not a failing check:
-  it does not change `doctor`'s exit code, does not produce a re-authentication suggestion, and
-  suppresses the Chat additional-scope rows for that account.
-- An account that *can* use Chat but has not granted its scopes is a failing check with the
-  per-account re-auth command, like any other scope gap.
+There is no "not available" status. Issue #71 expected consumer accounts to need one; a consumer
+account was observed to work fully, so there is nothing to classify. If an account is ever found
+that cannot use Chat — a Workspace whose admin has turned Chat off is the likeliest — its failure
+is classified from what it actually returns, as a spec change, and not guessed at in advance.
 
 ## Principles
 

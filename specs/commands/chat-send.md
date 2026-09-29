@@ -104,7 +104,6 @@ input, so the caller sees what the markup became.
 | `THREAD_NOT_FOUND` | `--thread` does not exist | `chat messages <space>` |
 | `MESSAGE_TOO_LARGE` | Body exceeds 32,000 bytes | The actual size |
 | `ACCOUNT_REQUIRED` | 2+ accounts and no explicit account | One runnable line per account |
-| `CHAT_NOT_AVAILABLE` | Account type cannot use Chat | As in [chat-read.md § Errors](chat-read.md#errors) |
 
 ## Chat app configuration
 

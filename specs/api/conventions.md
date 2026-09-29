@@ -229,7 +229,6 @@ The two compose: the config dir bounds what is *reachable*, the pin bounds what 
 
 - A command works only if its service's representative scope (and any required `ADDITIONAL_SCOPES`) was granted at login. A new capability needing a scope not implied by an existing grant adds an `ADDITIONAL_SCOPES` entry and requires affected accounts to re-auth once (see [architecture.md](../architecture.md#scope-model-srcauthscopests)).
 - Insufficient-scope (403) is translated with a suggestion to re-run `auth login`.
-- A service the account's **type** cannot use is a different condition from a scope that was not granted, and is never reported as one. It has its own code (`CHAT_NOT_AVAILABLE`), its suggestions name the accounts that can use the service, and `doctor` reports it as not available rather than failing ([commands/chat-read.md § Service availability](../commands/chat-read.md#service-availability)).
 
 ## Reads vs writes
 

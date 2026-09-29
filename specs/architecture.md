@@ -22,7 +22,7 @@ Foundational, concrete structure and model decisions for `gws-axi`. These are fa
 
 - **`client.ts`** — per-service factory functions `calendarClient` / `gmailClient` / `docsClient` / `driveClient` / `slidesClient` / `sheetsClient` / `chatClient`, each `(email) => Promise<client>`, all built on `oauthClientForAccount(email)` which seeds a `google-auth-library` `OAuth2Client` with stored tokens (access + refresh + `expiry_date` + scope) for proactive/mid-request refresh. Also exports `translateGoogleError`.
 - **`tokens.ts`** — token lifecycle. `getValidAccessToken(email)` refreshes before expiry with a 5-minute safety buffer. Reads OAuth client creds from `credentials.json`; throws `CREDENTIALS_MISSING` if absent. Tokens written `0600`.
-- **`probe.ts`** — doctor's live per-service read probes via raw `fetch` + bearer token; classifies `ok | warn | fail`, plus **not available** for a service the account's type cannot use — which is not a failure, changes no exit code, and suggests no re-auth ([commands/chat-read.md § Service availability](commands/chat-read.md#service-availability)). Scope-presence checks (`hasScope`) key off the single representative scope per service.
+- **`probe.ts`** — doctor's live per-service read probes via raw `fetch` + bearer token; classifies `ok | warn | fail`. Scope-presence checks (`hasScope`) key off the single representative scope per service.
 - **`account.ts`** — `resolveAccount` (account resolution + write-protection; single source of truth) and `accountHeaderFields`.
 
 ## Auth model

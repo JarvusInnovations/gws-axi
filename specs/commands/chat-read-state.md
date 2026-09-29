@@ -62,7 +62,7 @@ still show unread thread replies in Chat and the caller must not conclude the co
 
 ## Errors
 
-`SPACE_NOT_FOUND`, `CHAT_NOT_AVAILABLE`, `SCOPE_MISSING`, `ACCOUNT_REQUIRED`, and
+`SPACE_NOT_FOUND`, `SCOPE_MISSING`, `ACCOUNT_REQUIRED`, and
 `VALIDATION_ERROR`, as specified in [chat-read.md § Errors](chat-read.md#errors). `mark-unread
 --from` naming a message not in the conversation is `MESSAGE_NOT_FOUND`.
 
