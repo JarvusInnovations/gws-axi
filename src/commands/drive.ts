@@ -1,4 +1,6 @@
 import { AxiError } from "axi-sdk-js";
+import { driveRenameCommand, RENAME_HELP } from "./drive/rename.js";
+import { driveShareCommand, driveUnshareCommand, SHARE_HELP, UNSHARE_HELP } from "./drive/share.js";
 import { resolveAccount, withAccountSource } from "../google/account.js";
 import { notImplemented, renderAlternatives, withInstead } from "./stub-signposts.js";
 import { docsDownloadCommand } from "./docs/download.js";
@@ -52,9 +54,6 @@ status: planned for v1 writes — not yet implemented
 const MOVE_HELP = `usage: gws-axi drive move <file-id> --parent <folder-id> [flags]
 status: planned for v1 writes — not yet implemented
 `;
-const RENAME_HELP = `usage: gws-axi drive rename <file-id> --name <new-name> [flags]
-status: planned for v1 writes — not yet implemented
-`;
 const DELETE_HELP = `usage: gws-axi drive delete <file-id> [flags]
 status: planned for v1 writes — not yet implemented
 `;
@@ -103,12 +102,12 @@ const SUBCOMMANDS: DriveSubcommand[] = [
       'gws-axi drive mkdir "<name>" --account <email> — creates a folder',
     ],
   },
-  // copy / move / delete have no shipped equivalent. `rename` deliberately
-  // gets none either: `drive upload --update --name` does rename, but only
-  // while replacing the file's content, so advertising it here would mislead.
+  // copy / move / delete have no shipped equivalent.
   { name: "copy", mutation: true, help: COPY_HELP },
   { name: "move", mutation: true, help: MOVE_HELP },
-  { name: "rename", mutation: true, help: RENAME_HELP },
+  { name: "rename", mutation: true, help: RENAME_HELP, handler: driveRenameCommand },
+  { name: "share", mutation: true, help: SHARE_HELP, handler: driveShareCommand },
+  { name: "unshare", mutation: true, help: UNSHARE_HELP, handler: driveUnshareCommand },
   { name: "delete", mutation: true, help: DELETE_HELP },
   {
     name: "mkdir",
@@ -151,8 +150,9 @@ writes[${writes.length}]:
 notes:
   Writes require --account <email> when 2+ accounts are authenticated.
   Reads use the default account when --account is not provided.
-  upload and mkdir are live; the remaining write subcommands are scaffolded
-  for the next slice and throw NOT_IMPLEMENTED after account resolution runs.
+  upload, mkdir, rename, share, and unshare are live; the remaining write
+  subcommands are scaffolded and throw NOT_IMPLEMENTED after account resolution.
+  share never makes anything public or domain-wide.
 ${renderAlternatives(SUBCOMMANDS)}subcommand help:
   gws-axi drive ls --help            for folder listing (incl. --recursive)
   gws-axi drive get --help           for full file metadata
@@ -161,6 +161,8 @@ ${renderAlternatives(SUBCOMMANDS)}subcommand help:
   gws-axi drive download --help      for fetching bytes (alias of docs download)
   gws-axi drive upload --help        for uploading a local file (incl. --convert)
   gws-axi drive mkdir --help         for creating a folder
+  gws-axi drive rename --help        for renaming a file or folder
+  gws-axi drive share --help         for giving named people access (unshare removes it)
 examples:
   gws-axi drive ls
   gws-axi drive ls <folder-id> --recursive
@@ -169,6 +171,7 @@ examples:
   gws-axi drive permissions <file-id>
   gws-axi drive upload ./report.pdf --account you@example.com
   gws-axi drive mkdir "Q2 Reports" --account you@example.com
+  gws-axi drive share <file-id> --with lead@school.org --role reader --account you@example.com
 `;
 
 export async function driveCommand(args: string[]): Promise<string> {
