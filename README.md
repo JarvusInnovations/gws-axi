@@ -13,7 +13,7 @@ Read coverage is complete across all seven services; write coverage is rolling o
 | **Calendar** | ✅ events · get · calendars · search · freebusy | ✅ create · update · delete · respond |
 | **Gmail** | ✅ search · read · labels · download | ✅ triage · draft · labels · filters &nbsp;·&nbsp; ✋ `send` out of scope |
 | **Docs** | ✅ read · find · comments · download · revisions · diff | 🚧 append · insert-text · delete-range |
-| **Drive** | ✅ ls · get · search · permissions · download · revisions · activity | 🟡 upload · mkdir &nbsp;·&nbsp; 🚧 create · copy · move · rename · delete |
+| **Drive** | ✅ ls · get · search · permissions · download · revisions · activity | 🟡 upload · mkdir · rename · share · unshare &nbsp;·&nbsp; 🚧 create · copy · move · delete |
 | **Slides** | ✅ get · page · summarize · comments | 🚧 create · update |
 | **Sheets** | ✅ read · comments | 🚧 update · append · clear · create · add-tab |
 | **Chat** | ✅ spaces · messages · search · members · download · wait · watch | ✅ send · react · unreact · mark-read · mark-unread |
@@ -226,6 +226,9 @@ gws-axi drive activity <itemId>                   # attributed change timeline (
                                                   # actors are named from your own directory; outside
                                                   # collaborators stay as people/<id>
 gws-axi drive download <fileId> --out ./file      # fetch bytes / export a native file
+gws-axi drive rename <id> --name "New name" --account you@example.com
+gws-axi drive share <id> --with lead@school.org --role reader --account you@example.com   # emails them by default
+gws-axi drive unshare <id> --with lead@school.org --account you@example.com
 ```
 
 **Writes:**
