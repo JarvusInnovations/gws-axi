@@ -33,6 +33,8 @@ a relaxation — see [Why Chat sends when Gmail does not](#why-chat-sends-when-g
 | `markupSyntax: MARKUP_SYNTAX_MARKDOWN` on create renders standard Markdown | **Observed**: a Markdown body was stored as Chat's own formatting — bold, italic, strike, code, a list, a quote, and a link with its own text |
 | A message may carry a client-assigned id (`client-…`), unique within its conversation, under user auth | **Observed**: accepted, returned as `clientAssignedMessageId`, and usable in place of the system id to fetch the message |
 | Creating a message whose client-assigned id already exists is refused, and creates nothing | **Observed**: refused with a conflict, for the same body and for a different one; the conversation still held one message |
+| A mention tag, by `data-email` or by `data-user`, becomes a real mention | **Observed 2026-09-29**: both stored a `USER_MENTION` annotation and rendered `@Name` |
+| A mention of an address that is not a Chat user is refused | **Contradicted by observation**: the message posted, with the mention replaced by the literal text `<chat-user>` and no annotation |
 | Message size limit is 32,000 bytes | Documented. Enforced before the call, so not exercised against Chat |
 | A reply to a thread that does not exist fails | **Observed**: refused, and nothing was posted |
 | Thread replies via `messageReplyOption` are supported only in named spaces | Documented. `--thread` in a direct message was **not tested** — it would mean posting in a real conversation with someone |
@@ -42,9 +44,26 @@ a relaxation — see [Why Chat sends when Gmail does not](#why-chat-sends-when-g
 - The body is **standard Markdown** and is sent with the Markdown markup syntax, so `**bold**`,
   `*italic*`, `~~strike~~`, inline code, fenced code, lists, block quotes, and `[text](url)` render
   as formatting. Chat's legacy markup (`*bold*`, `<url|text>`) is not the input format.
-- A user mention is written as Chat's mention tag, documented in `--help`. There is no
-  `@name` shorthand: a name is not an address
-  ([chat-read.md § Principles](chat-read.md#principles)).
+- **Mentions: `@` followed by an email address.** `@bob@example.com` becomes a real mention of
+  that person — Chat notifies them and renders it `@Bob Tran`. Chat's own tag,
+  `<chat-user data-email="…"></chat-user>` or `data-user="users/{id}"`, is also accepted as
+  written.
+  - The shorthand applies only where an address follows `@` directly, at the start of the text
+    or after a space or punctuation. A bare `bob@example.com` stays plain text, as does anything
+    inside inline code or a fenced code block, and `\@bob@example.com` is a literal.
+  - There is no `@name` form: a name is not an address
+    ([chat-read.md § Principles](chat-read.md#principles)).
+- **Every mention must name a member of the conversation**, checked against its member list
+  **before** sending. A mention of anyone else — a typo, someone outside the conversation — is
+  refused with `MENTION_NOT_MEMBER`, naming each address, and nothing is posted. This holds for
+  the tag form as well as the shorthand.
+
+  > **Why:** Chat does not refuse a mention it cannot resolve. It posts the message with the
+  > mention replaced by the literal text `<chat-user>` — observed with an address that is not a
+  > Chat user — so a typo reaches everyone as junk, and the intended person is never notified.
+  > What mentioning a real person outside the conversation does (invite, notify, or the same
+  > junk) was not tested, and a send is the wrong place to find out.
+- `@all` is not a mention form here; the text is sent as written.
 - The body is validated against the 32,000-byte limit **before** any API call
   (`MESSAGE_TOO_LARGE`, stating the actual size).
 - There is no literal-text mode in this version: characters that are Markdown syntax are
@@ -114,6 +133,7 @@ input, so the caller sees what the markup became.
 | `DM_NOT_FOUND` | `--with <email>` has no existing conversation | Statement that no gws-axi command starts one |
 | `THREAD_NOT_FOUND` | `--thread` does not exist | `chat messages <space>` |
 | `MESSAGE_TOO_LARGE` | Body exceeds 32,000 bytes | The actual size |
+| `MENTION_NOT_MEMBER` | A mention names someone who isn't a member of the conversation | The addresses refused, and `chat members <space>` |
 | `SEND_UNCONFIRMED` | The send got no answer, or a server error — it may or may not have posted | The complete retry command, carrying the same request id |
 | `ACCOUNT_REQUIRED` | 2+ accounts and no explicit account | One runnable line per account |
 
