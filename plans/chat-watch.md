@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: done
 depends: [chat-read]
 specs:
   - specs/commands/chat-watch.md
@@ -43,22 +43,22 @@ deletions, or reactions.
 
 ## Validation
 
-- [ ] `bun run build`, `lint`, `format:check`, `test` pass.
-- [ ] Unit: exactly-once delivery across consecutive checks and across a resume from a cursor,
+- [x] `bun run build`, `lint`, `format:check`, `test` pass.
+- [x] Unit: exactly-once delivery across consecutive checks and across a resume from a cursor,
       including a message that lands between the snapshot and the message read.
-- [ ] Unit: filters; own messages skipped by default; duration and cursor parsing.
-- [ ] Live, "Bot testing": `chat watch <space> --include-mine` under a monitor prints the
+- [x] Unit: filters; own messages skipped by default; duration and cursor parsing.
+- [x] Live, "Bot testing": `chat watch <space> --include-mine` under a monitor prints the
       first line, then one line per test message posted, each within one interval.
-- [ ] Live: `chat wait <space> --include-mine` in the background returns the message posted
+- [x] Live: `chat wait <space> --include-mine` in the background returns the message posted
       while it waits, with a cursor; `chat wait --after <that cursor>` does not return it again.
-- [ ] Live: `chat wait --timeout 20s` on a quiet conversation returns `messages: none within 20s`,
+- [x] Live: `chat wait --timeout 20s` on a quiet conversation returns `messages: none within 20s`,
       exit 0, with a resume command.
-- [ ] Live: `chat watch --all --include-mine` picks up a message in "Bot testing".
-- [ ] Live: a thread reply is caught by `--thread`, and a top-level message is not.
-- [ ] Live: killing a `watch` with SIGTERM prints its resume line and exits 0.
-- [ ] Live: without `--include-mine`, the account's own test message is not reported.
-- [ ] A conversation the account isn't in fails before waiting, exit 1.
-- [ ] Nothing is posted anywhere but "Bot testing".
+- [x] Live: `chat watch --all --include-mine` picks up a message in "Bot testing".
+- [x] Live: a thread reply is caught by `--thread`, and a top-level message is not.
+- [x] Live: killing a `watch` with SIGTERM prints its resume line and exits 0.
+- [x] Live: without `--include-mine`, the account's own test message is not reported.
+- [x] A conversation the account isn't in fails before waiting, exit 1.
+- [x] Nothing is posted anywhere but "Bot testing".
 
 ## Risks / unknowns
 
@@ -68,4 +68,24 @@ deletions, or reactions.
 
 ## Notes
 
+- **Probed before the spec was written**: `lastActiveTime` moves to the new message's
+  `createTime` at +0s for top-level messages and thread replies alike, and
+  `createTime > "<exact time>"` is exact to the microsecond. The delivery design rests on both.
+- **Verified live under Claude Code's Monitor tool**: `chat watch` printed its first line, then
+  tests 11–14 once each and in order, and ended itself on its 3-minute timeout with the resume
+  line — before the Monitor's own deadline.
+- **Verified live with background Bash**: a `--thread` wait ignored a top-level message and
+  returned the reply; resuming from its cursor returned the next message and not that one; a
+  default wait (no `--include-mine`) timed out past the account's own message; `--all` caught a
+  post; SIGTERM ended both commands with their resume output, exit 0; an unknown conversation
+  failed at once, exit 1.
+- **Test messages, all in "Bot testing"**: tests 9 and 10 (the `lastActiveTime` probe, posted
+  through the raw API), and tests 11–14.
+- **Two concurrency surprises in testing were correct behavior**: a resume check that ran while
+  another test posted returned that new post, not the old one.
+
 ## Follow-ups
+
+- Tracked as: push delivery through the Workspace Events API and Pub/Sub, if polling latency
+  ever matters.
+- Tracked as: watching for edits, deletions, and reactions.
