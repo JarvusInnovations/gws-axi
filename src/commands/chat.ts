@@ -1,5 +1,5 @@
 import { AxiError } from "axi-sdk-js";
-import { resolveAccount, withAccountSource } from "../google/account.js";
+import { accountSourceLabel, resolveAccount, withAccountSource } from "../google/account.js";
 import { chatDownloadCommand, DOWNLOAD_HELP } from "./chat/download.js";
 import { chatMembersCommand, MEMBERS_HELP } from "./chat/members.js";
 import { chatMessagesCommand, MESSAGES_HELP } from "./chat/messages.js";
@@ -12,6 +12,7 @@ import {
 import { chatSearchCommand, SEARCH_HELP } from "./chat/search.js";
 import { chatReactCommand, chatUnreactCommand, REACT_HELP, UNREACT_HELP } from "./chat/react.js";
 import { chatSendCommand, SEND_HELP } from "./chat/send.js";
+import { chatWaitCommand, chatWatchCommand, WAIT_HELP, WATCH_HELP } from "./chat/watch.js";
 import { chatSpacesCommand, SPACES_HELP } from "./chat/spaces.js";
 import { notImplemented, renderAlternatives, withInstead } from "./stub-signposts.js";
 
@@ -19,7 +20,12 @@ interface ChatSubcommand {
   name: string;
   mutation: boolean;
   help: string;
-  handler?: (account: string, args: string[]) => Promise<string>;
+  handler?: (account: string, args: string[], source?: string) => Promise<string>;
+  /**
+   * Writes its own header as a streamed first line, so the dispatcher passes
+   * the account source in rather than splicing it into the final output.
+   */
+  streams?: boolean;
   instead?: string[];
 }
 
@@ -29,6 +35,8 @@ const SUBCOMMANDS: ChatSubcommand[] = [
   { name: "search", mutation: false, help: SEARCH_HELP, handler: chatSearchCommand },
   { name: "members", mutation: false, help: MEMBERS_HELP, handler: chatMembersCommand },
   { name: "download", mutation: false, help: DOWNLOAD_HELP, handler: chatDownloadCommand },
+  { name: "wait", mutation: false, help: WAIT_HELP, handler: chatWaitCommand },
+  { name: "watch", mutation: false, help: WATCH_HELP, handler: chatWatchCommand, streams: true },
   { name: "send", mutation: true, help: SEND_HELP, handler: chatSendCommand },
   { name: "react", mutation: true, help: REACT_HELP, handler: chatReactCommand },
   { name: "unreact", mutation: true, help: UNREACT_HELP, handler: chatUnreactCommand },
@@ -85,12 +93,15 @@ ${renderAlternatives(SUBCOMMANDS)}subcommand help:
   gws-axi chat search --help       search messages across conversations
   gws-axi chat members --help      who is in a conversation
   gws-axi chat download --help     save a message's attachments
+  gws-axi chat wait --help         block until a new message arrives
+  gws-axi chat watch --help        stream new messages, one line each
   gws-axi chat send --help         post a message
   gws-axi chat react --help        add an emoji reaction (unreact removes it)
   gws-axi chat mark-read --help    mark conversations read
   gws-axi chat mark-unread --help  mark a conversation unread from a point
 examples:
   gws-axi chat spaces
+  gws-axi chat send AAAAxyz --text "@bob@example.com the feed is back up" --account you@example.com
   gws-axi chat messages AAAAxyz --since today
   gws-axi chat messages --with bob@example.com
   gws-axi chat search budget --since -7d
@@ -125,5 +136,8 @@ export async function chatCommand(args: string[]): Promise<string> {
     throw notImplemented("chat", sub, resolution.account, def.instead);
   }
 
+  if (def.streams) {
+    return def.handler(resolution.account, remaining, accountSourceLabel(resolution));
+  }
   return withAccountSource(resolution, await def.handler(resolution.account, remaining));
 }
