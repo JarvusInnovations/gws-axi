@@ -282,7 +282,7 @@ gws-axi chat search --mentions-me --unread
 gws-axi chat members <space>
 gws-axi chat download <space> <messageId>        # save a message's attachments
 
-gws-axi chat send <space> --text "Feed is back up" --account you@example.com   # SENDS — no draft step
+gws-axi chat send <space> --text "Feed is back up — @bob@example.com can you confirm?" --account you@example.com   # SENDS; @email mentions
 gws-axi chat send <space> --thread <id> --body-file reply.md --account you@example.com
 gws-axi chat send <space> - --request-id deploy-4821 --account you@example.com  # stdin; safe to retry
 gws-axi chat react <space> <messageId> --emoji 👍 --account you@example.com  # unreact takes it back
@@ -294,7 +294,7 @@ Conversations are addressed by id (from `chat spaces`) or by `--with <email>` �
 
 <sub>Message text is Markdown, with mentions as `@Name`. Reading never changes what is marked read. Search has gaps — it omits app messages, muted conversations, and has been seen to miss recent direct messages — and says so on every response. Uploaded attachments save with `chat download`; Drive-file ones point at `docs download`. The new Chat scopes mean existing accounts must `gws-axi auth login` once.</sub>
 
-<sub>`chat send` posts immediately to **one** conversation and can't be undone from gws-axi. The body is Markdown. Pass `--request-id` to make a send safe to retry — a second send with the same id posts nothing. Sending needs a Chat app configured on your Google Cloud project (Chat API → Configuration); its name appears beside each message. Marking read is conversation-level only: Google's API can't mark a thread read.</sub>
+<sub>`chat send` posts immediately to **one** conversation and can't be undone from gws-axi. The body is Markdown; mention someone with `@` + their email (`@bob@example.com`) — they must be in the conversation, or nothing is sent. Pass `--request-id` to make a send safe to retry — a second send with the same id posts nothing. Sending needs a Chat app configured on your Google Cloud project (Chat API → Configuration); its name appears beside each message. Marking read is conversation-level only: Google's API can't mark a thread read.</sub>
 
 ### Multi-account with write protection
 

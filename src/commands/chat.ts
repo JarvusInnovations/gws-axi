@@ -91,6 +91,7 @@ ${renderAlternatives(SUBCOMMANDS)}subcommand help:
   gws-axi chat mark-unread --help  mark a conversation unread from a point
 examples:
   gws-axi chat spaces
+  gws-axi chat send AAAAxyz --text "@bob@example.com the feed is back up" --account you@example.com
   gws-axi chat messages AAAAxyz --since today
   gws-axi chat messages --with bob@example.com
   gws-axi chat search budget --since -7d
