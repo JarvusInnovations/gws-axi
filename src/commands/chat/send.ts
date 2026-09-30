@@ -8,6 +8,7 @@ import { joinBlocks, renderHelp, renderObject } from "../../output/index.js";
 import { resolveSpaceTarget, type SpaceTarget } from "./address.js";
 import { parseArgs } from "./flags.js";
 import { IdentityLedger, type ChatUser } from "./identity.js";
+import { checkMentions, expandMentions } from "./mentions.js";
 import { bareId, chatError, localTime, nameSpaces, resolveSpace } from "./shared.js";
 import { mentionedUsers, renderMessageText } from "./text.js";
 
@@ -30,7 +31,7 @@ flags[6]:
   --account <email>    REQUIRED when 2+ accounts are authenticated
                        (or set GWS_AXI_ACCOUNT)
 examples:
-  gws-axi chat send AAAAxyz --text "Feed is back up" --account you@example.com
+  gws-axi chat send AAAAxyz --text "Feed is back up — @bob@example.com can you confirm?" --account you@example.com
   gws-axi chat send AAAAxyz --thread t8Q… --body-file ./reply.md --account you@example.com
   echo "deploy finished" | gws-axi chat send AAAAxyz - --request-id deploy-4821 --account you@example.com
 output:
@@ -42,7 +43,10 @@ notes:
   The body is Markdown: **bold**, *italic*, ~~strike~~, \`code\`, fenced code,
   lists, > quotes and [text](url) all render as formatting. The characters
   * _ ~ \` # > [ ] are therefore interpreted, not literal.
-  Mention someone with <chat-user data-email="bob@example.com"></chat-user>.
+  Mention someone with @ + their email: @bob@example.com. They're notified,
+  and it shows as @Bob Tran. Everyone mentioned must be a member of the
+  conversation — otherwise nothing is sent (MENTION_NOT_MEMBER). A bare
+  address, one in \`code\`, or \\@bob@example.com stays plain text.
   Re-running without --request-id sends the message AGAIN.
   Members see the message as sent by the account, with the name of the Chat
   app configured on the Google Cloud project shown beside it.
@@ -292,7 +296,8 @@ async function renderSent(
 export async function chatSendCommand(account: string, args: string[]): Promise<string> {
   // Everything that can be refused without touching Chat is refused first.
   const flags = parseSendFlags(args);
-  const text = readBody(flags.body);
+  const mentions = expandMentions(readBody(flags.body));
+  const text = mentions.body;
 
   const api = await chatClient(account);
   const space = await resolveSpace(api, account, flags.target);
@@ -305,6 +310,15 @@ export async function chatSendCommand(account: string, args: string[]): Promise<
       "VALIDATION_ERROR",
       [`Drop --thread to post to the conversation: \`gws-axi chat send ${spaceId} --text "…"\``],
     );
+  }
+
+  // Chat posts an unresolvable mention as the literal text <chat-user>, so a
+  // mention of anyone outside the conversation is refused before sending.
+  try {
+    await checkMentions(api, spaceName, spaceId, mentions);
+  } catch (err) {
+    if (err instanceof AxiError) throw err;
+    throw chatError(err, { account, operation: "chat.spaces.members.list", space: spaceId });
   }
 
   // The request id rides as the message's client-assigned id. Chat refuses a
