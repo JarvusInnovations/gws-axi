@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: done
 depends: []
 specs:
   - specs/commands/drive-rename.md
@@ -34,16 +34,16 @@ expiring access, `move` / `copy` / `delete`.
 
 ## Validation
 
-- [ ] `bun run build`, `lint`, `format:check`, `test` pass.
-- [ ] Live, on a scratch folder in the owner's Drive, shared only with the owner's own second
+- [x] `bun run build`, `lint`, `format:check`, `test` pass.
+- [x] Live, on a scratch folder in the owner's Drive, shared only with the owner's own second
       account: `share` reader → `shared`; again → `already_shared`; `--role writer` →
       `role_changed`; back to reader → `role_changed` (a downgrade that `create` would ignore);
       `unshare` → `unshared`; again → `not_shared`.
-- [ ] `unshare` on a child folder reports `inherited` and removes nothing.
-- [ ] `--with anyone` and `--with example.com` are refused before any call.
-- [ ] `rename` → `renamed`; the same name again → `unchanged`.
-- [ ] Without `--account` (2+ accounts) all three return `ACCOUNT_REQUIRED`.
-- [ ] No one outside the owner's own accounts is shared with during testing.
+- [x] `unshare` on a child folder reports `inherited` and removes nothing.
+- [x] `--with anyone` and `--with example.com` are refused before any call.
+- [x] `rename` → `renamed`; the same name again → `unchanged`.
+- [x] Without `--account` (2+ accounts) all three return `ACCOUNT_REQUIRED`.
+- [x] No one outside the owner's own accounts is shared with during testing.
 
 ## Risks / unknowns
 
@@ -54,5 +54,17 @@ expiring access, `move` / `copy` / `delete`.
 
 - Probing made the empty scratch folder public ("anyone with the link") for the instant between
   creating and deleting that permission, to confirm it is one call. Nothing was in it.
+- **A spec claim was wrong and caught before code**: the first draft said folders can't take a
+  commenter role. A probe granted it; the spec was corrected in its own commit.
+- **Verified live** on a scratch folder in the owner's Drive, shared only with the owner's other
+  account: every row of both decision tables, including a downgrade that `permissions.create`
+  would have ignored, the inherited case on a child folder, and one run with the notification
+  on — which arrived in the owner's inbox. The folder ended with only its owner.
+- **Inherited roles lag.** The child still listed writer moments after the parent went to
+  reader. Recorded in the spec.
+- The scratch folder "gws-axi share test (safe to delete)" and its "child" remain in the owner's
+  Drive; gws-axi has no delete yet.
 
 ## Follow-ups
+
+- Tracked as: expiring access, and ownership transfer.
