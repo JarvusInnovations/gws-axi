@@ -22,6 +22,7 @@ share can reach people outside the organization. The design follows from that.
 | An `anyone` permission is a single call | **Observed** (created and removed at once on an empty scratch folder). The reason `share` refuses it |
 | Access inherited from a parent folder cannot be removed on the child | **Observed**: `403 cannotDeletePermission` |
 | Deleting a permission that no longer exists is `404` | Observed |
+| A folder accepts a `commenter` role | **Observed** |
 | The existing `auth/drive` scope covers all of it | Observed |
 
 ## `drive share`
@@ -35,9 +36,8 @@ gws-axi drive share <file-id> --with <email>[,<email>…] --role <reader|comment
   email address. **`anyone`, a bare domain, or anything that isn't an address is refused** with
   `PUBLIC_SHARING_REFUSED`, which says gws-axi does not make files public or domain-wide and
   that the Drive UI can. There is no flag to override it.
-- `--role` — required. `reader`, `commenter`, or `writer`. Ownership transfer is not offered.
-  Drive doesn't give folders a commenter role; `--role commenter` on a folder is refused before
-  any call.
+- `--role` — required. `reader`, `commenter`, or `writer`, on files and folders alike.
+  Ownership transfer is not offered.
 - `--group` — the addresses are Google Groups rather than people.
 - `--no-notify` — don't email the people shared with. **Default: notify**, because being told you
   now have access is safer than silently having it. Drive refuses `--no-notify` for an address
@@ -91,7 +91,7 @@ help[2]:
 
 | Code | When |
 | --- | --- |
-| `VALIDATION_ERROR` | Missing `--with` or `--role`; an unknown role; `--message` with `--no-notify`; commenter on a folder |
+| `VALIDATION_ERROR` | Missing `--with` or `--role`; an unknown role; `--message` with `--no-notify` |
 | `PUBLIC_SHARING_REFUSED` | `--with` names `anyone`, a domain, or anything that isn't an address |
 | `FILE_NOT_FOUND` | Unknown file, or no access to it |
 | `FORBIDDEN` | The account may not change sharing on this file |

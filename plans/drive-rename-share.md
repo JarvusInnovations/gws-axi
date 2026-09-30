@@ -26,7 +26,7 @@ expiring access, `move` / `copy` / `delete`.
 1. `src/commands/drive/rename.ts`: read the current name; same → `unchanged`; else
    `files.update` with `name` only.
 2. `src/commands/drive/share.ts`: address parsing and the public-sharing refusal; role
-   validation (commenter refused on folders); per-address: list permissions, then create,
+   validation; per-address: list permissions, then create,
    update, or no-op by the table in the spec; `unshare` by the same lookup, with inherited and
    owner cases reported rather than attempted.
 3. Dispatcher: `rename` gets its handler; `share` and `unshare` are new, all `mutation: true`.
