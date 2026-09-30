@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: done
 depends: [chat-write]
 specs:
   - specs/commands/chat-send.md
@@ -32,13 +32,13 @@ examples, and the README.
 
 ## Validation
 
-- [ ] `bun run build`, `lint`, `format:check`, `test` pass.
-- [ ] Live in "Bot testing": `@chris@jarv.us` in a body stores a `USER_MENTION` and reads back
+- [x] `bun run build`, `lint`, `format:check`, `test` pass.
+- [x] Live in "Bot testing": `@chris@jarv.us` in a body stores a `USER_MENTION` and reads back
       as `@Chris Alfano`.
-- [ ] A mention of a nonexistent address is refused with `MENTION_NOT_MEMBER`, and nothing is
+- [x] A mention of a nonexistent address is refused with `MENTION_NOT_MEMBER`, and nothing is
       posted.
-- [ ] A bare address and an address in inline code stay plain text.
-- [ ] The first `chat send --help` example, a `chat --help` example, and the README use it.
+- [x] A bare address and an address in inline code stay plain text.
+- [x] The first `chat send --help` example, a `chat --help` example, and the README use it.
 
 ## Risks / unknowns
 
@@ -47,4 +47,19 @@ examples, and the README.
 
 ## Notes
 
+- **Test messages in "Bot testing"** (only member: the account), which gws-axi cannot delete:
+  - test 5 and test 6 — tag mentions by address and by id, verifying tags before this plan;
+  - test 7 — a tag naming a nonexistent address, sent *before* the member check existed. It
+    posted with the literal text `<chat-user>` in place of the mention. That observation is why
+    the check exists;
+  - test 8 — the shorthand, with a plain address and one in inline code beside it. One mention
+    stored; the other two stayed text.
+  Two sends refused by the new check posted nothing; the conversation's message count was
+  verified before and after.
+- **Early, prominent examples**: the first `chat send --help` example, the second
+  `chat --help` example, and the first send line in the README all use `@bob@example.com`.
+
 ## Follow-ups
+
+- Tracked as: what mentioning a real person outside the conversation does. Refused here rather
+  than tested, since finding out means notifying or inviting someone.
