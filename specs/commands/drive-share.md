@@ -23,6 +23,7 @@ share can reach people outside the organization. The design follows from that.
 | Access inherited from a parent folder cannot be removed on the child | **Observed**: `403 cannotDeletePermission` |
 | Deleting a permission that no longer exists is `404` | Observed |
 | A folder accepts a `commenter` role | **Observed** |
+| An inherited role on a child can lag a change on its parent | **Observed**: moments after the parent went writer → reader, the child still listed writer. `unshare` reports the role the child lists |
 | The existing `auth/drive` scope covers all of it | Observed |
 
 ## `drive share`
