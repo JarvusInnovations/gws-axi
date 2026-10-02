@@ -3,9 +3,16 @@ import type { calendar_v3 } from "googleapis";
 import { calendarClient, translateGoogleError } from "../../google/client.js";
 import { joinBlocks, renderObject } from "../../output/index.js";
 import { formatEventTime, parseDateishFlag } from "./dateish.js";
+import {
+  TRANSPARENCY,
+  availabilityOf,
+  rejectUnknownFlag,
+  setAvailability,
+  type Availability,
+} from "./availability.js";
 
 export const CREATE_HELP = `usage: gws-axi calendar create --summary <text> --start <iso> [flags]
-flags[13]:
+flags[15]:
   --summary <text>       REQUIRED — event title
   --start <iso>          REQUIRED — event start (ISO datetime or YYYY-MM-DD for all-day)
   --end <iso>            End time (default: start + 1h for timed, start + 1d for all-day)
@@ -16,12 +23,15 @@ flags[13]:
   --attendees <emails>   Comma-separated emails (no spaces). Invites sent per --send-updates
   --timezone <tz>        IANA TZ (e.g. America/New_York) for timed events (default: calendar's tz)
   --recurrence <rrule>   RFC 5545 RRULE (e.g. "RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR")
+  --free                 Show as free: the event doesn't block your availability
+  --busy                 Show as busy (Google's default for a new event)
   --send-updates <mode>  none | all | externalOnly (default: none — agent-safe)
   --calendar <id>        Calendar to write to (default: primary)
   --account <email>      REQUIRED when 2+ accounts are authenticated (or set GWS_AXI_ACCOUNT)
 examples:
   gws-axi calendar create --summary "Team sync" --start 2026-04-22T14:00 --duration 30m
   gws-axi calendar create --summary "Holiday" --start 2026-05-26 --all-day
+  gws-axi calendar create --summary "Pickup window" --start 2026-04-22T15:00 --duration 3h --free
   gws-axi calendar create --summary "1:1" --start 2026-04-22T10:00 --end 2026-04-22T10:30 --attendees alice@x.com,bob@x.com --send-updates all
 notes:
   --send-updates defaults to "none" so agent-created events don't spam
@@ -31,6 +41,23 @@ output:
   Returns the newly-created event's key fields (id, summary, start, end,
   organizer, attendees count, htmlLink) plus an \`action: created\` line.
 `;
+
+const CREATE_FLAGS = [
+  "--all-day",
+  "--attendees",
+  "--busy",
+  "--calendar",
+  "--description",
+  "--duration",
+  "--end",
+  "--free",
+  "--location",
+  "--recurrence",
+  "--send-updates",
+  "--start",
+  "--summary",
+  "--timezone",
+];
 
 interface ParsedFlags {
   summary: string | undefined;
@@ -43,6 +70,7 @@ interface ParsedFlags {
   attendees: string[];
   timezone: string | undefined;
   recurrence: string | undefined;
+  availability: Availability | undefined;
   sendUpdates: "all" | "externalOnly" | "none";
   calendar: string;
 }
@@ -61,13 +89,14 @@ function parseDurationMs(value: string): number {
   return (hours * 60 + minutes) * 60 * 1000;
 }
 
-function parseFlags(args: string[]): ParsedFlags {
+export function parseFlags(args: string[]): ParsedFlags {
   const flags: ParsedFlags = {
     summary: undefined,
     start: undefined,
     end: undefined,
     duration: undefined,
     allDay: false,
+    availability: undefined,
     description: undefined,
     location: undefined,
     attendees: [],
@@ -137,6 +166,12 @@ function parseFlags(args: string[]): ParsedFlags {
         flags.calendar = next;
         i++;
         break;
+      case "--free":
+      case "--busy":
+        flags.availability = setAvailability(flags.availability, arg);
+        break;
+      default:
+        rejectUnknownFlag(arg, "create", CREATE_FLAGS);
     }
   }
   return flags;
@@ -220,6 +255,7 @@ function buildEventBody(flags: ParsedFlags): calendar_v3.Schema$Event {
       : { dateTime: endIso };
   }
 
+  if (flags.availability) body.transparency = TRANSPARENCY[flags.availability];
   return body;
 }
 
@@ -261,6 +297,7 @@ export async function calendarCreateCommand(account: string, args: string[]): Pr
     status: created.status ?? "",
     organizer: created.organizer?.email ?? "",
     attendee_count: attendees.length,
+    availability: availabilityOf(created),
     send_updates: flags.sendUpdates,
   };
   if (created.location) event.location = created.location;

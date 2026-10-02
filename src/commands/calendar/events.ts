@@ -1,3 +1,4 @@
+import { availabilityOf } from "./availability.js";
 import { AxiError } from "axi-sdk-js";
 import type { calendar_v3 } from "googleapis";
 import { calendarClient, translateGoogleError } from "../../google/client.js";
@@ -25,7 +26,7 @@ flags[10]:
   --limit <n>          Max events to return (default: 100, max: 2500)
   --query <text>       Full-text search across summary/description/location/attendees
   --single-events      Expand recurring events into individual instances (default: true)
-  --fields <list>      Extra columns: status, organizer, location, attendees, description, htmlLink, hangoutLink, join_url, conference, conference_source
+  --fields <list>      Extra columns: availability, status, organizer, location, attendees, description, htmlLink, hangoutLink, join_url, conference, conference_source
   --account <email>    Account override when 2+ are configured
 examples:
   gws-axi calendar events --today
@@ -212,6 +213,12 @@ function schemaWithExtras(extras: string[]): FieldDef[] {
         break;
       case "organizer":
         base.push(pluck("organizer", "email", "organizer"));
+        break;
+      case "availability":
+        base.push({
+          name: "availability",
+          extract: (item) => availabilityOf(item as calendar_v3.Schema$Event),
+        });
         break;
       case "location":
         base.push(truncated("location", 40));
