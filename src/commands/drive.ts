@@ -12,6 +12,14 @@ import { driveRevisionsCommand, REVISIONS_HELP } from "./drive/revisions.js";
 import { driveSearchCommand, SEARCH_HELP } from "./drive/search.js";
 import { driveUploadCommand, UPLOAD_HELP } from "./drive/upload.js";
 import { driveMkdirCommand, MKDIR_HELP } from "./drive/mkdir.js";
+import {
+  MOVE_HELP,
+  TRASH_HELP,
+  UNTRASH_HELP,
+  driveMoveCommand,
+  driveTrashCommand,
+  driveUntrashCommand,
+} from "./drive/move.js";
 
 interface DriveSubcommand {
   name: string;
@@ -51,11 +59,8 @@ status: planned for v1 writes — not yet implemented
 const COPY_HELP = `usage: gws-axi drive copy <file-id> --parent <folder-id> [--name <name>] [flags]
 status: planned for v1 writes — not yet implemented
 `;
-const MOVE_HELP = `usage: gws-axi drive move <file-id> --parent <folder-id> [flags]
-status: planned for v1 writes — not yet implemented
-`;
 const DELETE_HELP = `usage: gws-axi drive delete <file-id> [flags]
-status: planned for v1 writes — not yet implemented
+status: not planned — gws-axi trashes rather than destroys
 `;
 
 const SUBCOMMANDS: DriveSubcommand[] = [
@@ -102,13 +107,22 @@ const SUBCOMMANDS: DriveSubcommand[] = [
       'gws-axi drive mkdir "<name>" --account <email> — creates a folder',
     ],
   },
-  // copy / move / delete have no shipped equivalent.
+  // copy has no shipped equivalent.
   { name: "copy", mutation: true, help: COPY_HELP },
-  { name: "move", mutation: true, help: MOVE_HELP },
+  { name: "move", mutation: true, help: MOVE_HELP, handler: driveMoveCommand },
+  { name: "trash", mutation: true, help: TRASH_HELP, handler: driveTrashCommand },
+  { name: "untrash", mutation: true, help: UNTRASH_HELP, handler: driveUntrashCommand },
   { name: "rename", mutation: true, help: RENAME_HELP, handler: driveRenameCommand },
   { name: "share", mutation: true, help: SHARE_HELP, handler: driveShareCommand },
   { name: "unshare", mutation: true, help: UNSHARE_HELP, handler: driveUnshareCommand },
-  { name: "delete", mutation: true, help: DELETE_HELP },
+  {
+    name: "delete",
+    mutation: true,
+    help: DELETE_HELP,
+    instead: [
+      "gws-axi drive trash <file-id> --account <email> — moves it to the trash, reversible with `drive untrash` for 30 days (there is no permanent delete)",
+    ],
+  },
   {
     name: "mkdir",
     mutation: true,
@@ -150,8 +164,9 @@ writes[${writes.length}]:
 notes:
   Writes require --account <email> when 2+ accounts are authenticated.
   Reads use the default account when --account is not provided.
-  upload, mkdir, rename, share, and unshare are live; the remaining write
-  subcommands are scaffolded and throw NOT_IMPLEMENTED after account resolution.
+  upload, mkdir, rename, move, trash, untrash, share, and unshare are live; create
+  and copy are scaffolded and throw NOT_IMPLEMENTED after account resolution;
+  delete is not offered — trash instead.
   share never makes anything public or domain-wide.
 ${renderAlternatives(SUBCOMMANDS)}subcommand help:
   gws-axi drive ls --help            for folder listing (incl. --recursive)
@@ -162,6 +177,7 @@ ${renderAlternatives(SUBCOMMANDS)}subcommand help:
   gws-axi drive upload --help        for uploading a local file (incl. --convert)
   gws-axi drive mkdir --help         for creating a folder
   gws-axi drive rename --help        for renaming a file or folder
+  gws-axi drive move --help          for filing into another folder (trash/untrash too)
   gws-axi drive share --help         for giving named people access (unshare removes it)
 examples:
   gws-axi drive ls
@@ -171,6 +187,7 @@ examples:
   gws-axi drive permissions <file-id>
   gws-axi drive upload ./report.pdf --account you@example.com
   gws-axi drive mkdir "Q2 Reports" --account you@example.com
+  gws-axi drive move <file-id> --to <folder-id> --account you@example.com
   gws-axi drive share <file-id> --with lead@school.org --role reader --account you@example.com
 `;
 
