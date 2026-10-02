@@ -4,6 +4,7 @@ depends: []
 specs:
   - specs/commands/calendar-availability.md
 issues: [62]
+pr: 95
 ---
 
 # Plan: calendar free/busy
