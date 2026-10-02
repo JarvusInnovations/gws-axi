@@ -28,6 +28,22 @@ import {
 import { setupHtmlPath, writeSetupHtml } from "./setup-html.js";
 import type { StepOutcome } from "./steps.js";
 
+/**
+ * Instructions for a browser that can't reach this machine's 127.0.0.1 — led
+ * with when this is an SSH session, where the default path can't work.
+ */
+export function remoteSignInInstructions(port: number): string[] {
+  const lines = [
+    `If the user approves in a browser that can't reach this machine (a phone, or a laptop while gws-axi runs remotely), the final page fails to load at http://127.0.0.1:${port}/callback?… — that's expected. Have them copy that page's FULL address and run \`gws-axi auth login --callback-url '<url>'\` to finish.`,
+  ];
+  if (process.env.SSH_CONNECTION) {
+    lines.unshift(
+      `This machine is reached over SSH, so its 127.0.0.1 isn't the user's. Either forward the port first — \`ssh -L ${port}:127.0.0.1:${port} <this host>\` — and open http://127.0.0.1:${port}/ on their machine while \`--wait\` runs, or send the user the \`auth_url\` above to open in any browser signed into the account, and use the pasted-URL path below.`,
+    );
+  }
+  return lines;
+}
+
 function collapseHome(path: string): string {
   const home = process.env.HOME ?? "";
   return home && path.startsWith(home) ? `~${path.slice(home.length)}` : path;
@@ -201,18 +217,83 @@ class OAuthCallbackError extends Error {
   }
 }
 
+/** How long a prepared flow stays valid. Phone sign-ins routinely outlast 10 minutes. */
+export const PENDING_WINDOW_MS = 30 * 60_000;
+/** How long `--wait` listens — under the 10-minute ceiling of an agent's foreground shell. */
+export const CALLBACK_WAIT_MS = 9 * 60_000;
+
+/** `--wait` heard nothing in time. The prepared flow is still valid. */
+class CallbackTimeoutError extends Error {}
+
+/** A pasted callback URL that isn't this flow's redirect. Nothing was exchanged. */
+export class CallbackUrlError extends Error {}
+
+/**
+ * Validate a callback URL the user carried back from a browser that couldn't
+ * reach this machine, and pull out the code. Pure, for tests.
+ */
+export function parseCallbackUrl(
+  raw: string,
+  pending: Pick<PendingAuth, "port" | "state">,
+): { code: string; scope?: string } {
+  let u: URL;
+  try {
+    u = new URL(raw.trim());
+  } catch {
+    throw new CallbackUrlError(
+      "That isn't a URL — paste the whole address from the browser's address bar",
+    );
+  }
+  const hostOk = u.hostname === "127.0.0.1" || u.hostname === "localhost";
+  if (!hostOk || u.pathname !== "/callback") {
+    throw new CallbackUrlError(
+      `Expected http://127.0.0.1:${pending.port}/callback?…, got ${u.origin}${u.pathname}`,
+    );
+  }
+  if (Number(u.port) !== pending.port) {
+    throw new CallbackUrlError(
+      `That URL is for port ${u.port || "(none)"}, but the prepared sign-in is on port ${pending.port} — it belongs to an older sign-in`,
+    );
+  }
+  const errorParam = u.searchParams.get("error");
+  if (errorParam) throw new OAuthCallbackError(errorParam);
+  if (u.searchParams.get("state") !== pending.state) {
+    throw new CallbackUrlError(
+      "The URL's state doesn't match the prepared sign-in — it belongs to an older attempt",
+    );
+  }
+  const code = u.searchParams.get("code");
+  if (!code) throw new CallbackUrlError("The URL has no code parameter");
+  return { code, scope: u.searchParams.get("scope") ?? undefined };
+}
+
 async function waitForCallback(
   server: Server,
   expected: CallbackExpectation,
 ): Promise<CallbackHandle> {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
-      reject(new Error("Timed out waiting for OAuth callback after 5 minutes"));
-    }, 5 * 60_000);
+      reject(new CallbackTimeoutError("No sign-in arrived within 9 minutes"));
+    }, CALLBACK_WAIT_MS);
 
     server.on("request", (req: IncomingMessage, res: ServerResponse) => {
       if (!req.url) return;
       const u = new URL(req.url, "http://127.0.0.1");
+      // The setup page, served from the same origin as the callback
+      // (specs/commands/auth-login.md § The served setup page).
+      if (req.method === "GET" && (u.pathname === "/" || u.pathname === "/setup.html")) {
+        try {
+          const html = readFileSync(setupHtmlPath(), "utf-8");
+          res.statusCode = 200;
+          res.setHeader("content-type", "text/html; charset=utf-8");
+          res.setHeader("cache-control", "no-store");
+          res.end(html);
+        } catch {
+          res.statusCode = 404;
+          res.end("setup page not found — re-run `gws-axi auth login --no-wait`");
+        }
+        return;
+      }
       if (u.pathname !== "/callback") {
         res.statusCode = 404;
         res.end("Not found");
@@ -363,6 +444,8 @@ export interface PrepareOptions {
 export interface PrepareOutcome {
   pending: PendingAuth;
   htmlPath: string;
+  /** The setup page as served while `--wait` listens. */
+  pageUrl: string;
   credentialsPresent: boolean;
 }
 
@@ -404,7 +487,7 @@ export async function preparePendingAuth(
   });
 
   const now = new Date();
-  const expiresAt = new Date(now.getTime() + 10 * 60_000); // 10 min — plenty for user + agent coordination
+  const expiresAt = new Date(now.getTime() + PENDING_WINDOW_MS);
   const pending: PendingAuth = {
     version: 1,
     url: authUrl,
@@ -434,6 +517,7 @@ export async function preparePendingAuth(
   return {
     pending,
     htmlPath: setupHtmlPath(),
+    pageUrl: `http://127.0.0.1:${port}/`,
     credentialsPresent: true,
   };
 }
@@ -444,7 +528,15 @@ export async function preparePendingAuth(
  * userinfo to identify the account, writes tokens + profile, updates
  * default account if first, regenerates setup.html without the banner.
  */
-export async function awaitPendingAuth(): Promise<StepOutcome> {
+export const awaitPendingAuth = (): Promise<StepOutcome> => completePending({ kind: "wait" });
+
+/** Finish the prepared flow from a callback URL the user pasted back. */
+export const completePendingAuthFromUrl = (url: string): Promise<StepOutcome> =>
+  completePending({ kind: "url", url });
+
+async function completePending(
+  mode: { kind: "wait" } | { kind: "url"; url: string },
+): Promise<StepOutcome> {
   const step = "tokens_obtained" as const;
 
   const pending = readPendingAuth();
@@ -470,7 +562,9 @@ export async function awaitPendingAuth(): Promise<StepOutcome> {
       title: "Pending authentication expired",
       error: "The prepared OAuth flow expired — prepare a new one",
       code: "PENDING_EXPIRED",
-      instructions: ["Re-run `gws-axi auth login --account <email>` to prepare a fresh flow"],
+      instructions: [
+        "Re-run `gws-axi auth login --account <email> --no-wait` to prepare a fresh flow",
+      ],
     };
   }
 
@@ -486,12 +580,14 @@ export async function awaitPendingAuth(): Promise<StepOutcome> {
     };
   }
 
-  const server = createServer();
+  const server = mode.kind === "wait" ? createServer() : undefined;
   try {
-    await new Promise<void>((resolve, reject) => {
-      server.once("error", reject);
-      server.listen(pending.port, "127.0.0.1", () => resolve());
-    });
+    if (server) {
+      await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(pending.port, "127.0.0.1", () => resolve());
+      });
+    }
   } catch (err) {
     return {
       step,
@@ -516,12 +612,16 @@ export async function awaitPendingAuth(): Promise<StepOutcome> {
   const joined = wasJoinedSetup();
 
   let handle: CallbackHandle | undefined;
+  // A timeout or a wrong pasted URL leaves the flow usable for another try.
+  let keepPending = false;
   try {
-    handle = await waitForCallback(server, {
-      state: pending.state,
-      account: pending.expected_account,
-      joined,
-    });
+    handle = server
+      ? await waitForCallback(server, {
+          state: pending.state,
+          account: pending.expected_account,
+          joined,
+        })
+      : { ...parseCallbackUrl((mode as { url: string }).url, pending), finalize: () => {} };
     const tokens = await exchangeCode({
       clientId: creds.client_id,
       clientSecret: creds.client_secret,
@@ -621,6 +721,27 @@ export async function awaitPendingAuth(): Promise<StepOutcome> {
     // a later step blew up), surface the error there too.
     handle?.finalize({ ok: false, error: message });
 
+    if (err instanceof CallbackTimeoutError || err instanceof CallbackUrlError) {
+      keepPending = true;
+      const timeout = err instanceof CallbackTimeoutError;
+      return {
+        step,
+        advanced: false,
+        title: timeout ? "No sign-in arrived yet" : "That isn't this sign-in's callback URL",
+        error: message,
+        code: timeout ? "CALLBACK_TIMEOUT" : "CALLBACK_URL_MISMATCH",
+        instructions: [
+          ...(timeout
+            ? [
+                "The prepared sign-in is still valid. Run `gws-axi auth login --wait` again to keep listening",
+              ]
+            : []),
+          `If the user approved in a browser that couldn't load http://127.0.0.1:${pending.port}/callback (a phone, another machine), have them copy that page's full address and run \`gws-axi auth login --callback-url '<url>'\``,
+          `The prepared sign-in expires at ${pending.expires_at}; after that, prepare a new one with \`gws-axi auth login --account <email> --no-wait\``,
+        ],
+      };
+    }
+
     // access_denied is the common "user bailed at the unverified-app warning"
     // case (and, less often, a test-user/user-cap gap). It gets its own code +
     // join-aware guidance that never sends a joined teammate to the Console —
@@ -655,13 +776,15 @@ export async function awaitPendingAuth(): Promise<StepOutcome> {
     // stops *new* connections — the lingering keep-alive keeps Node's
     // event loop alive indefinitely. closeAllConnections() forcibly
     // terminates them so the process exits immediately.
-    server.closeAllConnections();
-    server.close();
-    clearPendingAuth();
-    try {
-      writeSetupHtml();
-    } catch {
-      // non-fatal
+    server?.closeAllConnections();
+    server?.close();
+    if (!keepPending) {
+      clearPendingAuth();
+      try {
+        writeSetupHtml();
+      } catch {
+        // non-fatal
+      }
     }
   }
 }
@@ -695,7 +818,8 @@ export async function advanceTokensObtained(options: PrepareOptions = {}): Promi
     instructions: [
       `The gws-axi setup page (${collapseHome(prepared.htmlPath)}) must be open in the browser PROFILE/SESSION where the user is signed into ${expected ? `\`${expected}\`` : "the target Google account"}. If initial setup ran in a different browser profile, tell the user to open ${collapseHome(prepared.htmlPath)} in the correct profile first.`,
       `In that setup page, the user waits for the yellow "Authenticate with Google" button (up to 10s auto-refresh), clicks it${expected ? `, signs in as \`${expected}\`` : ""}, approves scopes, and sees a success page.`,
-      "After RELAYING these instructions to the user, IMMEDIATELY run `gws-axi auth login --wait` in a new bash turn — do NOT wait for the user to confirm they're ready. The callback server must be listening BEFORE the user clicks. If you delay, the click hits an unreachable localhost URL. The wait is harmless: it just listens for up to 5 min while the user takes their time.",
+      "After RELAYING these instructions to the user, IMMEDIATELY run `gws-axi auth login --wait` in a new bash turn — do NOT wait for the user to confirm they're ready. The callback server must be listening BEFORE the user clicks. The wait listens for up to 9 minutes and can be re-run; the prepared sign-in lasts 30.",
+      ...remoteSignInInstructions(prepared.pending.port),
     ],
   };
 }

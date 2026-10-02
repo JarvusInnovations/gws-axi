@@ -33,7 +33,13 @@ import {
   type SetupFlags,
   type StepOutcome,
 } from "../auth/steps.js";
-import { advanceTokensObtained, awaitPendingAuth, preparePendingAuth } from "../auth/loopback.js";
+import {
+  advanceTokensObtained,
+  awaitPendingAuth,
+  completePendingAuthFromUrl,
+  preparePendingAuth,
+  remoteSignInInstructions,
+} from "../auth/loopback.js";
 import { setupHtmlPath, writeSetupHtml } from "../auth/setup-html.js";
 import {
   predictUnverifiedAppWarning,
@@ -70,7 +76,7 @@ join flags[1]:
                               already published to Production (opt-in — join
                               can't detect it; sets the local published flag so
                               login/publish reporting reflects permanent tokens)
-login flags[3]:
+login flags[4]:
   --account <email>           Authenticate or re-auth a specific account. Omit
                               only when 0 or 1 accounts exist (1 → re-auths it),
                               or when GWS_AXI_ACCOUNT pins one (→ re-auths the
@@ -84,6 +90,12 @@ login flags[3]:
                               with a follow-up \`auth login --wait\`.
   --wait                      Block on the callback for a previously
                               prepared session (paired with --no-wait).
+                              Listens up to 9 min and serves the setup page
+                              at http://127.0.0.1:<port>/ meanwhile.
+  --callback-url <url>        Finish the prepared sign-in from the address the
+                              browser landed on, when it couldn't reach this
+                              machine (phone, remote host): the failed
+                              http://127.0.0.1:<port>/callback?code=… page.
 publish flags[1]:
   --confirm                   Mark the consent screen as published in
                               setup state (after clicking "PUBLISH APP"
@@ -99,6 +111,7 @@ examples:
   gws-axi auth login --account chris@personal.com           # prepares + blocks (default)
   gws-axi auth login --account chris@personal.com --no-wait # agent prepare-only
   gws-axi auth login --wait                                 # agent block-only
+  gws-axi auth login --callback-url 'http://127.0.0.1:53121/callback?state=…&code=…'  # finish from a phone
   gws-axi auth publish                                      # show publish walkthrough
   gws-axi auth publish --confirm                            # mark consent screen as published
   gws-axi auth accounts
@@ -120,7 +133,7 @@ notes:
 flow:
   Humans: \`gws-axi auth login --account <email>\` is one command that
   prepares, prints a brief instruction, and waits for the OAuth
-  callback (up to 5 min).
+  callback (up to 9 min; the prepared sign-in lasts 30).
   Agents: pass --no-wait so the prepare returns immediately, relay the
   instructions to the user, then call \`gws-axi auth login --wait\` in
   a SEPARATE bash turn — the wait command binds the callback server
@@ -134,6 +147,7 @@ interface ParsedArgs {
   account?: string;
   wait: boolean;
   noWait: boolean;
+  callbackUrl?: string;
   confirm: boolean;
   published: boolean;
   positional: string[];
@@ -147,6 +161,7 @@ function parseArgs(args: string[]): ParsedArgs {
   let account: string | undefined;
   let wait = false;
   let noWait = false;
+  let callbackUrl: string | undefined;
   let confirm = false;
   let published = false;
 
@@ -192,6 +207,10 @@ function parseArgs(args: string[]): ParsedArgs {
       case "--no-wait":
         noWait = true;
         break;
+      case "--callback-url":
+        callbackUrl = next;
+        i++;
+        break;
       case "--confirm":
         confirm = true;
         break;
@@ -211,6 +230,7 @@ function parseArgs(args: string[]): ParsedArgs {
     account,
     wait,
     noWait,
+    callbackUrl,
     confirm,
     published,
     positional,
@@ -353,7 +373,7 @@ async function runSetup(args: string[]): Promise<Record<string, unknown>> {
     // and then must invoke `auth login --wait` to block on the callback in a
     // SEPARATE bash turn — so the user sees the instructions before the wait.
     help.push(
-      "Relay the instructions above to the user, then run `gws-axi auth login --wait` in a NEW bash turn to block on the callback (up to 5 minutes).",
+      "Relay the instructions above to the user, then run `gws-axi auth login --wait` in a NEW bash turn to block on the callback (up to 9 minutes; re-runnable until the prepared sign-in expires at 30).",
     );
   } else {
     help.push(`Complete step ${nextOutcome.step} and re-run \`gws-axi auth setup\``);
@@ -496,7 +516,17 @@ async function runJoin(args: string[]): Promise<Record<string, unknown>> {
 }
 
 async function runLogin(args: string[]): Promise<Record<string, unknown>> {
-  const { account, wait, noWait } = parseArgs(args);
+  const { account, wait, noWait, callbackUrl } = parseArgs(args);
+
+  // --callback-url: finish the prepared flow from a pasted redirect URL.
+  if (callbackUrl !== undefined) {
+    if (!callbackUrl) {
+      throw new AxiError("--callback-url needs the URL", "VALIDATION_ERROR", [
+        "Paste the full address of the page the browser landed on, in single quotes",
+      ]);
+    }
+    return await blockOnCallback(callbackUrl);
+  }
 
   // --wait: block on a previously-prepared session (agent flow second step).
   if (wait) {
@@ -515,11 +545,13 @@ async function runLogin(args: string[]): Promise<Record<string, unknown>> {
   // then block on the callback. The Record we return becomes the final
   // success/failure output on stdout once the callback fires.
   const acct = (prepared.account as string | undefined) ?? "the target Google account";
-  const htmlPath = prepared.setup_html as string;
+  const page = prepared.page as string;
   process.stderr.write(
-    `Authenticating ${acct}. Open ${htmlPath} in the browser ` +
+    `Authenticating ${acct}. Open ${page} in the browser ` +
       `signed into that account and click "Authenticate with Google" ` +
-      `(waiting up to 5 min)…\n`,
+      `(waiting up to 9 min)…\n` +
+      `If you approve on another device, copy the failed page's address and run ` +
+      `\`gws-axi auth login --callback-url '<url>'\`.\n`,
   );
   return await blockOnCallback();
 }
@@ -614,7 +646,7 @@ async function prepareLogin(account: string | undefined): Promise<Record<string,
   const setupState = readSetupState();
   const warningLevel = predictUnverifiedAppWarning(normalizedAccount, !!setupState.published);
   const instructions: string[] = [
-    `The gws-axi setup page (${htmlPath}) must be open in the browser PROFILE/SESSION where the user is signed into ${normalizedAccount ? `\`${normalizedAccount}\`` : "the target Google account"}. This may be a DIFFERENT browser profile than the one used for initial setup (e.g., personal Chrome profile vs work). If the setup page is open in the wrong profile, tell the user to open ${htmlPath} in the correct profile.`,
+    `The gws-axi setup page — served at ${prepared.pageUrl} while \`auth login --wait\` runs, and also on disk at ${htmlPath} — must be open in the browser PROFILE/SESSION where the user is signed into ${normalizedAccount ? `\`${normalizedAccount}\`` : "the target Google account"}. This may be a DIFFERENT browser profile than the one used for initial setup (e.g., personal Chrome profile vs work). If the setup page is open in the wrong profile, tell the user to open ${htmlPath} in the correct profile.`,
     `In that setup page tab, the user waits for the yellow "Authenticate with Google" button to appear (up to 10s auto-refresh), clicks it, signs in${normalizedAccount ? ` as \`${normalizedAccount}\`` : ""}, approves the requested scopes, and sees the success page.`,
   ];
   if (warningLevel === "always") {
@@ -627,24 +659,32 @@ async function prepareLogin(account: string | undefined): Promise<Record<string,
     );
   }
   instructions.push(
-    "After RELAYING these instructions to the user, IMMEDIATELY run `gws-axi auth login --wait` in a new bash turn — do NOT wait for the user to confirm they're ready. The wait command binds the callback server; it must be listening BEFORE the user clicks. If you delay, the user's click hits an unreachable localhost URL. The wait is harmless: it just listens for up to 5 minutes while the user takes their time.",
+    "After RELAYING these instructions to the user, IMMEDIATELY run `gws-axi auth login --wait` in a new bash turn — do NOT wait for the user to confirm they're ready. The wait command binds the callback server (and serves the page); it must be listening BEFORE the user clicks. It listens for up to 9 minutes and can be re-run; the prepared sign-in lasts 30.",
+    ...remoteSignInInstructions(prepared.pending.port),
   );
 
   return {
     status: "prepared",
     ...(normalizedAccount ? { account: normalizedAccount } : {}),
+    page: prepared.pageUrl,
+    // Remote sessions can't open the served page, so the agent hands the user
+    // Google's sign-in link directly (specs/commands/auth-login.md).
+    ...(process.env.SSH_CONNECTION ? { auth_url: prepared.pending.url } : {}),
     setup_html: htmlPath,
     expires_at: prepared.pending.expires_at,
     instructions,
     help: [
       "Relay instructions, then IMMEDIATELY run `gws-axi auth login --wait` in the next bash turn — no user-confirmation step between them.",
-      "The pending flow expires in 10 minutes — if you don't --wait by then, re-run this prepare step",
+      "The prepared sign-in expires in 30 minutes; `--wait` (or `--callback-url '<url>'`) works until then",
     ],
   };
 }
 
-async function blockOnCallback(): Promise<Record<string, unknown>> {
-  const outcome = await awaitPendingAuth();
+async function blockOnCallback(callbackUrl?: string): Promise<Record<string, unknown>> {
+  const outcome =
+    callbackUrl === undefined
+      ? await awaitPendingAuth()
+      : await completePendingAuthFromUrl(callbackUrl);
   if (!outcome.advanced) {
     throw new AxiError(
       outcome.error ?? "OAuth flow failed",
