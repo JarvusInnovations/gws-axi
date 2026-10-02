@@ -4,6 +4,7 @@ depends: []
 specs:
   - specs/commands/drive-move-trash.md
 issues: [70]
+pr: 89
 ---
 
 # Plan: drive move, trash, untrash
