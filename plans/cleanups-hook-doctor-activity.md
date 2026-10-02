@@ -4,6 +4,7 @@ depends: []
 specs:
   - specs/architecture.md
   - specs/commands/drive-activity.md
+pr: 96
 ---
 
 # Plan: three logged cleanups
