@@ -65,10 +65,33 @@ export function formatEventTime(
 ): string {
   if (!value) return "";
   if (value.dateTime) {
-    return value.timeZone ? `${value.dateTime} (${value.timeZone})` : value.dateTime;
+    const local = toLocalOffsetISO(value.dateTime);
+    // A declared zone other than ours is disclosed, never applied
+    // (specs/api/conventions.md#displayed-times).
+    return value.timeZone && value.timeZone !== localZone()
+      ? `${local} (set in ${value.timeZone})`
+      : local;
   }
   if (value.date) return `${value.date} (all-day)`;
   return "";
+}
+
+/**
+ * An event start/end for a list column: a timed value in local-offset ISO,
+ * an all-day value as its date. Google returns times in the calendar's (or the
+ * event's) zone, which can differ per account; printing that through reads an
+ * hour off wherever the zones disagree.
+ */
+export function localEventTime(
+  value: { dateTime?: string | null; date?: string | null } | null | undefined,
+): string {
+  if (value?.dateTime) return toLocalOffsetISO(value.dateTime);
+  return value?.date ?? "";
+}
+
+/** The IANA zone this process renders times in. */
+export function localZone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
 }
 
 /**

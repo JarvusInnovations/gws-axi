@@ -11,7 +11,7 @@ import {
   type FieldDef,
 } from "../../output/index.js";
 import { extractConference, resolveJoinUrl } from "./conference.js";
-import { resolveWindow, toLocalOffsetISO } from "./dateish.js";
+import { localEventTime, localZone, resolveWindow, toLocalOffsetISO } from "./dateish.js";
 import { resolveWeekStart } from "./week-start.js";
 
 export const EVENTS_HELP = `usage: gws-axi calendar events [flags]
@@ -156,15 +156,13 @@ function baseSchema(): FieldDef[] {
     {
       name: "start",
       extract: (item) => {
-        const s = item.start as { dateTime?: string; date?: string } | undefined;
-        return s?.dateTime ?? s?.date ?? "";
+        return localEventTime(item.start as { dateTime?: string; date?: string } | undefined);
       },
     },
     {
       name: "end",
       extract: (item) => {
-        const e = item.end as { dateTime?: string; date?: string } | undefined;
-        return e?.dateTime ?? e?.date ?? "";
+        return localEventTime(item.end as { dateTime?: string; date?: string } | undefined);
       },
     },
     // my_response: responseStatus of the attendee flagged `self: true`.
@@ -362,6 +360,12 @@ export async function calendarEventsCommand(account: string, args: string[]): Pr
   }
   if (data.nextPageToken) {
     summary.more_available = true;
+  }
+
+  // The calendar's own zone, when it isn't ours: times are shown in local
+  // offset either way, but a mismatched calendar setting is worth knowing.
+  if (data.timeZone && data.timeZone !== localZone()) {
+    summary.times = `shown in local time (${localZone()}); this calendar's zone is ${data.timeZone}`;
   }
 
   const suggestions: string[] = [];

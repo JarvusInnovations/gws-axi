@@ -8,7 +8,7 @@ import {
   truncated,
   type FieldDef,
 } from "../../output/index.js";
-import { resolveWindow, toLocalOffsetISO } from "./dateish.js";
+import { localEventTime, resolveWindow, toLocalOffsetISO } from "./dateish.js";
 import { resolveWeekStart } from "./week-start.js";
 
 export const SEARCH_HELP = `usage: gws-axi calendar search --query <text> [flags]
@@ -146,15 +146,13 @@ function baseSchema(): FieldDef[] {
     {
       name: "start",
       extract: (item) => {
-        const s = item.start as { dateTime?: string; date?: string } | undefined;
-        return s?.dateTime ?? s?.date ?? "";
+        return localEventTime(item.start as { dateTime?: string; date?: string } | undefined);
       },
     },
     {
       name: "end",
       extract: (item) => {
-        const e = item.end as { dateTime?: string; date?: string } | undefined;
-        return e?.dateTime ?? e?.date ?? "";
+        return localEventTime(item.end as { dateTime?: string; date?: string } | undefined);
       },
     },
     {
@@ -364,17 +362,14 @@ export async function calendarSearchCommand(account: string, args: string[]): Pr
     merged = flat.map((item) => ({ ...item, _seen_on: [item._calendar as string] }));
   }
 
-  merged.sort((a, b) => {
-    const startA =
-      (a.start as { dateTime?: string; date?: string } | undefined)?.dateTime ??
-      (a.start as { dateTime?: string; date?: string } | undefined)?.date ??
-      "";
-    const startB =
-      (b.start as { dateTime?: string; date?: string } | undefined)?.dateTime ??
-      (b.start as { dateTime?: string; date?: string } | undefined)?.date ??
-      "";
-    return String(startA).localeCompare(String(startB));
-  });
+  // By instant: calendars return times in their own zones, so the strings
+  // carry different offsets and do not sort as text.
+  const startMs = (item: Record<string, unknown>): number => {
+    const st = item.start as { dateTime?: string; date?: string } | undefined;
+    const ms = Date.parse(st?.dateTime ?? (st?.date ? `${st.date}T00:00` : ""));
+    return Number.isNaN(ms) ? 0 : ms;
+  };
+  merged.sort((a, b) => startMs(a) - startMs(b));
 
   const erroredCalendars = results.filter((r) => r.error);
   const succeededCount = results.length - erroredCalendars.length;

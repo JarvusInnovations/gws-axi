@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { AxiError } from "axi-sdk-js";
-import { parseDateishFlag, parseRangeFlag, resolveWindow, startOfWeek } from "./dateish.js";
+import {
+  formatEventTime,
+  localEventTime,
+  localZone,
+  parseDateishFlag,
+  parseRangeFlag,
+  resolveWindow,
+  startOfWeek,
+  toLocalOffsetISO,
+} from "./dateish.js";
 
 // These tests assume the repo's configured local zone (America/New_York) for the
 // DST cases; every other case is zone-agnostic. `now` is always injected, so no
@@ -287,5 +296,34 @@ describe("resolveWindow — suggestion targeting", () => {
     } catch (err) {
       expect((err as AxiError).suggestions.join(" ")).not.toMatch(/--today/);
     }
+  });
+});
+
+describe("displayed event times (conventions § Displayed times)", () => {
+  // Zone-agnostic: the same instant from two calendars in different zones
+  // must print identically, in this process's local offset.
+  const chicago = "2026-08-17T13:00:00-05:00";
+  const utc = "2026-08-17T18:00:00Z";
+
+  it("renders a timed value in local-offset ISO whatever zone Google used", () => {
+    expect(localEventTime({ dateTime: chicago })).toBe(localEventTime({ dateTime: utc }));
+    expect(localEventTime({ dateTime: chicago })).toBe(toLocalOffsetISO(utc));
+    expect(Date.parse(localEventTime({ dateTime: chicago }))).toBe(Date.parse(utc));
+  });
+
+  it("passes an all-day date through", () => {
+    expect(localEventTime({ date: "2026-08-17" })).toBe("2026-08-17");
+    expect(localEventTime(undefined)).toBe("");
+  });
+
+  it("discloses a declared zone only when it differs from local", () => {
+    expect(formatEventTime({ dateTime: chicago, timeZone: localZone() })).toBe(
+      toLocalOffsetISO(utc),
+    );
+    const other = localZone() === "Asia/Tokyo" ? "America/Chicago" : "Asia/Tokyo";
+    expect(formatEventTime({ dateTime: chicago, timeZone: other })).toBe(
+      `${toLocalOffsetISO(utc)} (set in ${other})`,
+    );
+    expect(formatEventTime({ date: "2026-08-17" })).toBe("2026-08-17 (all-day)");
   });
 });
