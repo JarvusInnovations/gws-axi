@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: done
 depends: []
 specs:
   - specs/commands/auth-login.md
@@ -29,10 +29,13 @@ instructions.
 
 ## Validation
 
-- [ ] Unit: callback-URL validation (path, host, port, state, error param).
-- [ ] Live: re-auth one account with `--callback-url` (the user approves; the agent pastes).
-- [ ] Live: `--wait` serves the page at `http://127.0.0.1:<port>/` (curl it while waiting).
-- [ ] build, lint, format:check, test.
+- [x] Unit: callback-URL validation (path, host, port, state, error param).
+- [x] Live: re-authed themightychris@gmail.com with `--callback-url` — the owner approved on a
+      phone from the `auth_url` the SSH-aware prepare printed and pasted the failed page's
+      address; 18 scopes granted, `directory.readonly` now present.
+- [x] Live: `--wait` served the page at `http://127.0.0.1:<port>/` (title, Authenticate button,
+      account); an unknown path 404s; stopping the wait left the prepared flow intact.
+- [x] build, lint, format:check, test.
 
 ## Risks / unknowns
 
@@ -40,8 +43,13 @@ instructions.
 
 ## Notes
 
-_Populated at closeout._
+- Found while validating: a phone can't open the served page either, so the remote path
+  needed Google's sign-in link itself. The prepare output adds `auth_url` only when
+  `SSH_CONNECTION` is set; elsewhere the page remains the surface, as before.
+- Google's redirect carried `iss` and `authuser` parameters beyond `state`/`code`/`scope`;
+  validation ignores extras.
 
 ## Follow-ups
 
-_Populated at closeout._
+- Tracked as: admin@save-the-academy.org and savetheacademy1812@gmail.com still need re-auth
+  for the Chat scopes and `directory.readonly` (the remaining doctor failures).
