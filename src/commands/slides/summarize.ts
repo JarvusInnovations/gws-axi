@@ -80,7 +80,7 @@ function renderDeckAsMarkdown(
   lines.push("---", "");
   for (const s of slides) {
     const heading = s.title ? `${s.index + 1}. ${s.title}` : `Slide ${s.index + 1}`;
-    lines.push(`## ${heading}`, "");
+    lines.push(`## ${heading}${s.skipped ? " _(skipped in presentation mode)_" : ""}`, "");
     if (s.body.length > 0) {
       lines.push(s.body.join("\n\n"), "");
     }
@@ -143,6 +143,9 @@ export async function slidesSummarizeCommand(account: string, args: string[]): P
         id: presentation.presentationId ?? flags.presentationId,
         title: presentation.title ?? "",
         slide_count: slides.length,
+        ...(slides.some((s) => s.skipped)
+          ? { skipped_count: slides.filter((s) => s.skipped).length }
+          : {}),
         ...(totalLinks > 0 ? { links_resolved: totalLinks } : {}),
       },
     }),

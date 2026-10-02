@@ -8,7 +8,7 @@ The Slides read commands turn a Google Slides presentation into agent-consumable
 
 ## Invocation
 
-- `gws-axi slides get <presentationId> [flags]` — deck metadata + `slides[N]{index,page_id,title}`.
+- `gws-axi slides get <presentationId> [flags]` — deck metadata + `slides[N]{index,page_id,title,skipped}`.
 - `gws-axi slides page <presentationId> <pageId> [flags]` — one slide's content.
 - `gws-axi slides summarize <presentationId> [flags]` — whole deck as markdown (`--full`, `--out <path>`).
 - `gws-axi slides comments <presentationId> [--include-resolved] [flags]`.
@@ -40,9 +40,10 @@ Hyperlinks on text runs are resolved and rendered **inline as markdown**, not dr
 
 ## Display Rules
 
-- **`get`** — `presentation{id,title,slide_count,revision_id}` + `slides[N]{index,page_id,title}`. Light metadata only.
-- **`page`** — `slide{index,page_id,title,image_count?,table_count?,has_video?,links_resolved?}` + `body` + (when present) `speaker_notes`. Body joins every shape's/table's text in document order (with links inline).
-- **`summarize`** — `presentation{id,title,slide_count,links_resolved?}` then a `content` markdown block (`## N. Title` per slide, body + `**Speaker notes:**` + `_visuals: …_`) or a `saved` path with `--out`. Truncated at 8000 chars unless `--full`/`--out` (same pattern as `docs read`).
+- **`get`** — `presentation{id,title,slide_count,skipped_count?,revision_id}` + `slides[N]{index,page_id,title,skipped}`. Light metadata only.
+- **Skipped slides** (#64) — a slide hidden in presentation mode (`slideProperties.isSkipped`) is still a slide in the deck, so every read keeps it and marks it: `skipped` is `✓` in `get`'s table, `skipped: true` in `page`'s `slide{}`, and `summarize` appends `_(skipped in presentation mode)_` to its heading. `get` and `summarize` add `skipped_count` to `presentation{}` when any slide is skipped. Writing the flag is [slides-skip.md](slides-skip.md).
+- **`page`** — `slide{index,page_id,title,image_count?,table_count?,has_video?,links_resolved?,skipped?}` + `body` + (when present) `speaker_notes`. Body joins every shape's/table's text in document order (with links inline).
+- **`summarize`** — `presentation{id,title,slide_count,skipped_count?,links_resolved?}` then a `content` markdown block (`## N. Title` per slide, body + `**Speaker notes:**` + `_visuals: …_`) or a `saved` path with `--out`. Truncated at 8000 chars unless `--full`/`--out` (same pattern as `docs read`).
 - **`comments`** — `comments[N]{id,author,created,resolved,quoted_content,body,reply_count}` + `replies[N]{…}`. Empty → canonical scalar. Header labels the resource `presentation`.
 
 ## Errors
