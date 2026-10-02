@@ -4,6 +4,7 @@ depends: []
 specs:
   - specs/api/conventions.md
 issues: [63]
+pr: 88
 ---
 
 # Plan: calendar times in local-offset ISO
