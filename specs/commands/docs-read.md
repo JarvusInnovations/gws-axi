@@ -44,13 +44,13 @@ A `revisions[N]{id,modified,author}` list of the **most recent 5** revisions, ne
 
 ### Content
 
-When a tab is rendered: either an inline `content` block of GitHub-flavored markdown (truncated to 8000 chars unless `--full`, with a `content_truncated`/`content_total_chars` marker and a save suggestion when capped), or a `saved` path + `content_total_chars` when `--out` is set. Images render as `[image]` placeholders.
+When a tab is rendered: either an inline `content` block of GitHub-flavored markdown (truncated to 8000 chars unless `--full`, with a `content_truncated`/`content_total_chars` marker and a save suggestion when capped), or a `saved` path + `content_total_chars` when `--out` is set. Images render as `[image: <alt text>]` when the image has a description (or title) in Docs, else `[image]`.
 
 The rendering is the inverse of the [markdown-to-doc](../behaviors/markdown-to-doc.md) mapping, so Markdown written by `docs write` reads back as the same Markdown. In particular:
 
 - A paragraph whose every run is in a monospace font is a code block; consecutive ones form one fenced block.
 - A non-list paragraph indented at both start and end is a blockquote (`> `).
-- A list whose preset is the checkbox renders `- [ ] item` (the API exposes no checked state).
+- A list whose preset is the checkbox renders `- [ ] item` (the API exposes no checked state — #84). Because that is silently wrong about checked items, a read with any checklist items carries a `help[]` line naming the count and saying their state is only visible in the Doc.
 - A vertical tab (`\u000b`) inside a paragraph is a hard line break (two trailing spaces, newline).
 - An empty paragraph with a bottom border is `---`; Docs' own horizontal rule is too.
 - The section break every body starts with is not rendered; only later section breaks are.

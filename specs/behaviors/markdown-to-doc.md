@@ -61,7 +61,7 @@ at once.
 | Fenced or indented code block | One `NORMAL_TEXT` paragraph per line, every run in `Roboto Mono` | ✅ (fence, no language) | **Not** a native Docs code block. Docs has one (with a language selector), and Google's importer creates it, but the Docs API can neither create one nor read one back, so the language is disclosed as dropped |
 | `\| table \|` | Table, first row bold and pinned as the header row | ✅ | Cell content is inline-only; block content in a cell is written as text. `docs read` does not re-emit the header row's bold, since a GFM header is bold by construction |
 | `---` | An empty paragraph with a bottom border | ✅ | Google's exporter drops it. There is no API request that inserts Docs' own horizontal rule |
-| `![alt](https://…)` | Inline image fetched by Google from the URL | ✅ as `[image]` | Only `http(s)` URLs; a local path or `data:` URL is refused (`IMAGE_NOT_FETCHABLE`). A URL Google cannot fetch fails the write with the same code. The API's insert takes no alt text; a non-empty `alt` is disclosed as dropped |
+| `![alt](https://…)` | Inline image fetched by Google from the URL | ✅ as `[image]` (alt can't be written; an image that has alt reads back as `[image: alt]`) | Only `http(s)` URLs; a local path or `data:` URL is refused (`IMAGE_NOT_FETCHABLE`). A URL Google cannot fetch fails the write with the same code. The API's insert takes no alt text; a non-empty `alt` is disclosed as dropped |
 | `[^1]` and its definition | A Docs footnote | ✅ | `docs read` renders the definitions at the end, numbered in citation order |
 | Inline HTML | Written as literal text | ✅ as text | Disclosed |
 | `<u>text</u>` | Text style `underline` | ✅ | The one HTML tag with a Doc equivalent, because `docs read` emits it |
