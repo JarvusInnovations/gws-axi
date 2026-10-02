@@ -35,7 +35,8 @@ the same Markdown, after normalization:
 - Heading text loses any emphasis wrappers (Google's own exporter adds `**` around headings
   from the theme's heading style; the content is the heading text).
 - List markers are `-` for bullets and `1.` for every ordered item; numbering is not preserved.
-- A table's alignment row is `| --- |` per column.
+- A table's alignment row is `| --- |` per column; the header row carries no emphasis markers.
+- Every list item is on its own line, indented two spaces per level.
 - Trailing whitespace on a line and runs of more than one blank line are collapsed.
 
 Google's exporter (`docs download --as text/markdown`) is a secondary check, not the target: it
@@ -57,11 +58,11 @@ at once.
 | Nested list (indented items) | Nesting level 1…8 of the same list | ✅ | Nesting deeper than the API allows is flattened to the deepest level and disclosed |
 | `- [ ] task`, `- [x] task` | List item with preset `BULLET_CHECKBOX` | ✅ as `- [ ]` | **The checked state cannot be set through the API**; every task is written unchecked and the count of checked tasks is disclosed |
 | `> quote` | `NORMAL_TEXT` paragraph indented 30pt start, first line, and end | ✅ | The exact indents Google's importer uses, which is what its exporter turns back into `>` |
-| Fenced or indented code block | One `NORMAL_TEXT` paragraph per line, every run in `Roboto Mono` | ✅ (fence, no language) | The language tag is not stored anywhere in a Doc and is disclosed as dropped |
-| `\| table \|` | Table, first row bold and marked as the header row | ✅ | Cell content is inline-only; block content in a cell is written as text |
+| Fenced or indented code block | One `NORMAL_TEXT` paragraph per line, every run in `Roboto Mono` | ✅ (fence, no language) | The language tag is not stored anywhere in a Doc and is disclosed as dropped. Google's exporter renders these as inline code per line (it fences only its own importer's output) |
+| `\| table \|` | Table, first row bold and pinned as the header row | ✅ | Cell content is inline-only; block content in a cell is written as text. `docs read` does not re-emit the header row's bold, since a GFM header is bold by construction |
 | `---` | An empty paragraph with a bottom border | ✅ | Google's exporter drops it. There is no API request that inserts Docs' own horizontal rule |
-| `![alt](https://…)` | Inline image fetched by Google from the URL, `alt` as its description | ✅ as `[image]` | Only `http(s)` URLs; a local path or `data:` URL is refused (`IMAGE_NOT_FETCHABLE`). A URL Google cannot fetch fails the write with the same code |
-| `[^1]` and its definition | A Docs footnote | ✅ | |
+| `![alt](https://…)` | Inline image fetched by Google from the URL | ✅ as `[image]` | Only `http(s)` URLs; a local path or `data:` URL is refused (`IMAGE_NOT_FETCHABLE`). A URL Google cannot fetch fails the write with the same code. The API's insert takes no alt text; a non-empty `alt` is disclosed as dropped |
+| `[^1]` and its definition | A Docs footnote | ✅ | `docs read` renders the definitions at the end, numbered in citation order |
 | Inline HTML | Written as literal text | ✅ as text | Disclosed |
 | `<u>text</u>` | Text style `underline` | ✅ | The one HTML tag with a Doc equivalent, because `docs read` emits it |
 
@@ -107,10 +108,14 @@ suggestion is to re-read and re-run.
 | Google's importer encodes a blockquote as 30pt start/first-line/end indents, a hard break as `\u000b`, inline code and code blocks as `Roboto Mono` runs, and bolds a table's first row with `tableHeader` set | Observed in a `drive upload --convert` of a probe file |
 | Google's exporter turns a 30/30/30pt-indented paragraph back into `>` but a 36/36pt one into plain indented text | Observed |
 | Google's exporter emits a fenced block for consecutive monospace paragraphs and guesses a language tag; it does not come from the Doc | Observed: `js` appeared for `const x = 1;` with nothing stored |
-| A heading at the top of a Doc shows its named style's space-above as a visible gap; `paragraphStyle.spaceAbove: 0pt` on that paragraph removes it without changing the style | To verify |
-| Google's exporter drops a continuous section break; whether it renders a bottom-bordered paragraph as `---` is unverified | Section break observed; border to verify |
+| A heading at the top of a Doc shows its named style's space-above as a visible gap; `paragraphStyle.spaceAbove: 0pt` on that paragraph removes it without changing the style | **Observed 2026-10-02**: the paragraph reads back with `spaceAbove` 0 and the style intact |
+| Google's exporter drops a continuous section break, and drops a bottom-bordered empty paragraph too | Observed: neither comes back as `---` |
+| Google's exporter turns monospace paragraphs written through the API into inline code per line, never a fence — whether the newline is styled or not, with or without zero paragraph spacing. Only its own importer's output fences | Observed: three encodings tried, none fenced |
+| `insertTable` at a paragraph's start inserts a newline before the table; the new empty paragraph inherits the style and bullet of the paragraph it split off | Observed: a rule paragraph doubled until the new one was reset |
 | `batchUpdate` is atomic: all requests apply or none | Documented |
-| `writeControl.requiredRevisionId` refuses a request against a stale revision | Documented; to verify |
+| `writeControl.requiredRevisionId` refuses a request against a stale revision with a 400 whose message says the id "does not match the latest" | **Observed 2026-10-02** |
+| A vertical tab in `insertText` is accepted and stored as a hard line break; Google's exporter renders it as two trailing spaces and a newline | Observed |
+| `createParagraphBullets` removes the nesting tabs it consumed, shifting every later index | Observed; the converter emits it last, in descending order |
 
 ## Principles
 

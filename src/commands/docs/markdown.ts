@@ -25,8 +25,14 @@ export interface RenderedMarkdown {
 export function renderBodyAsMarkdown(
   body: docs_v1.Schema$Body | undefined,
   lists: ListsMap | undefined,
+  footnotes?: Record<string, docs_v1.Schema$Footnote> | null,
 ): RenderedMarkdown {
-  const ctx: RenderCtx = { lists: lists ?? {}, imageCount: 0 };
+  const ctx: RenderCtx = {
+    lists: lists ?? {},
+    imageCount: 0,
+    footnotes: footnotes ?? {},
+    cited: [],
+  };
   if (!body?.content) {
     return { markdown: "", image_count: 0 };
   }
@@ -37,6 +43,8 @@ export function renderBodyAsMarkdown(
     if (codeLines) parts.push(`\`\`\`\n${codeLines.join("\n")}\n\`\`\`\n\n`);
     codeLines = undefined;
   };
+  let inList = false;
+  let listId = "";
   for (const [i, element] of body.content.entries()) {
     // Every body opens with a section break; it is structure, not content.
     if (i === 0 && element.sectionBreak) continue;
@@ -45,9 +53,24 @@ export function renderBodyAsMarkdown(
       continue;
     }
     closeCode();
+    // List items are single lines; whatever follows a list needs a blank line first.
+    const isItem = !!element.paragraph?.bullet;
+    const itemList = element.paragraph?.bullet?.listId ?? "";
+    // …and so does a different list starting right after this one.
+    if (inList && (!isItem || itemList !== listId)) parts.push("\n");
+    inList = isItem;
+    listId = itemList;
     parts.push(renderStructuralElement(element, ctx));
   }
   closeCode();
+  // Footnote definitions, numbered in citation order.
+  for (const [n, id] of ctx.cited.entries()) {
+    const text = (ctx.footnotes[id]?.content ?? [])
+      .map((el) => renderStructuralElement(el, ctx))
+      .join("")
+      .trim();
+    parts.push(`\n[^${n + 1}]: ${text}\n`);
+  }
   return {
     markdown: parts
       .join("")
@@ -60,6 +83,9 @@ export function renderBodyAsMarkdown(
 interface RenderCtx {
   lists: ListsMap;
   imageCount: number;
+  footnotes: Record<string, docs_v1.Schema$Footnote>;
+  /** Footnote ids in order of first citation. */
+  cited: string[];
 }
 
 const MONO = /mono|consolas|courier|code/i;
@@ -147,7 +173,10 @@ function renderParagraphElement(pe: ParagraphElement, ctx: RenderCtx): string {
   if (pe.pageBreak) return "\n\n";
   if (pe.columnBreak) return "\n";
   if (pe.footnoteReference) {
-    return `[^${pe.footnoteReference.footnoteNumber ?? "?"}]`;
+    const id = pe.footnoteReference.footnoteId ?? "";
+    let n = ctx.cited.indexOf(id);
+    if (n < 0) n = ctx.cited.push(id) - 1;
+    return `[^${n + 1}]`;
   }
   if (pe.equation) return "_[equation]_";
   if (pe.autoText) return pe.autoText.textStyle?.link?.url ?? "";
@@ -213,10 +242,14 @@ function renderTable(table: Table, ctx: RenderCtx): string {
     }
     return parts.join("").replace(/[\n|]/g, " ").trim();
   };
+  // A header row is bold by construction (GFM renders it so); emitting the
+  // markers would double it on the way back in.
+  const headerText = (cell: docs_v1.Schema$TableCell): string =>
+    cellText(cell).replace(/^\*\*(.+)\*\*$/, "$1");
 
   const lines: string[] = [];
   for (let i = 0; i < rows.length; i++) {
-    const cells = (rows[i].tableCells ?? []).map(cellText);
+    const cells = (rows[i].tableCells ?? []).map(i === 0 ? headerText : cellText);
     lines.push(`| ${cells.join(" | ")} |`);
     if (i === 0) {
       lines.push(`| ${cells.map(() => "---").join(" | ")} |`);

@@ -72,7 +72,8 @@ describe("docs read markdown renderer", () => {
       [para(["task\n"], {}, { listId: "kix.cb" }), para(["bullet\n"], {}, { listId: "kix.b" })],
       lists,
     );
-    expect(out).toBe("- [ ] task\n- bullet");
+    // Two lists back to back are separated, so they read back as two lists.
+    expect(out).toBe("- [ ] task\n\n- bullet");
   });
 
   it("renders a vertical tab as a hard line break", () => {

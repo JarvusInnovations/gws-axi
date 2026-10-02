@@ -217,10 +217,25 @@ describe("markdown-to-doc: index-shifting requests", () => {
     expect(parsed.lossy).toEqual([{ construct: "image_alt", count: 1, handling: "dropped" }]);
   });
 
-  it("puts a trailing table at the end of the segment", () => {
+  it("gives a trailing table an empty paragraph to precede and resets the paragraph the insert creates", () => {
     const { requests } = run("intro\n\n| a | b |\n| - | - |\n| 1 | 2 |");
-    const table = requests.find((r) => r.insertTable)?.insertTable;
-    expect(table).toEqual({ rows: 2, columns: 2, endOfSegmentLocation: { tabId: TAB } });
+    expect(inserted(requests)).toBe("intro\n");
+    const i = requests.findIndex((r) => r.insertTable);
+    expect(requests[i].insertTable).toEqual({
+      rows: 2,
+      columns: 2,
+      location: { index: 7, tabId: TAB },
+    });
+    expect(requests[i + 1].updateParagraphStyle?.range).toEqual({
+      startIndex: 7,
+      endIndex: 8,
+      tabId: TAB,
+    });
+    expect(requests[i + 2].deleteParagraphBullets?.range).toEqual({
+      startIndex: 7,
+      endIndex: 8,
+      tabId: TAB,
+    });
   });
 
   it("refuses a non-http image before producing anything", () => {

@@ -207,9 +207,15 @@ gws-axi docs revisions <documentId>               # version history (id, modifie
 gws-axi docs diff <documentId> <revA> [revB]      # unified diff between two revisions (revB defaults to head)
 gws-axi docs download <documentId> --as application/pdf   # native export (pdf, docx, odt, txt, html, epub, rtf)
 gws-axi docs download <documentId> --revision <id>        # fetch a past revision's content (markdown by default)
+gws-axi docs create --title "Sprint notes" ./notes.md --account you@example.com        # new Doc from Markdown
+gws-axi docs write <documentId> ./tab.md --tab t.0 --account you@example.com           # replace ONE tab's content
+gws-axi docs write <documentId> ./notes.md --new-tab "Decisions" --account you@example.com   # add a tab and fill it
+gws-axi docs append <documentId> --content "## Update" --tab t.0 --account you@example.com   # add to the end of a tab
 ```
 
 Every `docs read` carries the document's recent revisions and points at `docs revisions` / `docs download --revision` / `docs diff` — so an agent always knows which version it read. Non-native files (uploaded `.docx`, `.pdf`, etc.) get pointed at `docs download` automatically rather than failing with a cryptic Google API error.
+
+`docs create` / `write` / `append` turn Markdown into a Doc through gws-axi's own converter — headings, emphasis, code, links, lists, tasks, quotes, tables, rules, images by URL, footnotes — and touch exactly one tab, so `docs read --tab` → edit → `docs write --tab` is a safe loop on a multi-tab Doc. What the Docs API can't represent (a checked task, a code block's language) is written as text and listed under `lossy[]`. The write is refused if the Doc changed since it was read. Prefer these over `drive upload --convert` for Markdown: the result reads back with `docs read`, and opens without the gap Google's importer leaves above a first heading.
 
 ### Drive
 
@@ -241,7 +247,7 @@ gws-axi drive upload --content '# Notes' --name notes.md --convert --account you
 gws-axi drive upload ./edited.md --convert --update <docId> --account you@example.com          # replace a Doc's content (new revision)
 ```
 
-`drive upload` takes content from a local path, `-` (stdin), or `--content`; `--convert` imports it into the matching native Google format. With `--update` it replaces an existing file's content — and when that file is already the matching native type, `--convert --update` writes edited markdown back into the same Doc as a new revision.
+`drive upload` takes content from a local path, `-` (stdin), or `--content`; `--convert` hands it to Google's importer for the matching native format. With `--update` it replaces an existing file's content — and when that file is already the matching native type, `--convert --update` writes edited markdown back into the same Doc as a new revision (the whole Doc; for one tab, use `docs write --tab`).
 
 ### Slides
 

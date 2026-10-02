@@ -137,7 +137,7 @@ function liftFootnotes(markdown: string): { source: string; definitions: string[
       body += ` ${lines[++i].trim()}`;
     }
     labels.set(m[1], definitions.length);
-    definitions.push(body);
+    definitions.push(body.trim());
   }
   const source = kept
     .join("\n")
@@ -189,10 +189,10 @@ function pushText(inline: Inline, text: string, style: InlineStyle, ctx: ParseCt
     const index = m[0].charCodeAt(0) - FOOTNOTE_BASE;
     const definition = ctx.definitions[index];
     if (definition !== undefined) {
-      inline.footnotes.push({
-        offset: inlineLength(inline),
-        content: parseInline(marked.Lexer.lexInline(definition, { gfm: true }), ctx),
-      });
+      const content = parseInline(marked.Lexer.lexInline(definition, { gfm: true }), ctx);
+      const last = content.runs[content.runs.length - 1];
+      if (last) last.text = last.text.replace(/\s+$/, "");
+      inline.footnotes.push({ offset: inlineLength(inline), content });
     }
     rest = rest.slice(m.index + 1);
   }
@@ -514,13 +514,18 @@ const RESET_PARAGRAPH_FIELDS =
  * Phase 1: the body text and every style that can be addressed from the text
  * alone. Pure — the result is a function of the blocks and the placement.
  */
-export function phase1Requests(blocks: Block[], placement: Placement): Phase1 {
+export function phase1Requests(input: Block[], placement: Placement): Phase1 {
+  let blocks = input;
   const { tabId, base } = placement;
   const paragraphs: PlacedParagraph[] = [];
   const tables: Array<{ block: TableBlock; at: number | "end" }> = [];
   const pieces: string[] = [];
   let cursor = base;
 
+  // A table is inserted before the paragraph that follows it; give a final one a paragraph to precede.
+  if (blocks.length && blocks[blocks.length - 1].kind === "table") {
+    blocks = [...blocks, { kind: "paragraph", inline: { runs: [], images: [], footnotes: [] } }];
+  }
   for (let i = 0; i < blocks.length; i++) {
     const block = blocks[i];
     if (block.kind === "table") {
@@ -617,6 +622,8 @@ export function phase1Requests(blocks: Block[], placement: Placement): Phase1 {
     at: number;
     order: number;
     request: Request;
+    /** Requests to run right after `request`, addressing only indices it just created. */
+    after?: Request[];
     footnote?: Inline;
   }
   const shifts: Shift[] = [];
@@ -648,13 +655,23 @@ export function phase1Requests(blocks: Block[], placement: Placement): Phase1 {
   for (const t of tables) {
     const rows = t.block.rows.length;
     const columns = Math.max(1, ...t.block.rows.map((r) => r.length));
+    const at = t.at === "end" ? cursor - 1 : t.at;
     shifts.push({
-      at: t.at === "end" ? Number.MAX_SAFE_INTEGER : t.at,
+      at,
       order: order++,
-      request:
-        t.at === "end"
-          ? { insertTable: { rows, columns, endOfSegmentLocation: { tabId } } }
-          : { insertTable: { rows, columns, location: { index: t.at, tabId } } },
+      request: { insertTable: { rows, columns, location: { index: at, tabId } } },
+      // The insert makes a new empty paragraph at `at` that inherits the style
+      // (and any bullet) of the paragraph it split off; give it a clean one.
+      after: [
+        {
+          updateParagraphStyle: {
+            range: { startIndex: at, endIndex: at + 1, tabId },
+            paragraphStyle: { namedStyleType: "NORMAL_TEXT" },
+            fields: RESET_PARAGRAPH_FIELDS,
+          },
+        },
+        { deleteParagraphBullets: { range: { startIndex: at, endIndex: at + 1, tabId } } },
+      ],
     });
   }
   // Bullets: one request per run of consecutive paragraphs sharing a list.
@@ -699,7 +716,7 @@ export function phase1Requests(blocks: Block[], placement: Placement): Phase1 {
   const indexed: Array<{ i: number; fn: Inline }> = [];
   for (const s of shifts) {
     if (s.footnote) indexed.push({ i: requests.length, fn: s.footnote });
-    requests.push(s.request);
+    requests.push(s.request, ...(s.after ?? []));
   }
   indexed.sort((a, b) => footnoteOrder.get(a.fn)! - footnoteOrder.get(b.fn)!);
   for (const x of indexed) footnoteRequestIndices.push(x.i);
