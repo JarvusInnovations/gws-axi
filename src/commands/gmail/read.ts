@@ -1,3 +1,4 @@
+import { toLocalOffsetISO } from "../calendar/dateish.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { AxiError } from "axi-sdk-js";
@@ -196,6 +197,8 @@ interface MessageRow {
   to: string;
   cc: string;
   date: string;
+  /** When it was sent, in local-offset ISO — the header \`date\` is kept verbatim beside it. */
+  sent: string;
   subject: string;
   unread: boolean;
   body_source: string;
@@ -211,6 +214,20 @@ interface MessageRow {
   inline_image_count: number;
 }
 
+/**
+ * The message's Date header as local-offset ISO (specs/api/conventions.md §
+ * Displayed times), so "did it leave before 3:00 PM?" is a read, not a
+ * conversion. Falls back to Gmail's internal date when the header won't parse.
+ */
+export function sentTime(header: string, internalDate?: string | null): string {
+  const ms = Date.parse(header);
+  if (!Number.isNaN(ms)) return toLocalOffsetISO(new Date(ms).toISOString());
+  const internal = Number(internalDate);
+  return internalDate && Number.isFinite(internal)
+    ? toLocalOffsetISO(new Date(internal).toISOString())
+    : "";
+}
+
 function buildMessageRow(msg: gmail_v1.Schema$Message, index: number): MessageRow {
   const pm = parseMessage(msg);
   const unread = (msg.labelIds ?? []).includes("UNREAD");
@@ -221,6 +238,7 @@ function buildMessageRow(msg: gmail_v1.Schema$Message, index: number): MessageRo
     to: getHeader(pm, "to"),
     cc: getHeader(pm, "cc"),
     date: getHeader(pm, "date"),
+    sent: sentTime(getHeader(pm, "date"), msg.internalDate),
     subject: getHeader(pm, "subject"),
     unread,
     body_source: pm.body.source,
@@ -326,6 +344,7 @@ async function renderSingleMessage(
         to: row.to,
         cc: row.cc,
         date: row.date,
+        sent: row.sent,
         subject: row.subject,
         unread: row.unread,
         body_source: row.body_source,
@@ -493,6 +512,7 @@ async function renderHeadersMode(
         to: row.to,
         cc: row.cc,
         date: row.date,
+        sent: row.sent,
         subject: row.subject,
         body_source: row.body_source,
         body: row.body,
@@ -613,6 +633,12 @@ export async function gmailReadCommand(account: string, args: string[]): Promise
     message_count: rows.length,
     unread: threadUnread,
   };
+  // Attachments summed across the thread, so verifying "what went out" is one line.
+  const attached = rows.flatMap((r) => r.attachments);
+  if (attached.length) {
+    threadHeader.attachments = attached.length;
+    threadHeader.attachment_bytes = attached.reduce((n, a) => n + a.size_bytes, 0);
+  }
   if (resolved_via_message) {
     threadHeader.resolved_via_message = resolved_via_message;
   }
@@ -646,6 +672,7 @@ export async function gmailReadCommand(account: string, args: string[]): Promise
           id: r.id,
           from: r.from,
           date: r.date,
+          sent: r.sent,
           body_chars: r.body_total_chars,
           attachments: r.attachments.length,
         })),
@@ -672,6 +699,7 @@ export async function gmailReadCommand(account: string, args: string[]): Promise
         to: r.to,
         cc: r.cc,
         date: r.date,
+        sent: r.sent,
         unread: r.unread,
         body_source: r.body_source,
         body: r.body,

@@ -30,6 +30,8 @@ Reads a Gmail thread (or single message) and renders it for agent consumption. T
 ## Display Rules
 
 - **Default / `--full` / `--out` / `--message-only`**: unchanged from current behavior — `thread{...}` header + `messages[N]` with parsed from/to/date/subject/body/attachments, size-threshold truncation, markdown-conversation file output.
+- **Delivery verification** (#70): every parsed message carries `sent` — its `Date` header in local-offset ISO ([conventions § Displayed times](../api/conventions.md#displayed-times)), falling back to Gmail's internal date when the header won't parse — beside the header `date`, which stays verbatim as provenance. The `thread{}` header adds `attachments` (count) and `attachment_bytes` (sum of `size_bytes`) when any message has attachments, so "did the right file go out, before the deadline?" is answered by the header and one row.
+- **`gmail search`** renders `last_date` in local-offset ISO, not the raw `Date` header.
 - **`--headers`**: in addition to the `account:` header, emit:
   - a `message{id,thread_id,internal_date}` header object;
   - a `headers[N]{name,value}` list of every RFC 2822 header on the message, in the order Gmail returns them, values untruncated ([principles.md#ids-are-first-class](../principles.md#ids-are-first-class) applies to `Message-ID` and the IDs);

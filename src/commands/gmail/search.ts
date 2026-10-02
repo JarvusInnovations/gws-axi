@@ -1,3 +1,4 @@
+import { toLocalOffsetISO } from "../calendar/dateish.js";
 import type { gmail_v1 } from "googleapis";
 import { gmailClient, translateGoogleError, withRateLimitRetry } from "../../google/client.js";
 import { field, renderListResponse, truncated, type FieldDef } from "../../output/index.js";
@@ -163,7 +164,10 @@ async function fetchThreadSummary(
       id: id,
       from,
       subject,
-      last_date: lastDate,
+      // Local-offset ISO, like every printed instant (conventions § Displayed times).
+      last_date: Number.isNaN(Date.parse(lastDate))
+        ? lastDate
+        : toLocalOffsetISO(new Date(Date.parse(lastDate)).toISOString()),
       message_count: messages.length,
       unread,
       labels: [...labelSet].join(","),
