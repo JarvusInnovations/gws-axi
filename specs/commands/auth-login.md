@@ -59,7 +59,10 @@ answer. `auth login --callback-url '<that url>'` finishes the prepared flow with
 
 The prepare output and the `--wait` timeout message both name this path. On a machine reached
 over SSH (`SSH_CONNECTION` set), the prepare instructions lead with it and with the `ssh -L`
-alternative, since the default — open the page on this machine — can't work there.
+alternative, since the default — open the page on this machine — can't work there, and the
+prepare output adds `auth_url`, Google's sign-in link, for the agent to hand to the user: a phone
+can't open the served page, so the link has to travel some other way. It is printed only there,
+since a terminal-wrapped jumbo URL is what the setup page exists to avoid.
 
 ## Errors
 
