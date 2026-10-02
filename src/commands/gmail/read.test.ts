@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { AxiError } from "axi-sdk-js";
-import { parseFlags } from "./read.js";
+import { parseFlags, sentTime } from "./read.js";
+import { toLocalOffsetISO } from "../calendar/dateish.js";
 
 describe("gmail read parseFlags", () => {
   it("parses a bare id with defaults", () => {
@@ -54,5 +55,19 @@ describe("gmail read parseFlags", () => {
       expect(err).toBeInstanceOf(AxiError);
       expect((err as AxiError).code).toBe("VALIDATION_ERROR");
     }
+  });
+});
+
+describe("sent time", () => {
+  it("renders the Date header in local-offset ISO", () => {
+    expect(sentTime("Fri, 2 Oct 2026 09:08:02 -0700")).toBe(
+      toLocalOffsetISO("2026-10-02T16:08:02Z"),
+    );
+  });
+  it("falls back to Gmail's internal date when the header won't parse", () => {
+    expect(sentTime("garbage", String(Date.parse("2026-10-02T16:08:02Z")))).toBe(
+      toLocalOffsetISO("2026-10-02T16:08:02Z"),
+    );
+    expect(sentTime("", undefined)).toBe("");
   });
 });

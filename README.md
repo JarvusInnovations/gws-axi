@@ -177,6 +177,7 @@ gws-axi gmail batch-modify --query "is:unread older_than:30d" --remove-label UNR
 
 # Drafts (composed for you; you send from Gmail):
 gws-axi gmail draft --to alice@x.com --subject "Re: budget" --body "Approved."
+gws-axi gmail draft --to rfp@agency.gov --subject "RFI response" --body-file ./cover.md --attach ./response.docx   # with attachments (25 MB total)
 gws-axi gmail draft --to a@x.com,b@x.com --subject Hi --body-file ./note.txt --thread <id>
 
 # Label management:

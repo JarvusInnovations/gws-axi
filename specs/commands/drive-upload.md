@@ -87,13 +87,14 @@ Single-tab Docs, single-sheet Spreadsheets, and non-container targets (Slides, b
 
 Header object (in order): `action: created` (or `updated` under `--update`), then `account` (+ `account_source` per the standard header rules — but writes require explicit `--account` with 2+ accounts, so `account_source: default` only appears with exactly 1 account).
 
-Body: `file{id,name,mime_type,size_bytes,parents,web_view_link}`
+Body: `file{id,name,mime_type,size_bytes,parents,revision_id,web_view_link}`
 
 - `id` — the Drive fileId, first-class and never truncated ([principles.md#ids-are-first-class](../principles.md#ids-are-first-class)); it is the handoff to `drive get` / `docs download` / `drive permissions`.
 - `name` — the stored name.
 - `mime_type` — the **stored** Drive mime type from the API response (the native type when `--convert` took effect, else the source type).
 - `size_bytes` — from the response when present (omitted for native-converted files, which report no `size`).
 - `parents` — comma-joined parent folder IDs (empty for root).
+- `revision_id` — the revision this upload produced, so a caller can record exactly what was delivered (#70), as it would a commit. Drive returns `headRevisionId` for binary files only; for a native file the newest revision is read back from `revisions.list`, best-effort — a failed lookup omits the field and never fails the upload.
 - `web_view_link` — `webViewLink` when present.
 
 ### help[] suggestions

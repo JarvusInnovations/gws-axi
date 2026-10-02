@@ -1,3 +1,4 @@
+import { listRecentRevisions } from "../docs/revision-content.js";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { basename, resolve } from "node:path";
@@ -86,7 +87,8 @@ notes:
   pass --replace-all-tabs.
 output:
   An \`action: created\` (or \`updated\`) line plus a \`file{...}\` object with
-  id, name, mime_type, size_bytes, parents, and web_view_link.
+  id, name, mime_type, size_bytes, parents, revision_id (the revision this upload
+  produced — record it to know exactly what was delivered), and web_view_link.
 `;
 
 export interface ParsedFlags {
@@ -157,7 +159,7 @@ export function parseFlags(args: string[]): ParsedFlags {
   return flags;
 }
 
-const UPLOAD_FIELDS = "id,name,mimeType,size,parents,webViewLink";
+const UPLOAD_FIELDS = "id,name,mimeType,size,parents,webViewLink,headRevisionId";
 
 /**
  * Validate the local path is present and the flag combination is legal,
@@ -413,6 +415,18 @@ export async function driveUploadCommand(account: string, args: string[]): Promi
   };
   if (file.size) details.size_bytes = parseInt(file.size, 10);
   details.parents = file.parents?.length ? file.parents.join(", ") : "";
+  // The revision this upload produced, so a caller can record exactly what was
+  // delivered. Binary files carry it as headRevisionId; native files don't, so
+  // their newest revision is read back — best-effort, never failing the upload.
+  let revisionId = file.headRevisionId ?? "";
+  if (!revisionId && file.id && (file.mimeType ?? "").startsWith("application/vnd.google-apps.")) {
+    try {
+      revisionId = (await listRecentRevisions(api, file.id, 1))[0]?.id ?? "";
+    } catch {
+      revisionId = "";
+    }
+  }
+  if (revisionId) details.revision_id = revisionId;
   if (file.webViewLink) details.web_view_link = file.webViewLink;
 
   const blocks: string[] = [];

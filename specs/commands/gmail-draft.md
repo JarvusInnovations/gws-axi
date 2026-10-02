@@ -26,6 +26,7 @@ HTML, and Gmail generates the `text/plain` alternative itself on send.
 - `--plain` — treat the body as **literal text** rather than markdown (see
   [Literal-text mode](#literal-text-mode)). Boolean; takes no value.
 - `--thread <thread-id>` — attach the draft to an existing thread (a reply draft).
+- `--attach <path>` — attach a local file. Repeatable. See [Attachments](#attachments).
 - `--account <email>` — REQUIRED when 2+ accounts are authenticated (this is a write —
   [principles.md#write-protection-requires-explicit-account](../principles.md#write-protection-requires-explicit-account)).
 
@@ -89,6 +90,30 @@ item, and appended new paragraphs, the delivered HTML still carried our `<p>`, `
 `<a>`, `<br>`, and `<ul>`/`<li>`, with the human's additions merged into that structure (a
 typed list item became an `<li>` inside our existing `<ul>`).
 
+## Attachments
+
+With `--attach`, the message is `multipart/mixed`: its **first part is the same single
+`text/html` part** described above, followed by one part per file. The body still offers the
+composer exactly one text part to adopt, so nothing in [How Gmail's composer treats a
+draft](#how-gmails-composer-treats-a-draft) changes.
+
+- Each file part carries `Content-Type` from the file's extension (with a `name` parameter),
+  `Content-Disposition: attachment` with a `filename`, and base64 content.
+- **A non-ASCII filename is an RFC 2047 encoded-word inside the quotes.** RFC 2231's
+  `filename*` is ignored by Gmail, which stores a mangled ASCII fallback instead (observed:
+  `Résumé — draft.md` became `R_sum_ _ draft.md`); the encoded-word form is what Gmail itself
+  writes, and it is kept intact (observed).
+- **25 MB total**, Gmail's attachment limit, checked from the files' sizes before anything is
+  read or drafted (`ATTACHMENT_TOO_LARGE`, suggesting a Drive link instead).
+- The draft is created by **upload** (`message/rfc822` media), not a base64url `raw` field,
+  so a full 25 MB fits the API's request limit (observed: a 20 MB attachment drafted).
+- Every path is checked before the draft is created; a bad one drafts nothing.
+
+Verified: three files (text, a non-ASCII-named Markdown file, 300 KB of random bytes) round-
+tripped through `gmail read` with their names and sizes, and the binary came back byte-
+identical through `gmail download`. **Not verified:** a human sending the draft from the Gmail
+UI — the composer is expected to keep attachments as it does for its own, but no send was made.
+
 ## Body rendering
 
 The `--body` / `--body-file` value is **markdown**, rendered to the `text/html` part with
@@ -145,9 +170,9 @@ A single flat object, in order: `action: drafted`, `account`, `draft_id`, `messa
   the handle for a later edit or delete.
 - `cc` present only when `--cc` was passed; `thread_id` only when `--thread` was.
 - `subject` falls back to `(no subject)` when empty.
+- With `--attach`, an `attachments[N]{name,size_bytes,mime_type}` list follows the object.
 
-The MIME structure is an implementation detail of the message, not of the response — the
-output shape is unchanged by this spec.
+The MIME structure is an implementation detail of the message, not of the response.
 
 ### help[] suggestions
 
@@ -159,6 +184,8 @@ output shape is unchanged by this spec.
 - `--to` empty or absent → `VALIDATION_ERROR` with a usage suggestion.
 - `--body` and `--body-file` together → `VALIDATION_ERROR`.
 - `--body-file` unreadable → `VALIDATION_ERROR` naming the path.
+- An `--attach` path missing → `LOCAL_FILE_NOT_FOUND`; a directory → `LOCAL_PATH_NOT_FILE`;
+  attachments over 25 MB in total → `ATTACHMENT_TOO_LARGE`. Nothing is drafted in any case.
 - Google failures via `translateGoogleError`
   ([principles.md#structured-errors-to-stdout](../principles.md#structured-errors-to-stdout)).
 
@@ -166,8 +193,9 @@ output shape is unchanged by this spec.
 
 - **Sending** — permanently, by design. See
   [principles.md#gmail-send-out-of-scope-by-design](../principles.md#gmail-send-out-of-scope-by-design).
-- **Attachments** — a draft carries body text only; `multipart/mixed` with file parts is deferred.
-- **Inline images / `cid:` references** — deferred with attachments.
+- **Inline images / `cid:` references** — attachments are files only; images embedded in the
+  body are deferred.
+- **Attachments over 25 MB** — Gmail's own limit; share a Drive link instead.
 
 ## Principles
 

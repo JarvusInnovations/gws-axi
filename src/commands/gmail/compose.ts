@@ -39,7 +39,19 @@ export interface ComposeFields {
    * HTML is built structurally instead of through the markdown renderer.
    */
   plain?: boolean;
+  /** Files to attach, already read. */
+  attachments?: Attachment[];
 }
+
+export interface Attachment {
+  /** The name the recipient sees. */
+  name: string;
+  mimeType: string;
+  content: Buffer;
+}
+
+/** Gmail's limit on a message's attachments, before transfer encoding. */
+export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
 /** Split a comma-separated recipient flag into trimmed, non-empty addresses. */
 export function parseRecipients(value: string): string[] {
@@ -111,26 +123,65 @@ export function renderPlainText(body: string): string {
 }
 
 /** Base64 with CRLF line endings wrapped at 76 columns (RFC 2045). */
-function encodeBody(text: string): string {
-  return Buffer.from(text, "utf8")
+function encodeBody(content: string | Buffer): string {
+  return (typeof content === "string" ? Buffer.from(content, "utf8") : content)
     .toString("base64")
     .replace(/(.{76})/g, "$1\r\n");
 }
 
 /**
- * Build a base64url-encoded RFC 5322 message suitable for
- * `users.drafts.create` / `users.messages.send` `raw` fields.
+ * A `filename` parameter that survives any name. ASCII names are quoted as-is.
+ * Anything else is an RFC 2047 encoded-word inside the quotes — not RFC 2231's
+ * `filename*`, which Gmail ignores in favour of a mangled ASCII fallback
+ * (observed: `Résumé — draft.md` stored as `R_sum_ _ draft.md`). The encoded-word
+ * form is what Gmail itself writes.
  */
-export function buildRawMessage(fields: ComposeFields): string {
+export function filenameParams(name: string): string {
+  const value = encodeHeaderValue(name);
+  return `filename="${value === name ? name.replace(/[\\"]/g, "\\$&") : value}"`;
+}
+
+/**
+ * Build the RFC 5322 message for `users.drafts.create`.
+ *
+ * Without attachments: the single `text/html` part, as specified. With them:
+ * `multipart/mixed` whose first part is that same single `text/html` part and
+ * whose remaining parts are the files — the body still offers the composer
+ * exactly one text part to adopt (specs/commands/gmail-draft.md § Attachments).
+ */
+export function buildMessage(fields: ComposeFields, boundary?: string): string {
   const headers: string[] = [`From: ${fields.from}`, `To: ${fields.to.join(", ")}`];
   if (fields.cc?.length) headers.push(`Cc: ${fields.cc.join(", ")}`);
   if (fields.bcc?.length) headers.push(`Bcc: ${fields.bcc.join(", ")}`);
   headers.push(`Subject: ${encodeHeaderValue(fields.subject)}`);
   headers.push("MIME-Version: 1.0");
-  headers.push('Content-Type: text/html; charset="UTF-8"');
-  headers.push("Content-Transfer-Encoding: base64");
 
   const html = fields.plain ? renderPlainText(fields.body) : renderMarkdown(fields.body);
-  const raw = `${headers.join("\r\n")}\r\n\r\n${encodeBody(html)}`;
-  return Buffer.from(raw, "utf8").toString("base64url");
+  const htmlHeaders = [
+    'Content-Type: text/html; charset="UTF-8"',
+    "Content-Transfer-Encoding: base64",
+  ];
+  if (!fields.attachments?.length) {
+    return `${[...headers, ...htmlHeaders].join("\r\n")}\r\n\r\n${encodeBody(html)}`;
+  }
+
+  const b = boundary ?? `gws-axi-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  headers.push(`Content-Type: multipart/mixed; boundary="${b}"`);
+  const parts = [`${htmlHeaders.join("\r\n")}\r\n\r\n${encodeBody(html)}`];
+  for (const a of fields.attachments) {
+    parts.push(
+      [
+        `Content-Type: ${a.mimeType}; ${filenameParams(a.name).replace(/^filename/, "name")}`,
+        `Content-Disposition: attachment; ${filenameParams(a.name)}`,
+        "Content-Transfer-Encoding: base64",
+      ].join("\r\n") + `\r\n\r\n${encodeBody(a.content)}`,
+    );
+  }
+  const body = parts.map((p) => `--${b}\r\n${p}`).join("\r\n") + `\r\n--${b}--`;
+  return `${headers.join("\r\n")}\r\n\r\n${body}`;
+}
+
+/** The message base64url-encoded, for a `raw` field. */
+export function buildRawMessage(fields: ComposeFields): string {
+  return Buffer.from(buildMessage(fields), "utf8").toString("base64url");
 }
