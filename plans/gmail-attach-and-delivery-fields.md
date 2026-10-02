@@ -6,6 +6,7 @@ specs:
   - specs/commands/gmail-read.md
   - specs/commands/drive-upload.md
 issues: [70]
+pr: 91
 ---
 
 # Plan: the rest of #70 — attachments and delivery-verification fields
