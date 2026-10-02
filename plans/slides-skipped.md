@@ -5,6 +5,7 @@ specs:
   - specs/commands/slides-read.md
   - specs/commands/slides-skip.md
 issues: [64]
+pr: 94
 ---
 
 # Plan: Slides skipped flag — read and write
