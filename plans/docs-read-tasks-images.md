@@ -4,6 +4,7 @@ depends: [docs-markdown-write]
 specs:
   - specs/commands/docs-read.md
 issues: [84]
+pr: 93
 ---
 
 # Plan: docs read — disclose tasks, render image alt text
