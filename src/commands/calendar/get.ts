@@ -4,6 +4,7 @@ import { calendarClient, translateGoogleError } from "../../google/client.js";
 import { field, joinBlocks, renderHelp, renderList, renderObject } from "../../output/index.js";
 import { extractConference } from "./conference.js";
 import { formatEventTime } from "./dateish.js";
+import { availabilityOf } from "./availability.js";
 
 export const GET_HELP = `usage: gws-axi calendar get <event-id> [flags]
 args[1]:
@@ -125,6 +126,7 @@ export async function calendarGetCommand(account: string, args: string[]): Promi
     end: formatEventTime(event.end),
     creator: event.creator?.email ?? "",
     organizer: event.organizer?.email ?? "",
+    availability: availabilityOf(event),
   };
   if (event.location) details.location = event.location;
   if (event.hangoutLink) details.hangout_link = event.hangoutLink;
