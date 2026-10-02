@@ -100,6 +100,7 @@ Body: `file{id,name,mime_type,size_bytes,parents,web_view_link}`
 
 - `drive get <id>` for full metadata; `drive permissions <id>` for sharing.
 - When converted: `docs read <id>` (for a Doc) / `docs download <id>` to fetch it back.
+- When a Markdown or text source was converted to a Doc: a line stating the Doc was built by **Google's importer**, and that `docs create` / `docs write` write Markdown through gws-axi's own converter — the one `docs read` round-trips and the one that can target a single tab ([markdown-to-doc](../behaviors/markdown-to-doc.md)). `drive upload --convert` stays Google's importer for every source type; it never switches engines by extension.
 - When **created** (not `--update`): a one-line note that re-running creates another copy (Drive allows duplicate names) and that `--update <id>` replaces this file's content instead — disclosing the non-idempotency of create-new.
 - When an update collapsed a multi-tab Doc under `--replace-all-tabs`: a line stating how many tabs were replaced by the single imported tab, and that the prior version is in `drive revisions <id>`.
 - Open in browser: the `webViewLink`.
@@ -127,7 +128,7 @@ The `drive` dispatcher gains a real handler for a new `{ name: "upload", mutatio
 - **Resumable uploads** — v1 uses the library's simple/multipart streamed upload. Very large files (multi-GB) that benefit from resumable sessions are deferred.
 - **Folder moves on update** — `--update` replaces content/name only; relocating via `addParents`/`removeParents` belongs with `drive move`.
 - **Changing a file's *type* on update** — `--convert` + `--update` only re-imports a convertible source into a target that's *already* the matching native type (a new revision). Turning a binary file into a native one (or one native type into another) in place is not supported.
-- **Writing to a specific tab or sheet, or adding one** — Drive media replaces the file wholesale; per-tab writes need Docs `batchUpdate` and per-sheet writes need Sheets `values.update`, both belonging with the deferred `docs`/`sheets` write surfaces. `--replace-all-tabs` is a disclosure, not a tab-aware write.
+- **Writing to a specific tab or sheet, or adding one** — Drive media replaces the file wholesale. Per-tab Doc writes are `docs write --tab` / `--new-tab` ([docs-write.md](docs-write.md)); per-sheet writes need Sheets `values.update` and belong with the deferred `sheets` write surface. `--replace-all-tabs` is a disclosure, not a tab-aware write.
 - **Recursive directory upload** — one file per invocation; uploading a tree is deferred.
 - **Resumable / large stdin** — stdin and `--content` use the same simple streamed upload as files; very large piped inputs that need resumable sessions are deferred.
 - **Idempotent create** — create-new intentionally always makes a new file; dedupe-by-name/path is not attempted. `--update` is the idempotent path and the disclosure in `help[]` points to it.
