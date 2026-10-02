@@ -5,6 +5,7 @@ import { docsCommentsCommand } from "./docs/comments.js";
 import { GET_HELP, slidesGetCommand } from "./slides/get.js";
 import { PAGE_HELP, slidesPageCommand } from "./slides/page.js";
 import { SUMMARIZE_HELP, slidesSummarizeCommand } from "./slides/summarize.js";
+import { SKIP_HELP, UNSKIP_HELP, slidesSkipCommand, slidesUnskipCommand } from "./slides/skip.js";
 
 // Slides comments are Drive comments — the same file-agnostic API `docs
 // comments` / `sheets comments` use. Alias the shared handler with a
@@ -64,6 +65,8 @@ const SUBCOMMANDS: SlidesSubcommand[] = [
     handler: slidesSummarizeCommand,
   },
   { name: "comments", mutation: false, help: COMMENTS_HELP, handler: slidesCommentsCommand },
+  { name: "skip", mutation: true, help: SKIP_HELP, handler: slidesSkipCommand },
+  { name: "unskip", mutation: true, help: UNSKIP_HELP, handler: slidesUnskipCommand },
   {
     name: "create",
     mutation: true,
@@ -116,18 +119,20 @@ writes[${writes.length}]:
 notes:
   Writes require --account <email> when 2+ accounts are authenticated.
   Reads use the default account when --account is not provided.
-  Write subcommands are scaffolded for the next slice; they throw
-  NOT_IMPLEMENTED after account resolution runs.
+  skip and unskip are live (hide/show slides in presentation mode); create and
+  update are scaffolded and throw NOT_IMPLEMENTED after account resolution runs.
 ${renderAlternatives(SUBCOMMANDS)}subcommand help:
   gws-axi slides get --help        for metadata + slide list
   gws-axi slides page --help       for a single slide's content
   gws-axi slides summarize --help  for the whole deck as markdown
   gws-axi slides comments --help   for review comments (Drive comments)
+  gws-axi slides skip --help       for hiding slides in presentation mode (unskip too)
 examples:
   gws-axi slides get 1AbC...
   gws-axi slides summarize 1AbC...
   gws-axi slides page 1AbC... gd87cbcb3a4_0_42
   gws-axi slides comments 1AbC...
+  gws-axi slides skip 1AbC... gd87cbcb3a4_0_42 --account you@example.com
 `;
 
 export async function slidesCommand(args: string[]): Promise<string> {

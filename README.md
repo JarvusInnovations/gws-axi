@@ -258,6 +258,7 @@ gws-axi drive upload ./edited.md --convert --update <docId> --account you@exampl
 gws-axi slides get <presentationId>               # deck metadata + slide list
 gws-axi slides page <presentationId> <slideId>    # one slide's content
 gws-axi slides summarize <presentationId>         # all slides condensed to text per slide
+gws-axi slides skip <presentationId> <slideId>... --account you@example.com   # hide slides in presentation mode (unskip to show)
 gws-axi slides comments <presentationId>          # review comments (Drive comments)
 ```
 
@@ -375,7 +376,7 @@ help[2]:
   - image alt text ([#85](https://github.com/JarvusInnovations/gws-axi/issues/85))
   - a native horizontal rule — written as a bordered empty paragraph ([#86](https://github.com/JarvusInnovations/gws-axi/issues/86))
 - **Drive writes**: `upload`, `mkdir`, `rename`, `move`, `trash`, `untrash`, `share`, and `unshare` are shipped; `create` / `copy` are still scaffolded as `NOT_IMPLEMENTED`. There is no permanent delete by design — `trash` is reversible for 30 days.
-- **Slides writes**: still scaffolded as `NOT_IMPLEMENTED` (reads are complete).
+- **Slides writes**: `skip` / `unskip` (hide slides in presentation mode) are shipped; `create` / `update` are still scaffolded as `NOT_IMPLEMENTED`.
 - **Sheets writes** (`update`, `append`, `clear`, `create`, `add-tab`): scaffolded as `NOT_IMPLEMENTED`; `read` (with inline-markdown links + cell notes) and `comments` are shipped.
 - **Testing-mode tokens** still expire every 7 days *if* you haven't published your OAuth app yet. Run `gws-axi auth publish` for the walkthrough — it covers the single-developer Production flow and removes the expiry once you've re-auth'd each account.
 

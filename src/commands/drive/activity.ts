@@ -320,7 +320,7 @@ export async function driveActivityCommand(account: string, args: string[]): Pro
   }
 
   const rawRows: ActivityRow[] = activities.slice(0, flags.limit).map((a) => ({
-    time: activityTime(a),
+    time: activityTime(a) ? toLocalOffsetISO(activityTime(a)) : "",
     action: primaryActionLabel(a),
     actor: primaryActor(a),
     target: primaryTarget(a),

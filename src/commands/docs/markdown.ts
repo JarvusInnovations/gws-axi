@@ -20,21 +20,26 @@ type ListsMap = Record<string, docs_v1.Schema$List>;
 export interface RenderedMarkdown {
   markdown: string;
   image_count: number;
+  /** Checklist items, all rendered `- [ ]` — the API exposes no checked state (#84). */
+  task_count: number;
 }
 
 export function renderBodyAsMarkdown(
   body: docs_v1.Schema$Body | undefined,
   lists: ListsMap | undefined,
   footnotes?: Record<string, docs_v1.Schema$Footnote> | null,
+  inlineObjects?: Record<string, docs_v1.Schema$InlineObject> | null,
 ): RenderedMarkdown {
   const ctx: RenderCtx = {
     lists: lists ?? {},
     imageCount: 0,
+    taskCount: 0,
     footnotes: footnotes ?? {},
     cited: [],
+    inlineObjects: inlineObjects ?? {},
   };
   if (!body?.content) {
-    return { markdown: "", image_count: 0 };
+    return { markdown: "", image_count: 0, task_count: 0 };
   }
   const parts: string[] = [];
   // Consecutive code-line paragraphs form one fenced block.
@@ -77,6 +82,7 @@ export function renderBodyAsMarkdown(
       .replace(/\n{3,}/g, "\n\n")
       .trim(),
     image_count: ctx.imageCount,
+    task_count: ctx.taskCount,
   };
 }
 
@@ -86,6 +92,8 @@ interface RenderCtx {
   footnotes: Record<string, docs_v1.Schema$Footnote>;
   /** Footnote ids in order of first citation. */
   cited: string[];
+  inlineObjects: Record<string, docs_v1.Schema$InlineObject>;
+  taskCount: number;
 }
 
 const MONO = /mono|consolas|courier|code/i;
@@ -138,6 +146,7 @@ function renderParagraph(para: Paragraph, ctx: RenderCtx): string {
   if (para.bullet) {
     const level = para.bullet.nestingLevel ?? 0;
     const marker = bulletMarker(para.bullet.listId ?? "", level, ctx.lists);
+    if (marker === "- [ ]") ctx.taskCount += 1;
     const indent = "  ".repeat(level);
     return `${indent}${marker} ${text.trim()}\n`;
   }
@@ -165,10 +174,11 @@ function renderParagraphElement(pe: ParagraphElement, ctx: RenderCtx): string {
   if (pe.horizontalRule) return "\n---\n";
   if (pe.inlineObjectElement) {
     ctx.imageCount += 1;
-    // We don't have the alt/title without a second lookup into
-    // document.inlineObjects. Agents typically just need to know an image
-    // exists and where; a placeholder is sufficient for v1.
-    return "[image]";
+    // The image's alt text (Docs' "description", or its title) when it has one.
+    const id = pe.inlineObjectElement.inlineObjectId ?? "";
+    const embedded = ctx.inlineObjects[id]?.inlineObjectProperties?.embeddedObject;
+    const alt = (embedded?.description || embedded?.title || "").replace(/[[\]\n]/g, " ").trim();
+    return alt ? `[image: ${alt}]` : "[image]";
   }
   if (pe.pageBreak) return "\n\n";
   if (pe.columnBreak) return "\n";

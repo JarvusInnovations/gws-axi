@@ -48,7 +48,12 @@ function parseFlags(args: string[]): ParsedFlags {
 }
 
 function slideRowSchema(): FieldDef[] {
-  return [field("index"), field("page_id"), field("title")];
+  return [
+    field("index"),
+    field("page_id"),
+    field("title"),
+    { name: "skipped", extract: (item) => (item.skipped ? "✓" : "") },
+  ];
 }
 
 export async function slidesGetCommand(account: string, args: string[]): Promise<string> {
@@ -86,6 +91,7 @@ export async function slidesGetCommand(account: string, args: string[]): Promise
       index: i + 1,
       page_id: content.page_id,
       title: content.title,
+      skipped: content.skipped,
     };
   });
 
@@ -97,6 +103,9 @@ export async function slidesGetCommand(account: string, args: string[]): Promise
         id: presentation.presentationId ?? flags.presentationId,
         title: presentation.title ?? "",
         slide_count: slides.length,
+        ...(rows.some((r) => r.skipped)
+          ? { skipped_count: rows.filter((r) => r.skipped).length }
+          : {}),
         ...(presentation.revisionId ? { revision_id: presentation.revisionId } : {}),
       },
     }),

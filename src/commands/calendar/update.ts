@@ -3,11 +3,18 @@ import type { calendar_v3 } from "googleapis";
 import { calendarClient, translateGoogleError } from "../../google/client.js";
 import { joinBlocks, renderObject } from "../../output/index.js";
 import { formatEventTime, parseDateishFlag } from "./dateish.js";
+import {
+  TRANSPARENCY,
+  availabilityOf,
+  rejectUnknownFlag,
+  setAvailability,
+  type Availability,
+} from "./availability.js";
 
 export const UPDATE_HELP = `usage: gws-axi calendar update <event-id> [flags]
 args[1]:
   <event-id>             Event ID to update (from \`calendar events\` or \`calendar get\`)
-flags[12]:
+flags[15]:
   --summary <text>       New event title
   --start <iso>          New start time (ISO datetime or YYYY-MM-DD for all-day)
   --end <iso>            New end time
@@ -17,6 +24,9 @@ flags[12]:
   --add-attendees <es>   Comma-separated emails to add (merges with existing)
   --remove-attendees <es> Comma-separated emails to remove
   --replace-attendees <es> Comma-separated emails — REPLACES entire attendee list
+  --free                 Show as free: the event stops blocking your availability
+  --busy                 Show as busy
+  --timezone <tz>        IANA zone for new --start/--end values
   --send-updates <mode>  none | all | externalOnly (default: none)
   --calendar <id>        Calendar containing the event (default: primary)
   --account <email>      REQUIRED when 2+ accounts are authenticated (or set GWS_AXI_ACCOUNT)
@@ -24,6 +34,7 @@ examples:
   gws-axi calendar update abc_123 --summary "Team sync (rescheduled)"
   gws-axi calendar update abc_123 --start 2026-04-22T15:00 --duration 30m
   gws-axi calendar update abc_123 --add-attendees eve@x.com --send-updates all
+  gws-axi calendar update abc_123 --free
 notes:
   Uses events.patch — only specified fields change; everything else stays
   as-is. If --start is given without --end or --duration, --end stays put
@@ -31,6 +42,23 @@ notes:
   For attendee changes: --add/--remove merge with the existing list via a
   read-modify-write (two API calls); --replace-attendees overwrites in one.
 `;
+
+const UPDATE_FLAGS = [
+  "--add-attendees",
+  "--busy",
+  "--calendar",
+  "--description",
+  "--duration",
+  "--end",
+  "--free",
+  "--location",
+  "--remove-attendees",
+  "--replace-attendees",
+  "--send-updates",
+  "--start",
+  "--summary",
+  "--timezone",
+];
 
 interface ParsedFlags {
   eventId: string;
@@ -46,6 +74,7 @@ interface ParsedFlags {
   timezone: string | undefined;
   sendUpdates: "all" | "externalOnly" | "none";
   calendar: string;
+  availability: Availability | undefined;
 }
 
 function parseDurationMs(value: string): number {
@@ -59,7 +88,7 @@ function parseDurationMs(value: string): number {
   return (parseInt(m[1] ?? "0", 10) * 60 + parseInt(m[2] ?? "0", 10)) * 60 * 1000;
 }
 
-function parseFlags(args: string[]): ParsedFlags {
+export function parseFlags(args: string[]): ParsedFlags {
   let eventId: string | undefined;
   const flags: Partial<ParsedFlags> = {
     addAttendees: [],
@@ -136,10 +165,17 @@ function parseFlags(args: string[]): ParsedFlags {
         flags.calendar = next;
         i++;
         break;
+      case "--free":
+      case "--busy":
+        flags.availability = setAvailability(flags.availability, arg);
+        break;
       default:
-        if (!arg.startsWith("--") && eventId === undefined) {
-          eventId = arg;
-        }
+        if (arg.startsWith("--")) rejectUnknownFlag(arg, "update", UPDATE_FLAGS);
+        else if (eventId === undefined) eventId = arg;
+        else
+          throw new AxiError(`Unexpected argument: ${arg}`, "VALIDATION_ERROR", [
+            "Usage: gws-axi calendar update <event-id> [flags] — one event per call",
+          ]);
     }
   }
 
@@ -160,6 +196,7 @@ function buildPatchBody(
   const body: calendar_v3.Schema$Event = {};
 
   if (flags.summary !== undefined) body.summary = flags.summary;
+  if (flags.availability) body.transparency = TRANSPARENCY[flags.availability];
   if (flags.description !== undefined) body.description = flags.description;
   if (flags.location !== undefined) body.location = flags.location;
 
@@ -256,12 +293,13 @@ export async function calendarUpdateCommand(account: string, args: string[]): Pr
     flags.duration !== undefined ||
     flags.addAttendees.length > 0 ||
     flags.removeAttendees.length > 0 ||
-    flags.replaceAttendees !== undefined;
+    flags.replaceAttendees !== undefined ||
+    flags.availability !== undefined;
   if (!hasChanges) {
     throw new AxiError("No update flags provided — nothing to change", "VALIDATION_ERROR", [
       "Pass at least one of --summary, --start, --end, --duration,",
       "--description, --location, --add-attendees, --remove-attendees,",
-      "or --replace-attendees",
+      "--replace-attendees, --free, or --busy",
     ]);
   }
 
@@ -310,7 +348,7 @@ export async function calendarUpdateCommand(account: string, args: string[]): Pr
   }
 
   const blocks: string[] = [];
-  const changedFields = Object.keys(body);
+  const changedFields = Object.keys(body).map((k) => (k === "transparency" ? "availability" : k));
   blocks.push(
     renderObject({
       action: "updated",
@@ -331,6 +369,7 @@ export async function calendarUpdateCommand(account: string, args: string[]): Pr
         end: formatEventTime(updated.end),
         status: updated.status ?? "",
         attendee_count: attendees.length,
+        availability: availabilityOf(updated),
         html_link: updated.htmlLink ?? "",
       },
     }),

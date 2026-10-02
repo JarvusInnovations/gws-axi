@@ -93,3 +93,48 @@ describe("docs read markdown renderer", () => {
     expect(render([para(["a\n"]), { sectionBreak: {} }, para(["b\n"])])).toBe("a\n\n---\n\nb");
   });
 });
+
+describe("docs read: images and tasks", () => {
+  it("renders an image's alt text when it has one", () => {
+    const body = {
+      content: [
+        { sectionBreak: {} },
+        {
+          paragraph: {
+            elements: [
+              { inlineObjectElement: { inlineObjectId: "kix.a" } },
+              { inlineObjectElement: { inlineObjectId: "kix.b" } },
+              { textRun: { content: "\n" } },
+            ],
+          },
+        },
+      ],
+    };
+    const objects = {
+      "kix.a": { inlineObjectProperties: { embeddedObject: { description: "a chart" } } },
+      "kix.b": { inlineObjectProperties: { embeddedObject: {} } },
+    };
+    const out = renderBodyAsMarkdown(body, {}, {}, objects);
+    expect(out.markdown).toBe("[image: a chart][image]");
+    expect(out.image_count).toBe(2);
+  });
+
+  it("counts checklist items", () => {
+    const lists = {
+      "kix.cb": {
+        listProperties: { nestingLevels: [{ glyphType: "GLYPH_TYPE_UNSPECIFIED" }] },
+      },
+    };
+    const out = renderBodyAsMarkdown(
+      {
+        content: [
+          { sectionBreak: {} },
+          para(["one\n"], {}, { listId: "kix.cb" }),
+          para(["two\n"], {}, { listId: "kix.cb" }),
+        ],
+      },
+      lists,
+    );
+    expect(out.task_count).toBe(2);
+  });
+});
