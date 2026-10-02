@@ -365,8 +365,13 @@ help[2]:
 ## Known issues & roadmap
 
 - **Gmail `send`**: intentionally unsupported — gws-axi drafts mail but leaves sending to a human in the Gmail UI. See the Gmail section above.
-- **Docs writes** (`append`, `insert-text`, `delete-range`, etc.): scaffolded as `NOT_IMPLEMENTED`. The next frontier.
-- **Drive writes**: `upload` and `mkdir` are shipped; `create` / `copy` / `move` / `rename` / `delete` are still scaffolded as `NOT_IMPLEMENTED`.
+- **Docs writes**: `create` / `write` / `append` (Markdown into one tab) are shipped; positional edits (`insert-text`, `delete-range`, `style-*`, `insert-table`, `edit-cell`) and comment writes are scaffolded as `NOT_IMPLEMENTED`.
+- **Docs API gaps** — Docs has these, and Google's own importer (`drive upload --convert`) produces them, but the Docs API can't write them, so the Markdown writers can't either. Each write lists what it dropped under `lossy[]`; each gap is tracked until Google adds it ([`upstream-blocked`](https://github.com/JarvusInnovations/gws-axi/labels/upstream-blocked)):
+  - native code blocks and their language — written as monospace lines ([#83](https://github.com/JarvusInnovations/gws-axi/issues/83))
+  - checked tasks — written unchecked, and `docs read` can't see the state either ([#84](https://github.com/JarvusInnovations/gws-axi/issues/84))
+  - image alt text ([#85](https://github.com/JarvusInnovations/gws-axi/issues/85))
+  - a native horizontal rule — written as a bordered empty paragraph ([#86](https://github.com/JarvusInnovations/gws-axi/issues/86))
+- **Drive writes**: `upload`, `mkdir`, `rename`, `share`, and `unshare` are shipped; `create` / `copy` / `move` / `delete` are still scaffolded as `NOT_IMPLEMENTED`.
 - **Slides writes**: still scaffolded as `NOT_IMPLEMENTED` (reads are complete).
 - **Sheets writes** (`update`, `append`, `clear`, `create`, `add-tab`): scaffolded as `NOT_IMPLEMENTED`; `read` (with inline-markdown links + cell notes) and `comments` are shipped.
 - **Testing-mode tokens** still expire every 7 days *if* you haven't published your OAuth app yet. Run `gws-axi auth publish` for the walkthrough — it covers the single-developer Production flow and removes the expiry once you've re-auth'd each account.

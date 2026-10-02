@@ -117,9 +117,7 @@ round-trips. `drive upload --convert` gains the pointer line and keeps Google's 
 - Tracked as: `docs` tab delete/rename commands — both API calls work; no command yet.
 - Tracked as: a mixed-kind nested list (bullets under numbers) takes the outer preset;
   separate `createParagraphBullets` on the inner range might preserve it.
-- Tracked as: native code blocks (with language) and checked tasks exist in Docs and survive
-  Google's importer, but the Docs API can neither write nor read them (checked against the
-  live discovery document). Re-check when the API's discovery revision moves; until then
-  `lossy[]` discloses both.
+- Issue: #83 native code blocks, #84 checked tasks, #85 image alt, #86 horizontal rule —
+  all `upstream-blocked` on the Docs API.
 - Tracked as: very large bodies may hit undocumented `batchUpdate` request limits; no cap
   yet.

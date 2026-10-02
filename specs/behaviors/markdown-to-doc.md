@@ -77,6 +77,13 @@ written from Markdown do — otherwise starts with a blank gap that has to be re
 every time. Google's importer leaves that gap; this converter does not. A paragraph appended
 below existing content keeps its style's normal spacing.
 
+## Upstream gaps
+
+Four constructs exist in Docs, and Google's importer creates them, but the Docs API cannot write
+them. Each is tracked with the `upstream-blocked` label so the converter can adopt it when the
+API does: native code blocks with a language (#83), checked tasks (#84), image alt text (#85),
+and a native horizontal rule (#86). Each issue names the discovery revision last checked.
+
 ## Disclosure
 
 A write reports what did not survive conversion as `lossy[N]{construct,count,handling}` — for
