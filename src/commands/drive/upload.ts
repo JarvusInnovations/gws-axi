@@ -430,6 +430,13 @@ export async function driveUploadCommand(account: string, args: string[]): Promi
   }
   if (isNativeDoc) {
     suggestions.push(`Run \`gws-axi docs read ${id}\` to read it as markdown`);
+    if (targetMime && sourceMime.startsWith("text/")) {
+      // The verb names the converter (specs/behaviors/markdown-to-doc.md):
+      // this Doc came from Google's importer; the docs writers use gws-axi's.
+      suggestions.push(
+        `This Doc was built by Google's importer. \`gws-axi docs create\` / \`docs write\` write Markdown through gws-axi's own converter — the one \`docs read\` round-trips, with no gap above the first heading, and able to target one tab`,
+      );
+    }
   } else if ((file.mimeType ?? "").startsWith("application/vnd.google-apps.")) {
     suggestions.push(
       `Native Google file — run \`gws-axi docs download ${id} --as <mime>\` to export it`,

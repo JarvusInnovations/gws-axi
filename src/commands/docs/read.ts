@@ -191,6 +191,7 @@ export async function docsReadCommand(account: string, args: string[]): Promise<
   let activeTab: FlatTab | undefined;
   let contentBody: docs_v1.Schema$Body | undefined;
   let contentLists: Record<string, docs_v1.Schema$List> | undefined;
+  let contentFootnotes: Record<string, docs_v1.Schema$Footnote> | undefined;
 
   if (flags.tab) {
     activeTab = flat.find((t) => t.id === flags.tab);
@@ -206,13 +207,16 @@ export async function docsReadCommand(account: string, args: string[]): Promise<
     }
     contentBody = activeTab.tab.documentTab?.body ?? undefined;
     contentLists = activeTab.tab.documentTab?.lists ?? undefined;
+    contentFootnotes = activeTab.tab.documentTab?.footnotes ?? undefined;
   } else if (flat.length === 1) {
     activeTab = flat[0];
     contentBody = activeTab.tab.documentTab?.body ?? undefined;
     contentLists = activeTab.tab.documentTab?.lists ?? undefined;
+    contentFootnotes = activeTab.tab.documentTab?.footnotes ?? undefined;
   } else if (flat.length === 0) {
     contentBody = doc.body ?? undefined;
     contentLists = doc.lists ?? undefined;
+    contentFootnotes = doc.footnotes ?? undefined;
   }
   // (multi-tab, no --tab) → activeTab stays undefined, contentBody undefined
 
@@ -273,7 +277,7 @@ export async function docsReadCommand(account: string, args: string[]): Promise<
   const suggestions: string[] = [];
 
   if (contentBody) {
-    const rendered = renderBodyAsMarkdown(contentBody, contentLists);
+    const rendered = renderBodyAsMarkdown(contentBody, contentLists, contentFootnotes);
     const total = rendered.markdown.length;
     const tabSuffix = activeTab ? ` --tab ${activeTab.id}` : "";
 

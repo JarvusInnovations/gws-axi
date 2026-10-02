@@ -28,6 +28,8 @@ specs/
 ├── architecture.md      ← tech stack, dispatch structure, auth/config/output/error models
 ├── api/
 │   └── conventions.md   ← cross-command output, error, account-resolution, help[] contracts
+├── behaviors/           ← rules shared by several commands (e.g. the Markdown↔Doc mapping)
+│   └── <behavior>.md
 └── commands/            ← one file per command or command group (what it does, flags, output, errors)
     └── <service>-<command>.md
 ```
@@ -35,6 +37,7 @@ specs/
 - **principles.md** — the decisive value judgments that pick a side when two reasonable implementations conflict. Feature specs reference the relevant ones *down* into their own `## Principles` sections.
 - **architecture.md** — concrete, foundational structure and model decisions (distinct from principles, which are value judgments).
 - **api/conventions.md** — the contracts every command honors: TOON output shape, the canonical empty-list form, the `account:` header, `help[]` suggestions, `AxiError` shape, account resolution + write-protection.
+- **behaviors/** — a rule that several commands share and that no one command owns. Command specs link to it rather than restating it.
 - **commands/** — one spec per command. Declares flags, default vs `--full`/opt-in output schema, error translation, and account/write-protection behavior.
 
 ## Conventions

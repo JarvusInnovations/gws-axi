@@ -6,6 +6,14 @@ import { docsDiffCommand, DIFF_HELP } from "./docs/diff.js";
 import { docsDownloadCommand, DOWNLOAD_HELP } from "./docs/download.js";
 import { docsFindCommand, FIND_HELP } from "./docs/find.js";
 import { docsReadCommand, READ_HELP } from "./docs/read.js";
+import {
+  APPEND_HELP,
+  CREATE_HELP,
+  WRITE_HELP,
+  docsAppendCommand,
+  docsCreateCommand,
+  docsWriteCommand,
+} from "./docs/write.js";
 import { driveRevisionsCommand, REVISIONS_HELP } from "./drive/revisions.js";
 
 interface DocsSubcommand {
@@ -21,19 +29,13 @@ interface DocsSubcommand {
 // replaces the whole document — so the lines say that rather than implying a
 // targeted edit.
 const ROUND_TRIP = [
-  "gws-axi docs download <documentId> --out ./doc.md — export the current content to edit locally",
-  "gws-axi drive upload ./doc.md --update <documentId> --convert --account <email> — write it back as a NEW REVISION, replacing the ENTIRE document",
-  "Multi-tab Docs are refused with MULTI_TAB_TARGET unless --replace-all-tabs; `gws-axi docs diff <documentId> <revA>` compares revisions afterward",
+  "gws-axi docs read <documentId> --tab <id> --out ./tab.md — export one tab's content to edit locally",
+  "gws-axi docs write <documentId> ./tab.md --tab <id> --account <email> — write it back, replacing that ONE tab's content (other tabs untouched)",
+  "gws-axi docs append <documentId> --content <markdown> --tab <id> --account <email> — add content at the end of a tab; `gws-axi docs diff <documentId> <revA>` compares revisions afterward",
 ];
 
-// Write subcommands are still stubs but we keep per-command --help text
-// so agents can plan around the future surface.
-const APPEND_HELP = `usage: gws-axi docs append <documentId> --text <markdown> [--tab <id>] [flags]
-status: planned for v1 writes — not yet implemented
-notes:
-  Will append the given markdown to the end of the body. Requires
-  --account <email> when 2+ accounts are authenticated.
-`;
+// Positional write subcommands are still stubs but we keep per-command
+// --help text so agents can plan around the future surface.
 const INSERT_TEXT_HELP = `usage: gws-axi docs insert-text <documentId> --at <ref|index> --text <markdown> [flags]
 status: planned for v1 writes — not yet implemented
 notes:
@@ -74,7 +76,9 @@ const SUBCOMMANDS: DocsSubcommand[] = [
   // model, but the implementation is Drive-wide (any file type).
   { name: "revisions", mutation: false, help: REVISIONS_HELP, handler: driveRevisionsCommand },
   { name: "diff", mutation: false, help: DIFF_HELP, handler: docsDiffCommand },
-  { name: "append", mutation: true, help: APPEND_HELP, instead: ROUND_TRIP },
+  { name: "create", mutation: true, help: CREATE_HELP, handler: docsCreateCommand },
+  { name: "write", mutation: true, help: WRITE_HELP, handler: docsWriteCommand },
+  { name: "append", mutation: true, help: APPEND_HELP, handler: docsAppendCommand },
   { name: "insert-text", mutation: true, help: INSERT_TEXT_HELP, instead: ROUND_TRIP },
   { name: "delete-range", mutation: true, help: DELETE_RANGE_HELP, instead: ROUND_TRIP },
   { name: "style-text", mutation: true, help: STYLE_TEXT_HELP, instead: ROUND_TRIP },
@@ -121,14 +125,16 @@ writes[${writes.length}]:
 notes:
   Writes require --account <email> when 2+ accounts are authenticated.
   Reads use the default account when --account is not provided.
-  Write subcommands are scaffolded for the next slice — all currently
-  throw NOT_IMPLEMENTED after account resolution runs.
+  create, write, and append are live — Markdown in, one tab written, through
+  gws-axi's own converter (the inverse of \`docs read\`). The positional edit
+  subcommands are scaffolded and throw NOT_IMPLEMENTED after account resolution.
 ${renderAlternatives(SUBCOMMANDS)}subcommand help:
   gws-axi docs read --help        for documentId + tab handling
   gws-axi docs find --help        for text-match search
   gws-axi docs comments --help    for review comments + replies
   gws-axi docs download --help    for native-file export / raw download
   gws-axi docs diff --help        for comparing two revisions
+  gws-axi docs write --help       for writing Markdown to one tab (create, append too)
 examples:
   gws-axi docs read 1BxAbc...
   gws-axi docs read 1BxAbc... --tab t.0 --full
@@ -136,6 +142,8 @@ examples:
   gws-axi docs comments 1BxAbc...
   gws-axi docs download 1BxAbc... --out ./spec.docx
   gws-axi docs diff 1BxAbc... 841 865
+  gws-axi docs write 1BxAbc... ./notes.md --tab t.0 --account you@example.com
+  gws-axi docs create --title "Sprint notes" ./notes.md --account you@example.com
 `;
 
 export async function docsCommand(args: string[]): Promise<string> {
