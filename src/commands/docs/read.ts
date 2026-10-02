@@ -192,6 +192,7 @@ export async function docsReadCommand(account: string, args: string[]): Promise<
   let contentBody: docs_v1.Schema$Body | undefined;
   let contentLists: Record<string, docs_v1.Schema$List> | undefined;
   let contentFootnotes: Record<string, docs_v1.Schema$Footnote> | undefined;
+  let contentInlineObjects: Record<string, docs_v1.Schema$InlineObject> | undefined;
 
   if (flags.tab) {
     activeTab = flat.find((t) => t.id === flags.tab);
@@ -208,15 +209,18 @@ export async function docsReadCommand(account: string, args: string[]): Promise<
     contentBody = activeTab.tab.documentTab?.body ?? undefined;
     contentLists = activeTab.tab.documentTab?.lists ?? undefined;
     contentFootnotes = activeTab.tab.documentTab?.footnotes ?? undefined;
+    contentInlineObjects = activeTab.tab.documentTab?.inlineObjects ?? undefined;
   } else if (flat.length === 1) {
     activeTab = flat[0];
     contentBody = activeTab.tab.documentTab?.body ?? undefined;
     contentLists = activeTab.tab.documentTab?.lists ?? undefined;
     contentFootnotes = activeTab.tab.documentTab?.footnotes ?? undefined;
+    contentInlineObjects = activeTab.tab.documentTab?.inlineObjects ?? undefined;
   } else if (flat.length === 0) {
     contentBody = doc.body ?? undefined;
     contentLists = doc.lists ?? undefined;
     contentFootnotes = doc.footnotes ?? undefined;
+    contentInlineObjects = doc.inlineObjects ?? undefined;
   }
   // (multi-tab, no --tab) → activeTab stays undefined, contentBody undefined
 
@@ -277,7 +281,12 @@ export async function docsReadCommand(account: string, args: string[]): Promise<
   const suggestions: string[] = [];
 
   if (contentBody) {
-    const rendered = renderBodyAsMarkdown(contentBody, contentLists, contentFootnotes);
+    const rendered = renderBodyAsMarkdown(
+      contentBody,
+      contentLists,
+      contentFootnotes,
+      contentInlineObjects,
+    );
     const total = rendered.markdown.length;
     const tabSuffix = activeTab ? ` --tab ${activeTab.id}` : "";
 
@@ -313,7 +322,14 @@ export async function docsReadCommand(account: string, args: string[]): Promise<
 
     if (rendered.image_count > 0) {
       suggestions.push(
-        `${rendered.image_count} image${rendered.image_count === 1 ? "" : "s"} rendered as \`[image]\` placeholders — use Drive to view them inline`,
+        `${rendered.image_count} image${rendered.image_count === 1 ? "" : "s"} rendered as \`[image]\` placeholders (with alt text when the image has it) — use Drive to view them inline`,
+      );
+    }
+    if (rendered.task_count > 0) {
+      // Rendering every task open would be silently wrong about the checked
+      // ones; the API can't say which they are (issue #84).
+      suggestions.push(
+        `${rendered.task_count} checklist item${rendered.task_count === 1 ? "" : "s"} rendered as \`- [ ]\` — the Docs API doesn't expose which are checked, so open the Doc to see their state`,
       );
     }
     // The in-process converter handles most docs well but loses some
