@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildRawMessage, parseRecipients } from "./compose.js";
+import { buildMessage, buildRawMessage, filenameParams, parseRecipients } from "./compose.js";
 
 /** Decode a base64url raw message into its header block and decoded HTML body. */
 function decodeRaw(raw: string): { header: string; body: string } {
@@ -200,5 +200,49 @@ describe("buildRawMessage --plain", () => {
 
   it("renders an empty body as an empty document", () => {
     expect(plainBody("")).toBe("<html><body></body></html>");
+  });
+});
+
+describe("attachments", () => {
+  const base = {
+    from: "me@x.com",
+    to: ["you@x.com"],
+    subject: "Files",
+    body: "See **attached**.",
+  };
+
+  it("keeps the single text/html part when there is nothing to attach", () => {
+    const mime = buildMessage(base);
+    expect(mime).toContain('Content-Type: text/html; charset="UTF-8"');
+    expect(mime).not.toContain("multipart");
+  });
+
+  it("wraps the one html part and each file in multipart/mixed", () => {
+    const mime = buildMessage(
+      {
+        ...base,
+        attachments: [
+          { name: "a.txt", mimeType: "text/plain", content: Buffer.from("hello") },
+          { name: "b.pdf", mimeType: "application/pdf", content: Buffer.from([0, 1, 2, 255]) },
+        ],
+      },
+      "BOUND",
+    );
+    expect(mime).toContain('Content-Type: multipart/mixed; boundary="BOUND"');
+    const parts = mime.split("--BOUND").slice(1, -1);
+    expect(parts).toHaveLength(3);
+    expect(parts[0]).toContain("Content-Type: text/html");
+    expect(parts.filter((p) => p.includes("text/html"))).toHaveLength(1);
+    expect(parts[1]).toContain('Content-Disposition: attachment; filename="a.txt"');
+    expect(parts[1]).toContain(Buffer.from("hello").toString("base64"));
+    expect(parts[2]).toContain('Content-Type: application/pdf; name="b.pdf"');
+    expect(parts[2]).toContain(Buffer.from([0, 1, 2, 255]).toString("base64"));
+    expect(mime.trimEnd().endsWith("--BOUND--")).toBe(true);
+  });
+
+  it("encodes a non-ASCII filename as an encoded-word, which Gmail keeps", () => {
+    const encoded = `=?UTF-8?B?${Buffer.from("Résumé — draft.md").toString("base64")}?=`;
+    expect(filenameParams("Résumé — draft.md")).toBe(`filename="${encoded}"`);
+    expect(filenameParams('q"uote.txt')).toBe('filename="q\\"uote.txt"');
   });
 });
