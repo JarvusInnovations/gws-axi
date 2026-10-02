@@ -4,6 +4,7 @@ depends: []
 specs:
   - specs/commands/auth-login.md
 issues: [69]
+pr: 97
 ---
 
 # Plan: served setup page and pasted-callback sign-in
