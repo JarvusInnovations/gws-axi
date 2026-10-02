@@ -38,7 +38,7 @@ List, **newest first**:
 activities[N]{time,action,actor,target}
 ```
 
-- `time` — the activity timestamp (or the end of its `timeRange`).
+- `time` — the activity timestamp (or the end of its `timeRange`), in local-offset ISO like the `range:` echo ([conventions § Displayed times](../api/conventions.md#displayed-times)). It was UTC `Z` form until 2026-10-02.
 - `action` — the primary action type, normalized to a short label. Filterable types: `create`, `edit`, `move`, `rename`, `delete`, `restore`, `permission_change`, `comment`. Additional labels surfaced in output but not selectable via `--action`: `dlp_change`, `reference`, `settings_change`, `applied_label_change`. An activity bundling multiple actions lists the primary one.
 - `actor` — who did it, by name. The API returns `actor.user.knownUser.personName` =
   `people/<id>` and no name, so known users are resolved through the shared resolver
