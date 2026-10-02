@@ -1,11 +1,12 @@
 ---
-status: in-progress
+status: done
 depends: []
 specs:
   - specs/behaviors/markdown-to-doc.md
   - specs/commands/docs-write.md
   - specs/commands/docs-read.md
   - specs/commands/drive-upload.md
+pr: 82
 ---
 
 # Plan: Markdown writers for Docs (create, write, append)
@@ -53,27 +54,27 @@ round-trips. `drive upload --convert` gains the pointer line and keeps Google's 
 
 ## Validation
 
-- [ ] `bun run build`, `lint`, `format:check`, `test` pass.
-- [ ] Unit: every row of the construct table produces the expected requests, with index
+- [x] `bun run build`, `lint`, `format:check`, `test` pass.
+- [x] Unit: every row of the construct table produces the expected requests, with index
       ranges checked against the inserted text; `lossy[]` counts for checked tasks, code
       languages, inline HTML, over-deep nesting.
-- [ ] Unit: the reader renders fixtures for each construct (code block, quote, checkbox,
+- [x] Unit: the reader renders fixtures for each construct (code block, quote, checkbox,
       hard break, rule, nested ordered list) and does not emit the leading `---`.
-- [ ] Live, scratch folder `1MWU4RkrVuDDIqJL9swWZIvLYCJpP_6Hh` (chris@jarv.us): a fixture
+- [x] Live, scratch folder `1MWU4RkrVuDDIqJL9swWZIvLYCJpP_6Hh` (chris@jarv.us): a fixture
       covering the whole table round-trips through `docs write` → `docs read --tab` after
       normalization; `docs download --as text/markdown` is compared by eye and the behavior
       spec's table updated where it differs.
-- [ ] Live: `docs write --tab` on a 2-tab Doc leaves the other tab untouched (its text and
+- [x] Live: `docs write --tab` on a 2-tab Doc leaves the other tab untouched (its text and
       `docs read` output identical before and after).
-- [ ] Live: `docs write --new-tab`, `docs append`, `docs create --parent` each produce the
+- [x] Live: `docs write --new-tab`, `docs append`, `docs create --parent` each produce the
       documented response; `docs write` on a multi-tab Doc without `--tab` returns
       `TAB_REQUIRED` and writes nothing.
-- [ ] Live: a stale `requiredRevisionId` is refused — edit the Doc between a forced read and
+- [x] Live: a stale `requiredRevisionId` is refused — edit the Doc between a forced read and
       write and confirm `DOCUMENT_CHANGED`.
-- [ ] Live: a table and a footnote survive the two-batch write; an `http` image is inserted; a
+- [x] Live: a table and a footnote survive the two-batch write; an `http` image is inserted; a
       local image path is `IMAGE_NOT_FETCHABLE` with nothing written.
-- [ ] `drive upload x.md --convert` shows the importer line.
-- [ ] Live: a Doc written from Markdown opening with `# Heading` has no gap above the heading
+- [x] `drive upload x.md --convert` shows the importer line.
+- [x] Live: a Doc written from Markdown opening with `# Heading` has no gap above the heading
       (paragraph `spaceAbove` is 0 in `documents.get`, and it looks right in the editor).
 
 ## Risks / unknowns
@@ -90,8 +91,34 @@ round-trips. `drive upload --convert` gains the pointer line and keeps Google's 
 
 ## Notes
 
-_Populated at closeout._
+- **Every API piece was probed before the spec was written** (scratch Docs `md2doc probe
+  (google importer)` and `md2doc probe (api)` in the safe-to-delete folder): tab add/rename/
+  clear, tab-scoped text and styles, nesting by tab prefix, `BULLET_CHECKBOX`, footnotes,
+  images by URL, tables, a vertical tab as a hard break, `spaceAbove: 0`, and the stale-
+  revision 400. The behavior spec's upstream table is the record.
+- **Index arithmetic held on the first live run** of the full fixture, tables and footnotes
+  included. The one round-trip defect found live was `insertTable`'s inherited paragraph
+  (a rule paragraph doubled); the insert now resets the paragraph it creates, and a
+  trailing table gets an empty paragraph to precede instead of an end-of-segment insert.
+- **Google's exporter is weaker than expected as a check**: it never fences API-written code
+  (three encodings tried), drops bordered rules, and exports all tabs at once. Round-trip
+  through `docs read` is the only real oracle, which the spec already said.
+- **`docs read` needed as much work as the writer**: code blocks, quotes, checkboxes, hard
+  breaks, footnote definitions, header-row bold, list separation, and the stray leading
+  `---` were all reader gaps that would have failed the round-trip.
+- **Not verified with a live stale write through the CLI** — the API behavior was probed
+  directly (probe3) and the error-message match is unit-covered by inspection only.
+- The normalizer used for the live comparison lives in the session scratchpad, not the
+  repo; the rules it encodes are in the spec.
 
 ## Follow-ups
 
-_Populated at closeout._
+- Tracked as: local image upload (push to Drive, then insert by URL).
+- Tracked as: `docs` tab delete/rename commands — both API calls work; no command yet.
+- Tracked as: a mixed-kind nested list (bullets under numbers) takes the outer preset;
+  separate `createParagraphBullets` on the inner range might preserve it.
+- Tracked as: Google's exporter fences only its own importer's code paragraphs; if the
+  encoding it keys on is ever found, matching it would make `docs download --as
+  text/markdown` a second round-trip oracle.
+- Tracked as: very large bodies may hit undocumented `batchUpdate` request limits; no cap
+  yet.
