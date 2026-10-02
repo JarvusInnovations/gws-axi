@@ -241,6 +241,8 @@ gws-axi drive unshare <id> --with lead@school.org --account you@example.com
 
 ```bash
 gws-axi drive mkdir "Reports" --account you@example.com         # create a folder
+gws-axi drive move <fileId> --to <folderId> --account you@example.com   # file it in another folder
+gws-axi drive trash <fileId> --account you@example.com           # to the trash (drive untrash restores; no permanent delete)
 gws-axi drive upload ./report.pdf --account you@example.com     # upload a local file
 echo '# Notes' | gws-axi drive upload - --name notes.md --convert --account you@example.com   # stdin → native Doc
 gws-axi drive upload --content '# Notes' --name notes.md --convert --account you@example.com   # inline content → native Doc
@@ -371,7 +373,7 @@ help[2]:
   - checked tasks — written unchecked, and `docs read` can't see the state either ([#84](https://github.com/JarvusInnovations/gws-axi/issues/84))
   - image alt text ([#85](https://github.com/JarvusInnovations/gws-axi/issues/85))
   - a native horizontal rule — written as a bordered empty paragraph ([#86](https://github.com/JarvusInnovations/gws-axi/issues/86))
-- **Drive writes**: `upload`, `mkdir`, `rename`, `share`, and `unshare` are shipped; `create` / `copy` / `move` / `delete` are still scaffolded as `NOT_IMPLEMENTED`.
+- **Drive writes**: `upload`, `mkdir`, `rename`, `move`, `trash`, `untrash`, `share`, and `unshare` are shipped; `create` / `copy` are still scaffolded as `NOT_IMPLEMENTED`. There is no permanent delete by design — `trash` is reversible for 30 days.
 - **Slides writes**: still scaffolded as `NOT_IMPLEMENTED` (reads are complete).
 - **Sheets writes** (`update`, `append`, `clear`, `create`, `add-tab`): scaffolded as `NOT_IMPLEMENTED`; `read` (with inline-markdown links + cell notes) and `comments` are shipped.
 - **Testing-mode tokens** still expire every 7 days *if* you haven't published your OAuth app yet. Run `gws-axi auth publish` for the walkthrough — it covers the single-developer Production flow and removes the expiry once you've re-auth'd each account.
