@@ -120,6 +120,26 @@ in **local-offset ISO** (`2026-08-26T00:00:00-04:00`), never UTC `Z` form
 makes tokens and shortcuts auditable — the caller can always see the window it actually got, without
 re-deriving it.
 
+## Displayed times
+
+Every instant a command prints — an event's start and end, a message's time, an activity's time,
+a free/busy block — is rendered in **local-offset ISO**, the same form as the `range:` echo. An
+upstream response's own zone is never passed through: Calendar returns an event's times in the
+*calendar's* zone (or the event's declared zone), which can differ from where the caller is and
+from one account or calendar to the next.
+
+- Two instants on the same output are always in the same offset form, so they compare and sort
+  as written, and a reader skimming the column reads wall-clock time where they are.
+- All-day values stay dates; they have no instant to convert.
+- A zone that differs from local is **disclosed, not applied**: `calendar get` / `create` /
+  `update` suffix a time with `(set in <IANA zone>)` when the event declares a zone other than
+  the local one, and `calendar events` notes when the calendar's own zone differs.
+
+> **Why:** A pass-through offset is self-consistent (`13:00-05:00` *is* `18:00Z`), so the bug is
+> silent: a parser gets the right instant while a reader — human or agent reading the hour —
+> places every meeting an hour off, on one account and not another (issue #63, where an
+> account's calendar was in America/Chicago and its owner in America/New_York).
+
 ## People
 
 Some upstream APIs identify a person only by id — Drive Activity returns `people/{id}` and never
