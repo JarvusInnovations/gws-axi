@@ -99,6 +99,7 @@ export async function slidesPageCommand(account: string, args: string[]): Promis
         ...(content.table_count > 0 ? { table_count: content.table_count } : {}),
         ...(content.has_video ? { has_video: true } : {}),
         ...(content.link_count > 0 ? { links_resolved: content.link_count } : {}),
+        ...(content.skipped ? { skipped: true } : {}),
       },
     }),
   );

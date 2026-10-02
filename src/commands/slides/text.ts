@@ -11,6 +11,8 @@ export interface SlideContent {
   has_video: boolean;
   /** Number of embedded links resolved inline as markdown across this slide. */
   link_count: number;
+  /** Hidden in presentation mode (`slideProperties.isSkipped`). */
+  skipped: boolean;
 }
 
 /**
@@ -89,6 +91,7 @@ export function extractSlideContent(slide: slides_v1.Schema$Page, index: number)
     table_count: 0,
     has_video: false,
     link_count: 0,
+    skipped: slide.slideProperties?.isSkipped === true,
   };
 
   for (const el of slide.pageElements ?? []) {
