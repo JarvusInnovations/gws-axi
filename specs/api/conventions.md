@@ -240,7 +240,7 @@ in the variable must not degrade into "acted as somebody else."
 - Every command emits `account_source: env` in its header whenever the pin decided the account —
   including the single-account case, where no other `account_source` line would appear
   ([principles.md#self-describing-account-header](../principles.md#self-describing-account-header)).
-- The home view (`gws-axi` / `--summary`), `auth accounts`, `auth status`, and `doctor` report the
+- The home view (`gws-axi`), `auth accounts`, `auth status`, and `doctor` report the
   pin as `account_lock: <email> (GWS_AXI_ACCOUNT)`. Where those surfaces report write-protection,
   they say it is satisfied by the pin rather than claiming writes still require `--account`.
 - `auth use <email>` still writes `default_account` while a pin is active — it is a legitimate

@@ -24,7 +24,7 @@ export const DOCTOR_HELP = `usage: gws-axi doctor [--check <tier|tier.service>] 
 flags[3]:
   --check <tier>           Run only one tier (prerequisites|setup|runtime)
   --check runtime.<service> Run probes for one service (${SERVICES.join(" | ")})
-  --summary                One-line summary output (used by SessionStart hook)
+  --summary                One-line health status; exits 1 when any check fails
 tiers:
   prerequisites  gcloud presence, node version, config dir perms
   setup          progress of the 7-step BYO onboarding
@@ -235,6 +235,9 @@ export async function doctorCommand(args: string[]): Promise<Record<string, unkn
     runtimeRows.filter((r) => r.status === "warn").length;
 
   if (summaryMode) {
+    // Same exit contract as the full report: a one-line answer must not hide
+    // a failure from a script that only checks the status code.
+    process.exitCode = failing > 0 || lockBroken ? 1 : 0;
     const state = readSetupState();
     const { done, total } = setupProgress(state);
     if (done < total) {

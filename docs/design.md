@@ -261,7 +261,7 @@ help[2]:
 
 - `--check <tier>` — run only one tier (e.g., `--check runtime`)
 - `--check <tier>.<name>` — run one specific check (e.g., `--check runtime.gmail`)
-- `--summary` — one-line output (used by SessionStart hook)
+- `--summary` — one-line health status (`setup N/M …` / `ok` / `N failing checks …`); exits 1 when any check fails, like the full report
 - `--json` — emit JSON instead of TOON (debugging only)
 - `--fix` — (v2, deferred) auto-resolve safe failures
 
@@ -324,11 +324,7 @@ Non-zero exit codes for unrecoverable errors; zero exit for idempotent no-ops (e
 
 ## Session hook (SessionStart)
 
-The SessionStart hook is installed **only** by the explicit `gws-axi setup hooks` command (never auto-installed on first run; no env toggle). It delegates to `installSessionStartHooks({ marker: "gws-axi", timeoutSeconds: 10 })` from `axi-sdk-js`, installing/repairing across Claude Code (`~/.claude/settings.json`), Codex (`~/.codex/hooks.json` + `config.toml`), and OpenCode — idempotent and self-repairing. The hook runs `gws-axi --summary` which emits a compact state line:
-
-- If setup incomplete: `gws-axi: setup 3/8 — run 'gws-axi auth setup' to continue`
-- If setup complete and healthy: `gws-axi: ok (5 services, chris@jarv.us)`
-- If setup complete with failures: `gws-axi: 1 failing check — run 'gws-axi doctor'`
+The SessionStart hook is installed **only** by the explicit `gws-axi setup hooks` command (never auto-installed on first run; no env toggle). It delegates to `installSessionStartHooks({ marker: "gws-axi", timeoutSeconds: 10 })` from `axi-sdk-js`, installing/repairing across Claude Code (`~/.claude/settings.json`), Codex (`~/.codex/hooks.json` + `config.toml`), and OpenCode — idempotent and self-repairing. The hook runs bare `gws-axi` — the content-first home view (account, other accounts, write protection, setup progress, help), which reads local state only and makes no network calls. `gws-axi doctor --summary` is the separate one-line health check (setup progress / ok / N failing checks) and exits 1 when anything fails.
 
 Token-budget-aware — single-line output in the healthy case.
 
