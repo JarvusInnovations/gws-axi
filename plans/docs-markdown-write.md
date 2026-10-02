@@ -1,5 +1,5 @@
 ---
-status: planned
+status: in-progress
 depends: []
 specs:
   - specs/behaviors/markdown-to-doc.md
@@ -37,16 +37,18 @@ round-trips. `drive upload --convert` gains the pointer line and keeps Google's 
    over the text we inserted, so it is unit-testable without the API.
 2. **Second batch** for tables and footnotes: re-read the tab, fill cells (in reverse index
    order) and footnote segments. Failure between batches → `WRITE_INCOMPLETE`.
-3. **Horizontal rule**: an empty paragraph with `borderBottom`; verify what Google's exporter
+3. **Top of tab**: `spaceAbove: 0` on the first paragraph when writing at index 1
+   (`write`, `create`, and `append` into an empty tab).
+4. **Horizontal rule**: an empty paragraph with `borderBottom`; verify what Google's exporter
    does with it and record the answer in the behavior spec's table.
-4. **Reader** (`src/commands/docs/markdown.ts`): code blocks from all-monospace paragraphs,
+5. **Reader** (`src/commands/docs/markdown.ts`): code blocks from all-monospace paragraphs,
    blockquotes from start+end indents, checkbox lists, `\u000b` → hard break, bordered empty
    paragraph → `---`, skip the leading section break, `1.` at every level.
-5. **Commands** (`src/commands/docs/write.ts`): shared source parsing with `drive upload`
+6. **Commands** (`src/commands/docs/write.ts`): shared source parsing with `drive upload`
    (extract the source reader if it is not already shared), tab resolution with `TAB_REQUIRED`
    / `TAB_NOT_FOUND`, `writeControl.requiredRevisionId`, the `lossy[]` report, and
    `create` via `files.create` + the write path.
-6. Dispatcher: `create`, `write` real; `append` real; stub `instead[]` lines point at
+7. Dispatcher: `create`, `write` real; `append` real; stub `instead[]` lines point at
    `docs write`. README, CLAUDE.md status, `docs.ts` help.
 
 ## Validation
@@ -71,6 +73,8 @@ round-trips. `drive upload --convert` gains the pointer line and keeps Google's 
 - [ ] Live: a table and a footnote survive the two-batch write; an `http` image is inserted; a
       local image path is `IMAGE_NOT_FETCHABLE` with nothing written.
 - [ ] `drive upload x.md --convert` shows the importer line.
+- [ ] Live: a Doc written from Markdown opening with `# Heading` has no gap above the heading
+      (paragraph `spaceAbove` is 0 in `documents.get`, and it looks right in the editor).
 
 ## Risks / unknowns
 

@@ -68,6 +68,14 @@ at once.
 Anything not in the table is written as its plain text, never dropped, and counted in the
 disclosure.
 
+### No gap at the top
+
+The first paragraph written at the start of a tab has **no space above it**, whatever its
+style. Docs' heading styles carry space-above, so a Doc that opens with a heading — as most
+written from Markdown do — otherwise starts with a blank gap that has to be removed by hand
+every time. Google's importer leaves that gap; this converter does not. A paragraph appended
+below existing content keeps its style's normal spacing.
+
 ## Disclosure
 
 A write reports what did not survive conversion as `lossy[N]{construct,count,handling}` — for
@@ -99,6 +107,7 @@ suggestion is to re-read and re-run.
 | Google's importer encodes a blockquote as 30pt start/first-line/end indents, a hard break as `\u000b`, inline code and code blocks as `Roboto Mono` runs, and bolds a table's first row with `tableHeader` set | Observed in a `drive upload --convert` of a probe file |
 | Google's exporter turns a 30/30/30pt-indented paragraph back into `>` but a 36/36pt one into plain indented text | Observed |
 | Google's exporter emits a fenced block for consecutive monospace paragraphs and guesses a language tag; it does not come from the Doc | Observed: `js` appeared for `const x = 1;` with nothing stored |
+| A heading at the top of a Doc shows its named style's space-above as a visible gap; `paragraphStyle.spaceAbove: 0pt` on that paragraph removes it without changing the style | To verify |
 | Google's exporter drops a continuous section break; whether it renders a bottom-bordered paragraph as `---` is unverified | Section break observed; border to verify |
 | `batchUpdate` is atomic: all requests apply or none | Documented |
 | `writeControl.requiredRevisionId` refuses a request against a stale revision | Documented; to verify |
