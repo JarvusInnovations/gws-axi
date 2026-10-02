@@ -4,6 +4,11 @@ import type { docs_v1 } from "googleapis";
 // We walk the StructuralElement tree and emit Markdown; images become
 // `[image: alt]` placeholders. Unknown elements fall through to their
 // textual content so the output is never lossy-silent.
+//
+// This is the inverse of md-to-doc.ts (specs/behaviors/markdown-to-doc.md):
+// Markdown written by `docs write` must read back as the same Markdown, so
+// the two share their encodings — monospace runs for code, 30pt indents for a
+// quote, a vertical tab for a hard break, a bottom border for a rule.
 
 type StructuralElement = docs_v1.Schema$StructuralElement;
 type Paragraph = docs_v1.Schema$Paragraph;
@@ -26,9 +31,23 @@ export function renderBodyAsMarkdown(
     return { markdown: "", image_count: 0 };
   }
   const parts: string[] = [];
-  for (const element of body.content) {
+  // Consecutive code-line paragraphs form one fenced block.
+  let codeLines: string[] | undefined;
+  const closeCode = () => {
+    if (codeLines) parts.push(`\`\`\`\n${codeLines.join("\n")}\n\`\`\`\n\n`);
+    codeLines = undefined;
+  };
+  for (const [i, element] of body.content.entries()) {
+    // Every body opens with a section break; it is structure, not content.
+    if (i === 0 && element.sectionBreak) continue;
+    if (element.paragraph && isCodeLine(element.paragraph)) {
+      (codeLines ??= []).push(codeLineText(element.paragraph));
+      continue;
+    }
+    closeCode();
     parts.push(renderStructuralElement(element, ctx));
   }
+  closeCode();
   return {
     markdown: parts
       .join("")
@@ -41,6 +60,30 @@ export function renderBodyAsMarkdown(
 interface RenderCtx {
   lists: ListsMap;
   imageCount: number;
+}
+
+const MONO = /mono|consolas|courier|code/i;
+
+function isMono(run: TextRun | undefined): boolean {
+  return MONO.test(run?.textStyle?.weightedFontFamily?.fontFamily ?? "");
+}
+
+/**
+ * A code line: a body paragraph whose every run with visible text is
+ * monospace. The writer styles whole lines this way; so does Google's importer.
+ */
+function isCodeLine(para: Paragraph): boolean {
+  if (para.bullet || headingLevelFor(para.paragraphStyle?.namedStyleType ?? "") > 0) return false;
+  const runs = (para.elements ?? []).map((e) => e.textRun).filter((r): r is TextRun => !!r);
+  const visible = runs.filter((r) => (r.content ?? "").trim().length > 0);
+  return visible.length > 0 && visible.every(isMono);
+}
+
+function codeLineText(para: Paragraph): string {
+  return (para.elements ?? [])
+    .map((e) => e.textRun?.content ?? "")
+    .join("")
+    .replace(/\n$/, "");
 }
 
 function renderStructuralElement(el: StructuralElement, ctx: RenderCtx): string {
@@ -73,7 +116,21 @@ function renderParagraph(para: Paragraph, ctx: RenderCtx): string {
     return `${indent}${marker} ${text.trim()}\n`;
   }
 
-  if (!text.trim()) return "\n";
+  const ps = para.paragraphStyle;
+  if (!text.trim()) {
+    // An empty paragraph ruled underneath is the writer's horizontal rule.
+    if ((ps?.borderBottom?.width?.magnitude ?? 0) > 0) return "\n---\n\n";
+    return "\n";
+  }
+  // Indented at both edges, not a list item: a blockquote (the shape
+  // Google's importer and md-to-doc both produce).
+  if ((ps?.indentStart?.magnitude ?? 0) > 0 && (ps?.indentEnd?.magnitude ?? 0) > 0) {
+    return `${text
+      .trim()
+      .split("\n")
+      .map((line) => `> ${line}`)
+      .join("\n")}\n\n`;
+  }
   return `${text.trim()}\n\n`;
 }
 
@@ -116,6 +173,8 @@ function renderTextRun(run: TextRun): string {
     text = text.slice(0, -trailing.length);
   }
   if (!text) return trailing;
+  // Docs stores a hard line break as a vertical tab.
+  text = text.split("\u000b").join("  \n");
 
   const style = run.textStyle;
   if (style) {
@@ -182,6 +241,11 @@ function bulletMarker(listId: string, level: number, lists: ListsMap): string {
   // renderers re-number, which is the GFM convention.
   if (levelProps?.glyphType && levelProps.glyphType !== "GLYPH_TYPE_UNSPECIFIED") {
     return "1.";
+  }
+  // A checkbox list has no glyph symbol and an unspecified glyph type (the
+  // API exposes no checked state, so every item reads as open).
+  if (levelProps && levelProps.glyphType === "GLYPH_TYPE_UNSPECIFIED" && !levelProps.glyphSymbol) {
+    return "- [ ]";
   }
   return "-";
 }
