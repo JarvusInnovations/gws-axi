@@ -71,6 +71,29 @@ All errors are `AxiError` with a stable `code` and actionable `suggestions[]`, w
 
 > **Why:** Agents read one channel and parse a predictable shape. Raw Google error JSON, or a message on stderr, is unparseable noise that corrupts the output contract.
 
+
+## fail-loud-on-unknown-flags
+
+Every command declares the flags it takes, and refuses any other by name — before any network
+call, with exit code 2, listing the command's valid flags and pointing at its `--help`, so the
+agent corrects itself in one turn. The same goes for the values of list flags such as
+`--fields`: an unknown name is an error, not a skipped column. A flag that is a likely guess for
+one that exists (`--transparency` for `--free`/`--busy`, `--url` for `--callback-url`) gets a
+targeted hint. `--help` is always allowed, and `--account` on every command that acts as an
+account.
+
+> **Why:** a dropped flag is worse than an error. The command succeeds, the output looks filtered
+> or applied, and the caller acts on it — `calendar update --transparency transparent` reported
+> success while changing nothing (#62). This is AXI principle 6, "Fail loud on unrecognized
+> input" ([kunchenguid/axi#63](https://github.com/kunchenguid/axi/pull/63), from
+> [#62](https://github.com/kunchenguid/axi/issues/62)); `axi-sdk-js` does not enforce it, so
+> gws-axi does.
+
+How it is enforced: commands parse with `parseArgs` in `src/util/flags.ts`, or their dispatcher
+entry declares a `flags` spec checked by `checkFlags` before the handler runs. A test fails when
+a subcommand has no declaration or its declaration disagrees with the flags its `--help`
+documents.
+
 ## no-dependency-noise-on-stdout
 
 Stdout is exclusively AXI-structured output. Never leak dependency chatter (`gcloud` stderr, raw `googleapis` errors, library logs) into it.

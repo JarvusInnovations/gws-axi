@@ -1,3 +1,4 @@
+import { checkFlags } from "../util/flags.js";
 import { execFileSync } from "node:child_process";
 import { existsSync, accessSync, constants } from "node:fs";
 import { homedir } from "node:os";
@@ -174,6 +175,7 @@ async function checkRuntime(serviceFilter?: string): Promise<RuntimeRow[]> {
 }
 
 export async function doctorCommand(args: string[]): Promise<Record<string, unknown>> {
+  checkFlags(args, { value: ["--check"], boolean: ["--summary"], noAccount: true }, "doctor");
   const summaryMode = args.includes("--summary");
   const checkIdx = args.indexOf("--check");
   const checkTarget = checkIdx >= 0 ? args[checkIdx + 1] : undefined;

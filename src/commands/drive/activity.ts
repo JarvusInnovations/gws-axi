@@ -13,9 +13,10 @@ export const ACTIVITY_HELP = `usage: gws-axi drive activity <itemId> [flags]
 args[1]:
   <itemId>             A Drive file or folder ID (the portion of the URL
                        after /d/ or /folders/)
-flags[5]:
+flags[6]:
   --folder             Treat <itemId> as a folder: report activity for it and
                        all descendants (ancestorName), not just the item itself
+  --recursive          Same as --folder
   --since <when>       Only activity at/after this time. A date-only value
                        opens at that day's local midnight.
   --until <when>       Only activity before this time. A date-only value

@@ -1,3 +1,4 @@
+import { checkFlags, type FlagSpec } from "../util/flags.js";
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
@@ -1032,11 +1033,44 @@ function runReset(args: string[]): Record<string, unknown> {
   };
 }
 
+/**
+ * Flags each auth subcommand takes (specs/principles.md#fail-loud-on-unknown-flags).
+ * `auth` shares one parser across subcommands, so the declaration is per
+ * subcommand here. `--account` is accepted everywhere, as on every command.
+ */
+export const AUTH_FLAGS: Record<string, FlagSpec> = {
+  setup: {
+    value: [
+      "--project",
+      "--create-project",
+      "--project-name",
+      "--credentials-json",
+      "--test-user",
+      "--confirm-step",
+      "--account",
+    ],
+  },
+  join: { value: ["--account"], boolean: ["--published"] },
+  login: {
+    value: ["--account", "--callback-url"],
+    boolean: ["--wait", "--no-wait"],
+    hints: { "--url": "Did you mean --callback-url '<url>'?" },
+  },
+  publish: { value: ["--account"], boolean: ["--confirm"] },
+  accounts: { value: ["--account"] },
+  use: { value: ["--account"] },
+  revoke: { value: ["--account"] },
+  status: { value: ["--account"] },
+  reset: { value: ["--from", "--account"] },
+};
+
 export async function authCommand(args: string[]): Promise<string | Record<string, unknown>> {
   const sub = args[0];
   if (!sub) return AUTH_HELP;
 
   const rest = args.slice(1);
+  const spec = AUTH_FLAGS[sub];
+  if (spec) checkFlags(rest, spec, `auth ${sub}`);
   switch (sub) {
     case "setup":
       return runSetup(rest);

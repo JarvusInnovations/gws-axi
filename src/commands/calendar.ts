@@ -1,3 +1,4 @@
+import { checkFlags, type FlagSpec } from "../util/flags.js";
 import { AxiError } from "axi-sdk-js";
 import { resolveAccount, withAccountSource } from "../google/account.js";
 import { calendarCalendarsCommand, CALENDARS_HELP } from "./calendar/calendars.js";
@@ -11,22 +12,84 @@ import { calendarSearchCommand, SEARCH_HELP } from "./calendar/search.js";
 import { calendarUpdateCommand, UPDATE_HELP } from "./calendar/update.js";
 
 interface CalendarSubcommand {
+  /** Flags this subcommand takes — or "self" when its own parser validates them. */
+  flags?: FlagSpec | "self";
   name: string;
   mutation: boolean;
   help: string;
   handler?: (account: string, args: string[]) => Promise<string>;
 }
 
-const SUBCOMMANDS: CalendarSubcommand[] = [
-  { name: "events", mutation: false, help: EVENTS_HELP, handler: calendarEventsCommand },
-  { name: "get", mutation: false, help: GET_HELP, handler: calendarGetCommand },
-  { name: "calendars", mutation: false, help: CALENDARS_HELP, handler: calendarCalendarsCommand },
-  { name: "search", mutation: false, help: SEARCH_HELP, handler: calendarSearchCommand },
-  { name: "freebusy", mutation: false, help: FREEBUSY_HELP, handler: calendarFreebusyCommand },
-  { name: "create", mutation: true, help: CREATE_HELP, handler: calendarCreateCommand },
-  { name: "update", mutation: true, help: UPDATE_HELP, handler: calendarUpdateCommand },
-  { name: "delete", mutation: true, help: DELETE_HELP, handler: calendarDeleteCommand },
-  { name: "respond", mutation: true, help: RESPOND_HELP, handler: calendarRespondCommand },
+export const SUBCOMMANDS: CalendarSubcommand[] = [
+  {
+    name: "events",
+    mutation: false,
+    flags: {
+      value: ["--calendar", "--from", "--to", "--limit", "--query", "--fields"],
+      boolean: ["--single-events", "--today", "--this-week"],
+    },
+    help: EVENTS_HELP,
+    handler: calendarEventsCommand,
+  },
+  {
+    name: "get",
+    mutation: false,
+    flags: { value: ["--calendar"], boolean: ["--full"] },
+    help: GET_HELP,
+    handler: calendarGetCommand,
+  },
+  {
+    name: "calendars",
+    mutation: false,
+    flags: { value: ["--fields"], boolean: [] },
+    help: CALENDARS_HELP,
+    handler: calendarCalendarsCommand,
+  },
+  {
+    name: "search",
+    mutation: false,
+    flags: {
+      value: ["--query", "--from", "--to", "--calendars", "--limit", "--fields"],
+      boolean: ["--today", "--this-week", "--no-dedupe", "--include-shared"],
+    },
+    help: SEARCH_HELP,
+    handler: calendarSearchCommand,
+  },
+  {
+    name: "freebusy",
+    mutation: false,
+    flags: { value: ["--calendars", "--from", "--to"], boolean: ["--today", "--this-week"] },
+    help: FREEBUSY_HELP,
+    handler: calendarFreebusyCommand,
+  },
+  {
+    name: "create",
+    mutation: true,
+    flags: "self",
+    help: CREATE_HELP,
+    handler: calendarCreateCommand,
+  },
+  {
+    name: "update",
+    mutation: true,
+    flags: "self",
+    help: UPDATE_HELP,
+    handler: calendarUpdateCommand,
+  },
+  {
+    name: "delete",
+    mutation: true,
+    flags: { value: ["--calendar", "--send-updates"], boolean: ["--yes"] },
+    help: DELETE_HELP,
+    handler: calendarDeleteCommand,
+  },
+  {
+    name: "respond",
+    mutation: true,
+    flags: { value: ["--response", "--comment", "--calendar", "--send-updates"], boolean: [] },
+    help: RESPOND_HELP,
+    handler: calendarRespondCommand,
+  },
 ];
 
 const SUB_BY_NAME: Record<string, CalendarSubcommand> = Object.fromEntries(
@@ -97,6 +160,9 @@ export async function calendarCommand(args: string[]): Promise<string> {
   }
 
   const { account: accountFlag, rest: remaining } = parseAccountFlag(rest);
+  if (def.handler && def.flags && def.flags !== "self") {
+    checkFlags(remaining, def.flags, `calendar ${sub}`);
+  }
   const resolution = resolveAccount(accountFlag, {
     mutation: def.mutation,
     commandName: `calendar ${sub}`,

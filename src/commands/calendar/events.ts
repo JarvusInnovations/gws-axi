@@ -1,3 +1,4 @@
+import { parseFieldList } from "../../util/flags.js";
 import { availabilityOf } from "./availability.js";
 import { AxiError } from "axi-sdk-js";
 import type { calendar_v3 } from "googleapis";
@@ -14,6 +15,20 @@ import {
 import { extractConference, resolveJoinUrl } from "./conference.js";
 import { localEventTime, localZone, resolveWindow, toLocalOffsetISO } from "./dateish.js";
 import { resolveWeekStart } from "./week-start.js";
+
+const FIELD_CHOICES = [
+  "availability",
+  "status",
+  "organizer",
+  "location",
+  "attendees",
+  "description",
+  "htmlLink",
+  "hangoutLink",
+  "join_url",
+  "conference",
+  "conference_source",
+];
 
 export const EVENTS_HELP = `usage: gws-axi calendar events [flags]
 flags[10]:
@@ -138,10 +153,7 @@ function parseEventsFlags(args: string[]): ParsedFlags {
         if (next === "false" || next === "true") i++;
         break;
       case "--fields":
-        flags.extraFields = next
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean);
+        flags.extraFields = parseFieldList("--fields", next ?? "", FIELD_CHOICES);
         i++;
         break;
     }
@@ -286,8 +298,7 @@ function schemaWithExtras(extras: string[]): FieldDef[] {
         );
         break;
       default:
-        // Unknown field — skip silently rather than error. Keeps --fields
-        // lenient (user doesn't need to know exact field names).
+        // Unreachable: parseFieldList refuses unknown names up front.
         break;
     }
   }

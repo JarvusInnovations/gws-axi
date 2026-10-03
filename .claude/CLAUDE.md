@@ -34,6 +34,8 @@ Tool versions are pinned in `.tool-versions` (bun 1.3.11 / nodejs 22.22.0 via as
 
 ## Conventions
 
+- **Fail loud on unknown flags** (`specs/principles.md#fail-loud-on-unknown-flags`, AXI principle 6): every dispatcher entry declares `flags` — a `FlagSpec` checked by `checkFlags` before the handler runs, or `"self"` when the handler parses with `parseArgs` (`src/util/flags.ts`). `auth` declares per subcommand (`AUTH_FLAGS`), `doctor` checks at its top. `flag-declarations.test.ts` fails when a subcommand has no declaration or its declaration disagrees with the flags its `--help` documents — so **a new flag goes in the help text and the declaration together**. `--fields` values go through `parseFieldList`. `axi-sdk-js` does not enforce any of this.
+
 - **Commits**: conventional commits (`type(scope): description`); commit often; stage specific files (never `git add -A`); keep generated-from-command changes in their own commit with the command in the body
 - **TypeScript**: strict mode, ESM (`type: module`), Node16 module resolution, target ES2022; avoid bun-specific runtime APIs since consumers run under Node
 - **Output**: never leak dependency noise (e.g. `gcloud` stderr) into stdout; all errors are AXI structured (`AxiError` with code + suggestions)

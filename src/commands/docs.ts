@@ -1,3 +1,4 @@
+import { checkFlags, type FlagSpec } from "../util/flags.js";
 import { AxiError } from "axi-sdk-js";
 import { resolveAccount, withAccountSource } from "../google/account.js";
 import { notImplemented, renderAlternatives, withInstead } from "./stub-signposts.js";
@@ -17,6 +18,8 @@ import {
 import { driveRevisionsCommand, REVISIONS_HELP } from "./drive/revisions.js";
 
 interface DocsSubcommand {
+  /** Flags this subcommand takes — or "self" when its own parser validates them. */
+  flags?: FlagSpec | "self";
   name: string;
   mutation: boolean;
   help: string;
@@ -67,18 +70,54 @@ const COMMENT_RESOLVE_HELP = `usage: gws-axi docs comment-resolve <documentId> -
 status: planned for v1 writes — not yet implemented
 `;
 
-const SUBCOMMANDS: DocsSubcommand[] = [
-  { name: "read", mutation: false, help: READ_HELP, handler: docsReadCommand },
-  { name: "find", mutation: false, help: FIND_HELP, handler: docsFindCommand },
-  { name: "comments", mutation: false, help: COMMENTS_HELP, handler: docsCommentsCommand },
-  { name: "download", mutation: false, help: DOWNLOAD_HELP, handler: docsDownloadCommand },
+export const SUBCOMMANDS: DocsSubcommand[] = [
+  {
+    name: "read",
+    mutation: false,
+    flags: { value: ["--tab", "--out"], boolean: ["--full"] },
+    help: READ_HELP,
+    handler: docsReadCommand,
+  },
+  {
+    name: "find",
+    mutation: false,
+    flags: { value: ["--query", "--tab", "--limit"], boolean: [] },
+    help: FIND_HELP,
+    handler: docsFindCommand,
+  },
+  {
+    name: "comments",
+    mutation: false,
+    flags: { value: ["--limit"], boolean: ["--include-resolved", "--full"] },
+    help: COMMENTS_HELP,
+    handler: docsCommentsCommand,
+  },
+  {
+    name: "download",
+    mutation: false,
+    flags: { value: ["--out", "--as", "--revision"], boolean: [] },
+    help: DOWNLOAD_HELP,
+    handler: docsDownloadCommand,
+  },
   // Alias for `drive revisions` — version history is a Docs-shaped mental
   // model, but the implementation is Drive-wide (any file type).
-  { name: "revisions", mutation: false, help: REVISIONS_HELP, handler: driveRevisionsCommand },
-  { name: "diff", mutation: false, help: DIFF_HELP, handler: docsDiffCommand },
-  { name: "create", mutation: true, help: CREATE_HELP, handler: docsCreateCommand },
-  { name: "write", mutation: true, help: WRITE_HELP, handler: docsWriteCommand },
-  { name: "append", mutation: true, help: APPEND_HELP, handler: docsAppendCommand },
+  {
+    name: "revisions",
+    mutation: false,
+    flags: { value: ["--limit"], boolean: ["--full"] },
+    help: REVISIONS_HELP,
+    handler: driveRevisionsCommand,
+  },
+  {
+    name: "diff",
+    mutation: false,
+    flags: { value: ["--out"], boolean: ["--full"] },
+    help: DIFF_HELP,
+    handler: docsDiffCommand,
+  },
+  { name: "create", mutation: true, flags: "self", help: CREATE_HELP, handler: docsCreateCommand },
+  { name: "write", mutation: true, flags: "self", help: WRITE_HELP, handler: docsWriteCommand },
+  { name: "append", mutation: true, flags: "self", help: APPEND_HELP, handler: docsAppendCommand },
   { name: "insert-text", mutation: true, help: INSERT_TEXT_HELP, instead: ROUND_TRIP },
   { name: "delete-range", mutation: true, help: DELETE_RANGE_HELP, instead: ROUND_TRIP },
   { name: "style-text", mutation: true, help: STYLE_TEXT_HELP, instead: ROUND_TRIP },
@@ -165,6 +204,9 @@ export async function docsCommand(args: string[]): Promise<string> {
   }
 
   const { account: accountFlag, rest: remaining } = parseAccountFlag(rest);
+  if (def.handler && def.flags && def.flags !== "self") {
+    checkFlags(remaining, def.flags, `docs ${sub}`);
+  }
   const resolution = resolveAccount(accountFlag, {
     mutation: def.mutation,
     commandName: `docs ${sub}`,

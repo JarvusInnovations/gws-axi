@@ -1,3 +1,4 @@
+import { checkFlags, type FlagSpec } from "../util/flags.js";
 import { AxiError } from "axi-sdk-js";
 import { resolveAccount, withAccountSource } from "../google/account.js";
 import { docsCommentsCommand } from "./docs/comments.js";
@@ -10,8 +11,10 @@ import { notImplemented, renderAlternatives, withInstead } from "./stub-signpost
 const COMMENTS_HELP = `usage: gws-axi sheets comments <spreadsheetId> [--include-resolved] [flags]
 args[1]:
   <spreadsheetId>      The spreadsheet ID (the portion of the URL after /d/)
-flags[2]:
+flags[4]:
   --include-resolved   Include resolved comment threads (hidden by default)
+  --full               Don't truncate comment/reply bodies (default cap: 500 chars)
+  --limit <n>          Max comments to return (default: 50)
   --account <email>    Account override when 2+ are configured
 examples:
   gws-axi sheets comments 1AbC...
@@ -25,6 +28,8 @@ notes:
 `;
 
 interface SheetsSubcommand {
+  /** Flags this subcommand takes — or "self" when its own parser validates them. */
+  flags?: FlagSpec | "self";
   name: string;
   mutation: boolean;
   help: string;
@@ -79,9 +84,15 @@ const sheetsCommentsCommand = (account: string, args: string[]): Promise<string>
     notFoundCode: "SPREADSHEET_NOT_FOUND",
   });
 
-const SUBCOMMANDS: SheetsSubcommand[] = [
-  { name: "read", mutation: false, help: READ_HELP, handler: sheetsReadCommand },
-  { name: "comments", mutation: false, help: COMMENTS_HELP, handler: sheetsCommentsCommand },
+export const SUBCOMMANDS: SheetsSubcommand[] = [
+  { name: "read", mutation: false, flags: "self", help: READ_HELP, handler: sheetsReadCommand },
+  {
+    name: "comments",
+    mutation: false,
+    flags: { value: ["--limit"], boolean: ["--include-resolved", "--full"] },
+    help: COMMENTS_HELP,
+    handler: sheetsCommentsCommand,
+  },
   { name: "update", mutation: true, help: UPDATE_HELP, instead: REPLACE_WHOLESALE },
   { name: "append", mutation: true, help: APPEND_HELP, instead: REPLACE_WHOLESALE },
   { name: "clear", mutation: true, help: CLEAR_HELP, instead: REPLACE_WHOLESALE },
@@ -155,6 +166,9 @@ export async function sheetsCommand(args: string[]): Promise<string> {
   }
 
   const { account: accountFlag, rest: remaining } = parseAccountFlag(rest);
+  if (def.handler && def.flags && def.flags !== "self") {
+    checkFlags(remaining, def.flags, `sheets ${sub}`);
+  }
   const resolution = resolveAccount(accountFlag, {
     mutation: def.mutation,
     commandName: `sheets ${sub}`,
