@@ -4,7 +4,7 @@ import { chatClient } from "../../google/client.js";
 import { field, joinBlocks, renderHelp, renderList, renderObject } from "../../output/index.js";
 import { parseDateishFlag } from "../calendar/dateish.js";
 import { parseSpaceId, spaceResourceName } from "./address.js";
-import { parseArgs } from "./flags.js";
+import { parseArgs } from "../../util/flags.js";
 import { bareId, chatError, localTime, nameSpaces, retryingChat } from "./shared.js";
 
 /**

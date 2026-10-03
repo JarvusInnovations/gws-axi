@@ -2,7 +2,7 @@ import { AxiError } from "axi-sdk-js";
 import type { slides_v1 } from "googleapis";
 import { slidesClient, translateGoogleError } from "../../google/client.js";
 import { field, joinBlocks, renderHelp, renderList, renderObject } from "../../output/index.js";
-import { parseArgs } from "../chat/flags.js";
+import { parseArgs } from "../../util/flags.js";
 import { extractSlideContent, isSlidePage } from "./text.js";
 
 /**

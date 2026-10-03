@@ -6,7 +6,7 @@ import { isJoinedInstall, readSetupState } from "../../config.js";
 import { chatClient } from "../../google/client.js";
 import { joinBlocks, renderHelp, renderObject } from "../../output/index.js";
 import { resolveSpaceTarget, type SpaceTarget } from "./address.js";
-import { parseArgs } from "./flags.js";
+import { parseArgs } from "../../util/flags.js";
 import { IdentityLedger, type ChatUser } from "./identity.js";
 import { checkMentions, expandMentions } from "./mentions.js";
 import { bareId, chatError, localTime, nameSpaces, resolveSpace } from "./shared.js";

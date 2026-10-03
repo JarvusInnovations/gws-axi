@@ -1,3 +1,4 @@
+import { checkFlags, type FlagSpec } from "../util/flags.js";
 import { AxiError } from "axi-sdk-js";
 import { resolveAccount, withAccountSource } from "../google/account.js";
 import { notImplemented, renderAlternatives, withInstead } from "./stub-signposts.js";
@@ -13,8 +14,10 @@ import { SKIP_HELP, UNSKIP_HELP, slidesSkipCommand, slidesUnskipCommand } from "
 const COMMENTS_HELP = `usage: gws-axi slides comments <presentation-id> [--include-resolved] [flags]
 args[1]:
   <presentation-id>    The Slides presentation ID (the portion of the URL after /d/)
-flags[2]:
+flags[4]:
   --include-resolved   Include resolved comment threads (hidden by default)
+  --full               Don't truncate comment/reply bodies (default cap: 500 chars)
+  --limit <n>          Max comments to return (default: 50)
   --account <email>    Account override when 2+ are configured
 examples:
   gws-axi slides comments 1AbC...
@@ -33,6 +36,8 @@ const slidesCommentsCommand = (account: string, args: string[]): Promise<string>
   });
 
 interface SlidesSubcommand {
+  /** Flags this subcommand takes — or "self" when its own parser validates them. */
+  flags?: FlagSpec | "self";
   name: string;
   mutation: boolean;
   help: string;
@@ -50,23 +55,43 @@ notes:
   the raw Slides API or the Drive copy/edit flow.
 `;
 
-const SUBCOMMANDS: SlidesSubcommand[] = [
-  { name: "get", mutation: false, help: GET_HELP, handler: slidesGetCommand },
+export const SUBCOMMANDS: SlidesSubcommand[] = [
+  {
+    name: "get",
+    mutation: false,
+    flags: { value: [], boolean: [] },
+    help: GET_HELP,
+    handler: slidesGetCommand,
+  },
   {
     name: "page",
     mutation: false,
+    flags: { value: [], boolean: [] },
     help: PAGE_HELP,
     handler: slidesPageCommand,
   },
   {
     name: "summarize",
     mutation: false,
+    flags: { value: ["--out"], boolean: ["--full"] },
     help: SUMMARIZE_HELP,
     handler: slidesSummarizeCommand,
   },
-  { name: "comments", mutation: false, help: COMMENTS_HELP, handler: slidesCommentsCommand },
-  { name: "skip", mutation: true, help: SKIP_HELP, handler: slidesSkipCommand },
-  { name: "unskip", mutation: true, help: UNSKIP_HELP, handler: slidesUnskipCommand },
+  {
+    name: "comments",
+    mutation: false,
+    flags: { value: ["--limit"], boolean: ["--include-resolved", "--full"] },
+    help: COMMENTS_HELP,
+    handler: slidesCommentsCommand,
+  },
+  { name: "skip", mutation: true, flags: "self", help: SKIP_HELP, handler: slidesSkipCommand },
+  {
+    name: "unskip",
+    mutation: true,
+    flags: "self",
+    help: UNSKIP_HELP,
+    handler: slidesUnskipCommand,
+  },
   {
     name: "create",
     mutation: true,
@@ -154,6 +179,9 @@ export async function slidesCommand(args: string[]): Promise<string> {
   }
 
   const { account: accountFlag, rest: remaining } = parseAccountFlag(rest);
+  if (def.handler && def.flags && def.flags !== "self") {
+    checkFlags(remaining, def.flags, `slides ${sub}`);
+  }
   const resolution = resolveAccount(accountFlag, {
     mutation: def.mutation,
     commandName: `slides ${sub}`,

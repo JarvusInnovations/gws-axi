@@ -1,3 +1,4 @@
+import { checkFlags, type FlagSpec } from "../util/flags.js";
 import { AxiError } from "axi-sdk-js";
 import { resolveAccount, withAccountSource } from "../google/account.js";
 import { gmailBatchModifyCommand, BATCH_MODIFY_HELP } from "./gmail/batch-modify.js";
@@ -25,56 +26,132 @@ import { gmailReadCommand, READ_HELP } from "./gmail/read.js";
 import { gmailSearchCommand, SEARCH_HELP } from "./gmail/search.js";
 
 interface GmailSubcommand {
+  /** Flags this subcommand takes — or "self" when its own parser validates them. */
+  flags?: FlagSpec | "self";
   name: string;
   mutation: boolean;
   help: string;
   handler?: (account: string, args: string[]) => Promise<string>;
 }
 
-const SUBCOMMANDS: GmailSubcommand[] = [
-  { name: "search", mutation: false, help: SEARCH_HELP, handler: gmailSearchCommand },
-  { name: "read", mutation: false, help: READ_HELP, handler: gmailReadCommand },
-  { name: "labels", mutation: false, help: LABELS_HELP, handler: gmailLabelsCommand },
-  { name: "download", mutation: false, help: DOWNLOAD_HELP, handler: gmailDownloadCommand },
-  { name: "filter-list", mutation: false, help: FILTER_LIST_HELP, handler: gmailFilterListCommand },
+export const SUBCOMMANDS: GmailSubcommand[] = [
+  {
+    name: "search",
+    mutation: false,
+    flags: { value: ["--query", "--in", "--limit", "--page"], boolean: ["--include-spam-trash"] },
+    help: SEARCH_HELP,
+    handler: gmailSearchCommand,
+  },
+  {
+    name: "read",
+    mutation: false,
+    flags: { value: ["--out"], boolean: ["--full", "--message-only", "--headers", "--raw"] },
+    help: READ_HELP,
+    handler: gmailReadCommand,
+  },
+  {
+    name: "labels",
+    mutation: false,
+    flags: { value: ["--type"], boolean: [] },
+    help: LABELS_HELP,
+    handler: gmailLabelsCommand,
+  },
+  {
+    name: "download",
+    mutation: false,
+    flags: { value: ["--out"], boolean: [] },
+    help: DOWNLOAD_HELP,
+    handler: gmailDownloadCommand,
+  },
+  {
+    name: "filter-list",
+    mutation: false,
+    flags: { value: [], boolean: [] },
+    help: FILTER_LIST_HELP,
+    handler: gmailFilterListCommand,
+  },
   // `send` is deliberately unsupported — gmailCommand short-circuits it with
   // a NOT_SUPPORTED redirect to `draft` before account resolution.
   { name: "send", mutation: true, help: SEND_HELP },
-  { name: "draft", mutation: true, help: DRAFT_HELP, handler: gmailDraftCommand },
-  { name: "modify", mutation: true, help: MODIFY_HELP, handler: gmailModifyCommand },
+  {
+    name: "draft",
+    mutation: true,
+    flags: {
+      value: [
+        "--to",
+        "--cc",
+        "--bcc",
+        "--subject",
+        "--body",
+        "--body-file",
+        "--thread",
+        "--attach",
+      ],
+      boolean: ["--plain"],
+    },
+    help: DRAFT_HELP,
+    handler: gmailDraftCommand,
+  },
+  {
+    name: "modify",
+    mutation: true,
+    flags: { value: ["--add-label", "--remove-label"], boolean: ["--thread", "--yes"] },
+    help: MODIFY_HELP,
+    handler: gmailModifyCommand,
+  },
   {
     name: "batch-modify",
     mutation: true,
+    flags: {
+      value: ["--query", "--add-label", "--remove-label", "--limit"],
+      boolean: ["--include-spam-trash"],
+    },
     help: BATCH_MODIFY_HELP,
     handler: gmailBatchModifyCommand,
   },
   {
     name: "label-create",
     mutation: true,
+    flags: { value: ["--name"], boolean: [] },
     help: LABEL_CREATE_HELP,
     handler: gmailLabelCreateCommand,
   },
   {
     name: "label-update",
     mutation: true,
+    flags: { value: ["--name"], boolean: [] },
     help: LABEL_UPDATE_HELP,
     handler: gmailLabelUpdateCommand,
   },
   {
     name: "label-delete",
     mutation: true,
+    flags: { value: [], boolean: ["--yes"] },
     help: LABEL_DELETE_HELP,
     handler: gmailLabelDeleteCommand,
   },
   {
     name: "filter-create",
     mutation: true,
+    flags: {
+      value: [
+        "--from",
+        "--to",
+        "--subject",
+        "--query",
+        "--add-label",
+        "--remove-label",
+        "--forward",
+      ],
+      boolean: ["--has-attachment"],
+    },
     help: FILTER_CREATE_HELP,
     handler: gmailFilterCreateCommand,
   },
   {
     name: "filter-delete",
     mutation: true,
+    flags: { value: [], boolean: [] },
     help: FILTER_DELETE_HELP,
     handler: gmailFilterDeleteCommand,
   },
@@ -165,6 +242,9 @@ export async function gmailCommand(args: string[]): Promise<string> {
   }
 
   const { account: accountFlag, rest: remaining } = parseAccountFlag(rest);
+  if (def.handler && def.flags && def.flags !== "self") {
+    checkFlags(remaining, def.flags, `gmail ${sub}`);
+  }
   const resolution = resolveAccount(accountFlag, {
     mutation: def.mutation,
     commandName: `gmail ${sub}`,

@@ -1,3 +1,4 @@
+import { checkFlags, type FlagSpec } from "../util/flags.js";
 import { AxiError } from "axi-sdk-js";
 import { driveRenameCommand, RENAME_HELP } from "./drive/rename.js";
 import { driveShareCommand, driveUnshareCommand, SHARE_HELP, UNSHARE_HELP } from "./drive/share.js";
@@ -22,6 +23,8 @@ import {
 } from "./drive/move.js";
 
 interface DriveSubcommand {
+  /** Flags this subcommand takes — or "self" when its own parser validates them. */
+  flags?: FlagSpec | "self";
   name: string;
   mutation: boolean;
   help: string;
@@ -63,19 +66,42 @@ const DELETE_HELP = `usage: gws-axi drive delete <file-id> [flags]
 status: not planned — gws-axi trashes rather than destroys
 `;
 
-const SUBCOMMANDS: DriveSubcommand[] = [
-  { name: "search", mutation: false, help: SEARCH_HELP, handler: driveSearchCommand },
-  { name: "get", mutation: false, help: GET_HELP, handler: driveGetCommand },
-  { name: "ls", mutation: false, help: LS_HELP, handler: driveLsCommand },
+export const SUBCOMMANDS: DriveSubcommand[] = [
+  {
+    name: "search",
+    mutation: false,
+    flags: { value: ["--query", "--mime", "--limit", "--page"], boolean: [] },
+    help: SEARCH_HELP,
+    handler: driveSearchCommand,
+  },
+  {
+    name: "get",
+    mutation: false,
+    flags: { value: [], boolean: [] },
+    help: GET_HELP,
+    handler: driveGetCommand,
+  },
+  {
+    name: "ls",
+    mutation: false,
+    flags: {
+      value: ["--depth", "--limit", "--page"],
+      boolean: ["--recursive", "--include-trashed"],
+    },
+    help: LS_HELP,
+    handler: driveLsCommand,
+  },
   {
     name: "permissions",
     mutation: false,
+    flags: { value: [], boolean: [] },
     help: PERMISSIONS_HELP,
     handler: drivePermissionsCommand,
   },
   {
     name: "download",
     mutation: false,
+    flags: { value: ["--out", "--as", "--revision"], boolean: [] },
     help: DOWNLOAD_HELP,
     // Delegates to docs/download.ts — same impl handles any Drive file.
     handler: docsDownloadCommand,
@@ -83,18 +109,27 @@ const SUBCOMMANDS: DriveSubcommand[] = [
   {
     name: "revisions",
     mutation: false,
+    flags: { value: ["--limit"], boolean: ["--full"] },
     help: REVISIONS_HELP,
     handler: driveRevisionsCommand,
   },
   {
     name: "activity",
     mutation: false,
+    flags: {
+      value: ["--since", "--until", "--action", "--limit"],
+      boolean: ["--folder", "--recursive"],
+    },
     help: ACTIVITY_HELP,
     handler: driveActivityCommand,
   },
   {
     name: "upload",
     mutation: true,
+    flags: {
+      value: ["--content", "--parent", "--name", "--mime", "--update"],
+      boolean: ["--convert", "--replace-all-tabs"],
+    },
     help: UPLOAD_HELP,
     handler: driveUploadCommand,
   },
@@ -109,12 +144,24 @@ const SUBCOMMANDS: DriveSubcommand[] = [
   },
   // copy has no shipped equivalent.
   { name: "copy", mutation: true, help: COPY_HELP },
-  { name: "move", mutation: true, help: MOVE_HELP, handler: driveMoveCommand },
-  { name: "trash", mutation: true, help: TRASH_HELP, handler: driveTrashCommand },
-  { name: "untrash", mutation: true, help: UNTRASH_HELP, handler: driveUntrashCommand },
-  { name: "rename", mutation: true, help: RENAME_HELP, handler: driveRenameCommand },
-  { name: "share", mutation: true, help: SHARE_HELP, handler: driveShareCommand },
-  { name: "unshare", mutation: true, help: UNSHARE_HELP, handler: driveUnshareCommand },
+  { name: "move", mutation: true, flags: "self", help: MOVE_HELP, handler: driveMoveCommand },
+  { name: "trash", mutation: true, flags: "self", help: TRASH_HELP, handler: driveTrashCommand },
+  {
+    name: "untrash",
+    mutation: true,
+    flags: "self",
+    help: UNTRASH_HELP,
+    handler: driveUntrashCommand,
+  },
+  { name: "rename", mutation: true, flags: "self", help: RENAME_HELP, handler: driveRenameCommand },
+  { name: "share", mutation: true, flags: "self", help: SHARE_HELP, handler: driveShareCommand },
+  {
+    name: "unshare",
+    mutation: true,
+    flags: "self",
+    help: UNSHARE_HELP,
+    handler: driveUnshareCommand,
+  },
   {
     name: "delete",
     mutation: true,
@@ -126,6 +173,7 @@ const SUBCOMMANDS: DriveSubcommand[] = [
   {
     name: "mkdir",
     mutation: true,
+    flags: { value: ["--parent"], boolean: [] },
     help: MKDIR_HELP,
     handler: driveMkdirCommand,
   },
@@ -210,6 +258,9 @@ export async function driveCommand(args: string[]): Promise<string> {
   }
 
   const { account: accountFlag, rest: remaining } = parseAccountFlag(rest);
+  if (def.handler && def.flags && def.flags !== "self") {
+    checkFlags(remaining, def.flags, `drive ${sub}`);
+  }
   const resolution = resolveAccount(accountFlag, {
     mutation: def.mutation,
     commandName: `drive ${sub}`,

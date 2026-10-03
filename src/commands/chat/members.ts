@@ -4,7 +4,7 @@ import { chatClient } from "../../google/client.js";
 import { resolvePeople } from "../../google/people.js";
 import { field, joinBlocks, renderHelp, renderList, renderObject } from "../../output/index.js";
 import { resolveSpaceTarget, type SpaceTarget } from "./address.js";
-import { parseArgs, parseLimit } from "./flags.js";
+import { parseArgs, parseLimit } from "../../util/flags.js";
 import { IdentityLedger, UNRESOLVED_NOTE, type ChatUser } from "./identity.js";
 import { bareId, chatError, nameSpaces, resolveSpace, retryingChat } from "./shared.js";
 

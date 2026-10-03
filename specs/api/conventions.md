@@ -264,6 +264,13 @@ applies to our own guarantees too). For an actual boundary, point `XDG_CONFIG_HO
 containing only the intended account's tokens — then no other account's credentials exist to use.
 The two compose: the config dir bounds what is *reachable*, the pin bounds what is *used*.
 
+## Unknown flags
+
+Every command refuses a flag it doesn't take, and an unknown `--fields` name, with
+`VALIDATION_ERROR` (exit 2) — see [principles.md#fail-loud-on-unknown-flags](../principles.md#fail-loud-on-unknown-flags).
+The error lists the command's valid flags and its `--help` command, plus a targeted hint when one
+is declared for that flag.
+
 ## Error envelope
 
 - All errors are `AxiError(message, code, suggestions[])` on **stdout** ([principles.md#structured-errors-to-stdout](../principles.md#structured-errors-to-stdout)).

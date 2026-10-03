@@ -1,3 +1,4 @@
+import { checkFlags, type FlagSpec } from "../util/flags.js";
 import { AxiError } from "axi-sdk-js";
 import { accountSourceLabel, resolveAccount, withAccountSource } from "../google/account.js";
 import { chatDownloadCommand, DOWNLOAD_HELP } from "./chat/download.js";
@@ -17,6 +18,8 @@ import { chatSpacesCommand, SPACES_HELP } from "./chat/spaces.js";
 import { notImplemented, renderAlternatives, withInstead } from "./stub-signposts.js";
 
 interface ChatSubcommand {
+  /** Flags this subcommand takes — or "self" when its own parser validates them. */
+  flags?: FlagSpec | "self";
   name: string;
   mutation: boolean;
   help: string;
@@ -29,21 +32,59 @@ interface ChatSubcommand {
   instead?: string[];
 }
 
-const SUBCOMMANDS: ChatSubcommand[] = [
-  { name: "spaces", mutation: false, help: SPACES_HELP, handler: chatSpacesCommand },
-  { name: "messages", mutation: false, help: MESSAGES_HELP, handler: chatMessagesCommand },
-  { name: "search", mutation: false, help: SEARCH_HELP, handler: chatSearchCommand },
-  { name: "members", mutation: false, help: MEMBERS_HELP, handler: chatMembersCommand },
-  { name: "download", mutation: false, help: DOWNLOAD_HELP, handler: chatDownloadCommand },
-  { name: "wait", mutation: false, help: WAIT_HELP, handler: chatWaitCommand },
-  { name: "watch", mutation: false, help: WATCH_HELP, handler: chatWatchCommand, streams: true },
-  { name: "send", mutation: true, help: SEND_HELP, handler: chatSendCommand },
-  { name: "react", mutation: true, help: REACT_HELP, handler: chatReactCommand },
-  { name: "unreact", mutation: true, help: UNREACT_HELP, handler: chatUnreactCommand },
-  { name: "mark-read", mutation: true, help: MARK_READ_HELP, handler: chatMarkReadCommand },
+export const SUBCOMMANDS: ChatSubcommand[] = [
+  { name: "spaces", mutation: false, flags: "self", help: SPACES_HELP, handler: chatSpacesCommand },
+  {
+    name: "messages",
+    mutation: false,
+    flags: "self",
+    help: MESSAGES_HELP,
+    handler: chatMessagesCommand,
+  },
+  { name: "search", mutation: false, flags: "self", help: SEARCH_HELP, handler: chatSearchCommand },
+  {
+    name: "members",
+    mutation: false,
+    flags: "self",
+    help: MEMBERS_HELP,
+    handler: chatMembersCommand,
+  },
+  {
+    name: "download",
+    mutation: false,
+    flags: "self",
+    help: DOWNLOAD_HELP,
+    handler: chatDownloadCommand,
+  },
+  { name: "wait", mutation: false, flags: "self", help: WAIT_HELP, handler: chatWaitCommand },
+  {
+    name: "watch",
+    mutation: false,
+    flags: "self",
+    help: WATCH_HELP,
+    handler: chatWatchCommand,
+    streams: true,
+  },
+  { name: "send", mutation: true, flags: "self", help: SEND_HELP, handler: chatSendCommand },
+  { name: "react", mutation: true, flags: "self", help: REACT_HELP, handler: chatReactCommand },
+  {
+    name: "unreact",
+    mutation: true,
+    flags: "self",
+    help: UNREACT_HELP,
+    handler: chatUnreactCommand,
+  },
+  {
+    name: "mark-read",
+    mutation: true,
+    flags: "self",
+    help: MARK_READ_HELP,
+    handler: chatMarkReadCommand,
+  },
   {
     name: "mark-unread",
     mutation: true,
+    flags: "self",
     help: MARK_UNREAD_HELP,
     handler: chatMarkUnreadCommand,
   },
@@ -127,6 +168,9 @@ export async function chatCommand(args: string[]): Promise<string> {
   }
 
   const { account: accountFlag, rest: remaining } = parseAccountFlag(rest);
+  if (def.handler && def.flags && def.flags !== "self") {
+    checkFlags(remaining, def.flags, `chat ${sub}`);
+  }
   const resolution = resolveAccount(accountFlag, {
     mutation: def.mutation,
     commandName: `chat ${sub}`,

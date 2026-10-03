@@ -2,7 +2,7 @@ import { AxiError } from "axi-sdk-js";
 import type { drive_v3 } from "googleapis";
 import { driveClient, translateGoogleError } from "../../google/client.js";
 import { field, joinBlocks, renderHelp, renderList, renderObject } from "../../output/index.js";
-import { parseArgs, parseChoice } from "../chat/flags.js";
+import { parseArgs, parseChoice } from "../../util/flags.js";
 
 /**
  * Granting and removing named people's access to a Drive file or folder.
