@@ -1,3 +1,4 @@
+import { parseFieldList } from "../../util/flags.js";
 import { AxiError } from "axi-sdk-js";
 import type { calendar_v3 } from "googleapis";
 import { calendarClient, translateGoogleError } from "../../google/client.js";
@@ -10,6 +11,8 @@ import {
 } from "../../output/index.js";
 import { localEventTime, resolveWindow, toLocalOffsetISO } from "./dateish.js";
 import { resolveWeekStart } from "./week-start.js";
+
+const FIELD_CHOICES = ["status", "organizer", "location", "attendees", "seen_on"];
 
 export const SEARCH_HELP = `usage: gws-axi calendar search --query <text> [flags]
 flags[11]:
@@ -121,10 +124,7 @@ function parseFlags(args: string[]): ParsedFlags {
         i++;
         break;
       case "--fields":
-        flags.extraFields = next
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean);
+        flags.extraFields = parseFieldList("--fields", next ?? "", FIELD_CHOICES);
         i++;
         break;
       case "--no-dedupe":

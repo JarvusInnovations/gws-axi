@@ -1,3 +1,4 @@
+import { parseFieldList } from "../../util/flags.js";
 import { calendarClient, translateGoogleError } from "../../google/client.js";
 import { field, mapEnum, renderListResponse, truncated } from "../../output/index.js";
 
@@ -29,10 +30,7 @@ function parseFlags(args: string[]): ParsedFlags {
     const arg = args[i];
     const next = args[i + 1];
     if (arg === "--fields" && next) {
-      flags.extraFields = next
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
+      flags.extraFields = parseFieldList("--fields", next, ["timezone", "description", "colorId"]);
       i++;
     }
   }
@@ -87,7 +85,6 @@ export async function calendarCalendarsCommand(account: string, args: string[]):
       case "colorId":
         schema.push(field("colorId"));
         break;
-      // silently skip unknown extras
     }
   }
 

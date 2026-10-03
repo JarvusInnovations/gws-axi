@@ -2,7 +2,7 @@ import { AxiError } from "axi-sdk-js";
 import type { drive_v3 } from "googleapis";
 import { driveClient, translateGoogleError } from "../../google/client.js";
 import { joinBlocks, renderHelp, renderObject } from "../../output/index.js";
-import { parseArgs } from "../chat/flags.js";
+import { parseArgs } from "../../util/flags.js";
 
 /**
  * `drive move`, `drive trash`, `drive untrash` (specs/commands/drive-move-trash.md).

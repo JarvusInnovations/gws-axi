@@ -1,7 +1,7 @@
 import { AxiError } from "axi-sdk-js";
 import { driveClient, translateGoogleError } from "../../google/client.js";
 import { joinBlocks, renderHelp, renderObject } from "../../output/index.js";
-import { parseArgs } from "../chat/flags.js";
+import { parseArgs } from "../../util/flags.js";
 
 export const RENAME_HELP = `usage: gws-axi drive rename <file-id> --name <new-name> [flags]
 args[1]:

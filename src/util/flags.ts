@@ -1,11 +1,16 @@
 import { AxiError } from "axi-sdk-js";
 
 /**
- * Flag parsing shared by the chat subcommands.
+ * Flag handling shared by every command (specs/principles.md#fail-loud-on-unknown-flags).
  *
- * Each command declares the flags it takes; anything else is refused by name.
- * A dropped flag is worse than an error — the caller gets plausible output it
- * believes was filtered, and acts on it.
+ * Each command declares the flags it takes; anything else is refused by name,
+ * before any network call, with the valid flags listed so one turn
+ * self-corrects. A dropped flag is worse than an error — the caller gets
+ * plausible output it believes was filtered, and acts on it.
+ *
+ * Newer commands parse with `parseArgs`. Older commands keep their own
+ * parsers and are guarded by their dispatcher calling `checkFlags` with the
+ * same declaration.
  */
 
 export interface FlagSpec {
@@ -13,6 +18,10 @@ export interface FlagSpec {
   value?: string[];
   /** Flags that are present or absent, e.g. `--full`. */
   boolean?: string[];
+  /** A targeted correction for a flag that doesn't exist but is a likely guess. */
+  hints?: Record<string, string>;
+  /** The command takes no `--account` (e.g. `doctor`), so errors don't offer it. */
+  noAccount?: boolean;
 }
 
 export interface ParsedArgs {
@@ -50,13 +59,27 @@ export function parseArgs(args: string[], spec: FlagSpec, command: string): Pars
       i++;
       continue;
     }
-    const valid = [...valueFlags, ...booleanFlags].sort();
+    const valid = [...valueFlags, ...booleanFlags].filter((f) => f !== "--account").sort();
+    const hint = spec.hints?.[arg];
+    const always = spec.noAccount ? "(--help always allowed)" : "--account (--help always allowed)";
     throw new AxiError(`Unknown flag ${arg} for \`${command}\``, "VALIDATION_ERROR", [
-      `Valid flags for \`${command}\`: ${valid.join(", ")}, --account (--help always allowed)`,
+      ...(hint ? [hint] : []),
+      valid.length
+        ? `Valid flags for \`${command}\`: ${[...valid, always].join(", ")}`
+        : `\`${command}\` takes no flags ${spec.noAccount ? "" : "besides --account "}(--help always allowed)`,
+      `Run \`gws-axi ${command} --help\` for usage`,
     ]);
   }
 
   return { values, booleans, positionals };
+}
+
+/**
+ * Validate flags without parsing them — for commands whose own parser predates
+ * the shared one. Same errors as `parseArgs`.
+ */
+export function checkFlags(args: string[], spec: FlagSpec, command: string): void {
+  parseArgs(args, spec, command);
 }
 
 /** A positive integer flag, clamped to `max`. */
@@ -89,6 +112,27 @@ export function parseChoice<T extends string>(
     ]);
   }
   return value;
+}
+
+/**
+ * A comma-separated `--fields`-style list, matched exactly (names like
+ * `htmlLink` keep their case). An unknown name is an error — a dropped column
+ * looks like an empty one.
+ */
+export function parseFieldList(flag: string, raw: string, choices: readonly string[]): string[] {
+  const picked = raw
+    .split(",")
+    .map((v) => v.trim())
+    .filter(Boolean);
+  const unknown = picked.filter((v) => !choices.includes(v));
+  if (unknown.length) {
+    throw new AxiError(
+      `Unknown ${flag} value${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")}`,
+      "VALIDATION_ERROR",
+      [`Valid values: ${choices.join(", ")}`],
+    );
+  }
+  return [...new Set(picked)];
 }
 
 /** A comma-separated list drawn from a fixed set. */

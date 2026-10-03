@@ -4,7 +4,7 @@ import { chatClient } from "../../google/client.js";
 import { OUTSIDE_DIRECTORY_NOTE } from "../../google/people.js";
 import { field, joinBlocks, renderHelp, renderList, renderObject } from "../../output/index.js";
 import { resolveSpaceTarget } from "./address.js";
-import { parseArgs, parseChoice, parseLimit } from "./flags.js";
+import { parseArgs, parseChoice, parseLimit } from "../../util/flags.js";
 import {
   chatError,
   nameSpaces,

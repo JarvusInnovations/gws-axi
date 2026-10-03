@@ -6,7 +6,7 @@ import { chatClient } from "../../google/client.js";
 import { field, joinBlocks, renderHelp, renderList, renderObject } from "../../output/index.js";
 import { resolveOutputPath, sanitizeFileName } from "../../util/paths.js";
 import { parseMessageTarget, spaceResourceName } from "./address.js";
-import { parseArgs } from "./flags.js";
+import { parseArgs } from "../../util/flags.js";
 import { fetchMessage } from "./react.js";
 import { bareId, chatError, resolveSpace, retryingChat } from "./shared.js";
 

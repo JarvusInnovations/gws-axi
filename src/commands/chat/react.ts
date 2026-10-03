@@ -3,7 +3,7 @@ import type { chat_v1 } from "googleapis";
 import { chatClient } from "../../google/client.js";
 import { joinBlocks, renderHelp, renderObject } from "../../output/index.js";
 import { parseMessageTarget, spaceResourceName, type SpaceTarget } from "./address.js";
-import { parseArgs } from "./flags.js";
+import { parseArgs } from "../../util/flags.js";
 import { reactionSummary } from "./message-rows.js";
 import { bareId, chatError, resolveSpace, retryingChat, selfUserRef } from "./shared.js";
 

@@ -4,7 +4,7 @@ import { chatClient } from "../../google/client.js";
 import { field, joinBlocks, renderHelp, renderList, renderObject } from "../../output/index.js";
 import { resolveWindow } from "../calendar/dateish.js";
 import { parseSpaceId, spaceResourceName } from "./address.js";
-import { parseArgs, parseChoice, parseLimit } from "./flags.js";
+import { parseArgs, parseChoice, parseLimit } from "../../util/flags.js";
 import { UNRESOLVED_NOTE } from "./identity.js";
 import { identifyPeople, messageSchema, senderRows, toRow } from "./message-rows.js";
 import { rangeEcho } from "./messages.js";
