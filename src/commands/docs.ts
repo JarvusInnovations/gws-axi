@@ -26,6 +26,11 @@ import {
   docsTabsDeleteCommand,
   docsTabsUpdateCommand,
 } from "./docs/tab-ops.js";
+import {
+  REPLACE_TEXT_FLAGS,
+  REPLACE_TEXT_HELP,
+  docsReplaceTextCommand,
+} from "./docs/replace-text.js";
 import { driveRevisionsCommand, REVISIONS_HELP } from "./drive/revisions.js";
 
 interface DocsSubcommand {
@@ -43,6 +48,7 @@ interface DocsSubcommand {
 // replaces the whole document — so the lines say that rather than implying a
 // targeted edit.
 const ROUND_TRIP = [
+  "gws-axi docs replace-text <documentId> --find <text> --replace <text> --tab <id> --account <email> — change one piece of text in place, keeping every style around it",
   "gws-axi docs read <documentId> --tab <id> --out ./tab.md — export one tab's content to edit locally",
   "gws-axi docs write <documentId> ./tab.md --tab <id> --account <email> — write it back, replacing that ONE tab's content (other tabs untouched)",
   "gws-axi docs append <documentId> --content <markdown> --tab <id> --account <email> — add content at the end of a tab; `gws-axi docs diff <documentId> <revA>` compares revisions afterward",
@@ -146,6 +152,13 @@ export const SUBCOMMANDS: DocsSubcommand[] = [
     help: TABS_DELETE_HELP,
     handler: docsTabsDeleteCommand,
   },
+  {
+    name: "replace-text",
+    mutation: true,
+    flags: REPLACE_TEXT_FLAGS,
+    help: REPLACE_TEXT_HELP,
+    handler: docsReplaceTextCommand,
+  },
   { name: "insert-text", mutation: true, help: INSERT_TEXT_HELP, instead: ROUND_TRIP },
   { name: "delete-range", mutation: true, help: DELETE_RANGE_HELP, instead: ROUND_TRIP },
   { name: "style-text", mutation: true, help: STYLE_TEXT_HELP, instead: ROUND_TRIP },
@@ -203,6 +216,7 @@ ${renderAlternatives(SUBCOMMANDS)}subcommand help:
   gws-axi docs diff --help        for comparing two revisions
   gws-axi docs write --help       for writing Markdown to one tab (create, append too)
   gws-axi docs tabs --help        for listing, moving, renaming, marking, deleting tabs
+  gws-axi docs replace-text --help  for changing one piece of text in place
 examples:
   gws-axi docs read 1BxAbc...
   gws-axi docs read 1BxAbc... --tab t.0 --full
