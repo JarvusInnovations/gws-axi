@@ -211,12 +211,18 @@ gws-axi docs download <documentId> --revision <id>        # fetch a past revisio
 gws-axi docs create --title "Sprint notes" ./notes.md --account you@example.com        # new Doc from Markdown
 gws-axi docs write <documentId> ./tab.md --tab t.0 --account you@example.com           # replace ONE tab's content
 gws-axi docs write <documentId> ./notes.md --new-tab "Decisions" --account you@example.com   # add a tab and fill it
+gws-axi docs write <documentId> ./round-3.md --new-tab "Round 3" --first --emoji 📝 --account you@example.com   # …placed first, with an icon
 gws-axi docs append <documentId> --content "## Update" --tab t.0 --account you@example.com   # add to the end of a tab
+gws-axi docs tabs <documentId>                                                               # list tabs (id, title, index, parent, emoji)
+gws-axi docs tabs update <documentId> t.k3j2 --first --title "Current" --account you@example.com   # move / rename / mark a tab
+gws-axi docs tabs delete <documentId> t.k3j2 --account you@example.com                       # delete a tab (children need --with-children)
 ```
 
 Every `docs read` carries the document's recent revisions and points at `docs revisions` / `docs download --revision` / `docs diff` — so an agent always knows which version it read. Non-native files (uploaded `.docx`, `.pdf`, etc.) get pointed at `docs download` automatically rather than failing with a cryptic Google API error.
 
 `docs create` / `write` / `append` turn Markdown into a Doc through gws-axi's own converter — headings, emphasis, code, links, lists, tasks, quotes, tables, rules, images by URL, footnotes — and touch exactly one tab, so `docs read --tab` → edit → `docs write --tab` is a safe loop on a multi-tab Doc. What the Docs API can't represent (a checked task, a code block's language) is written as text and listed under `lossy[]`. The write is refused if the Doc changed since it was read. Prefer these over `drive upload --convert` for Markdown: the result reads back with `docs read`, and opens without the gap Google's importer leaves above a first heading.
+
+`--new-tab` takes a placement — `--first`, `--last`, `--before <tabId>`, `--after <tabId>`, `--under <tabId>` — and `--emoji`, so a "regenerate into a new tab each round" workflow lands the newest round where readers open the Doc. `docs tabs update` moves, nests, renames or marks an existing tab with the same flags (plus `--top-level`, `--no-emoji`), is idempotent, and lists the resulting order with an undo line; `docs tabs delete` lists everything it removed and points at version history.
 
 ### Drive
 
