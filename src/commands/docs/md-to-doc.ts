@@ -915,6 +915,63 @@ export interface Phase2Input {
   contentWidthPt?: number;
 }
 
+/**
+ * Fill one empty cell paragraph at `at` with a cell's content: the lines as one
+ * insert, a style reset (a new cell inherits the split paragraph's heading or
+ * bold), the Markdown's own styles per paragraph, then one bullets request per
+ * run of same-kind items (level 0 only, so nothing shifts). `docs edit-cell`
+ * uses the same fill after clearing a cell.
+ */
+export function cellFillRequests(
+  cell: TableCell,
+  at: number,
+  tabId: string,
+  force: InlineStyle = {},
+): Request[] {
+  const requests: Request[] = [];
+  const { paragraphs } = cell;
+  const texts = paragraphs.map((p) => p.inline.runs.map((x) => x.text).join(""));
+  // Cell paragraphs are lines of one insert; the cell's own newline ends the last.
+  const text = texts.join("\n");
+  const range = { startIndex: at, endIndex: at + Math.max(text.length, 1), tabId };
+  if (text) requests.push({ insertText: { location: { index: at, tabId }, text } });
+  requests.push({
+    updateParagraphStyle: {
+      range,
+      paragraphStyle: { namedStyleType: "NORMAL_TEXT" },
+      fields: "namedStyleType,indentStart,indentFirstLine,indentEnd,borderBottom",
+    },
+  });
+  if (!text) return requests;
+  requests.push({ updateTextStyle: { range, textStyle: {}, fields: RESET_TEXT_FIELDS } });
+  const lists: Array<{ kind: ListKind; start: number; end: number }> = [];
+  let offset = at;
+  for (const [i, p] of paragraphs.entries()) {
+    requests.push(...runStyleRequests(p.inline, offset, tabId, undefined, force));
+    const end = offset + texts[i].length + 1;
+    const last = lists[lists.length - 1];
+    if (p.list && last && last.kind === p.list && last.end === offset) last.end = end;
+    else if (p.list) lists.push({ kind: p.list, start: offset, end });
+    offset = end;
+  }
+  for (const l of lists) {
+    requests.push({
+      createParagraphBullets: {
+        range: { startIndex: l.start, endIndex: l.end, tabId },
+        bulletPreset: BULLET_PRESET[l.kind],
+      },
+    });
+  }
+  return requests;
+}
+
+/** One cell's Markdown (styles, links, `<br>` lines, items) on its own — for `docs edit-cell`. */
+export function parseCellMarkdown(markdown: string): { cell: TableCell; lossy: Lossy[] } {
+  const ctx: ParseCtx = { lossy: new LossyLedger(), definitions: [] };
+  const cell = parseCell(markdown.replace(/\r\n?/g, "\n").replace(/\n/g, "<br>"), ctx);
+  return { cell, lossy: ctx.lossy.list() };
+}
+
 /** Phase 2: fill tables and footnotes. Descending index order inside each segment. */
 export function phase2Requests(phase1: Phase1, input: Phase2Input): Request[] {
   const { tabId } = input;
@@ -928,47 +985,9 @@ export function phase2Requests(phase1: Phase1, input: Phase2Input): Request[] {
       for (let c = block.rows[r].length - 1; c >= 0; c--) {
         const at = cells[r]?.[c];
         if (at === undefined) continue;
-        const { paragraphs } = block.rows[r][c];
-        const texts = paragraphs.map((p) => p.inline.runs.map((x) => x.text).join(""));
-        // Cell paragraphs are lines of one insert; the cell's own newline ends the last.
-        const text = texts.join("\n");
-        // A new cell's paragraph inherits the style of the paragraph the table
-        // split off (a heading, bold runs) — reset it before styling the text.
-        const cell = { startIndex: at, endIndex: at + Math.max(text.length, 1), tabId };
-        if (text) requests.push({ insertText: { location: { index: at, tabId }, text } });
-        requests.push({
-          updateParagraphStyle: {
-            range: cell,
-            paragraphStyle: { namedStyleType: "NORMAL_TEXT" },
-            fields: "namedStyleType,indentStart,indentFirstLine,indentEnd,borderBottom",
-          },
-        });
-        if (!text) continue;
-        requests.push({
-          updateTextStyle: { range: cell, textStyle: {}, fields: RESET_TEXT_FIELDS },
-        });
-        // Styles per paragraph at its offset, then one bullets request per run
-        // of same-kind items. Level 0 only, so nothing shifts.
-        const lists: Array<{ kind: ListKind; start: number; end: number }> = [];
-        let offset = at;
-        for (const [i, p] of paragraphs.entries()) {
-          requests.push(
-            ...runStyleRequests(p.inline, offset, tabId, undefined, r === 0 ? { bold: true } : {}),
-          );
-          const end = offset + texts[i].length + 1;
-          const last = lists[lists.length - 1];
-          if (p.list && last && last.kind === p.list && last.end === offset) last.end = end;
-          else if (p.list) lists.push({ kind: p.list, start: offset, end });
-          offset = end;
-        }
-        for (const l of lists) {
-          requests.push({
-            createParagraphBullets: {
-              range: { startIndex: l.start, endIndex: l.end, tabId },
-              bulletPreset: BULLET_PRESET[l.kind],
-            },
-          });
-        }
+        requests.push(
+          ...cellFillRequests(block.rows[r][c], at, tabId, r === 0 ? { bold: true } : {}),
+        );
       }
     }
     const start = input.tableStarts[t];
