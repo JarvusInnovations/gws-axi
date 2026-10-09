@@ -217,6 +217,7 @@ gws-axi docs tabs <documentId>                                                  
 gws-axi docs tabs update <documentId> t.k3j2 --first --title "Current" --account you@example.com   # move / rename / mark a tab
 gws-axi docs tabs delete <documentId> t.k3j2 --account you@example.com                       # delete a tab (children need --with-children)
 gws-axi docs replace-text <documentId> --find "Generating" --replace "Refining" --tab t.0 --account you@example.com   # change text in place, formatting kept
+gws-axi docs edit-cell <documentId> --row "State" --text "**Refining**" --account you@example.com   # replace one table cell by its row label; widths and other cells untouched
 ```
 
 Every `docs read` carries the document's recent revisions and points at `docs revisions` / `docs download --revision` / `docs diff` — so an agent always knows which version it read. Non-native files (uploaded `.docx`, `.pdf`, etc.) get pointed at `docs download` automatically rather than failing with a cryptic Google API error.
