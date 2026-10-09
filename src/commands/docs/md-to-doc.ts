@@ -1,4 +1,5 @@
 import { AxiError } from "axi-sdk-js";
+import { measureText } from "./text-width.js";
 import type { docs_v1 } from "googleapis";
 import { marked, type Token, type Tokens } from "marked";
 
@@ -79,29 +80,34 @@ export interface TableBlock {
   kind: "table";
   /** rows[0] is the header row. */
   rows: TableCell[][];
-  /** Column widths as fractions of the content width (sum 1), from a `<!-- cols: … -->` hint. */
-  cols?: number[];
+  /**
+   * Column widths from a `<!-- cols: … -->` hint: `"fit"` sizes a column to
+   * its content; a number is that column's fraction of what the fits leave.
+   */
+  cols?: ColSpec[];
 }
 
-/** `<!-- cols: 1 3 -->` or `<!-- cols: 25% 75% -->` on the line before a table. */
+export type ColSpec = number | "fit";
+
+/** `<!-- cols: 1 3 -->`, `<!-- cols: 25% 75% -->`, `<!-- cols: fit 1 -->` on the line before a table. */
 const COLS_HINT = /^\s*<!--\s*cols:\s*([^>]*?)\s*-->\s*$/i;
 
-/** Weights or percentages → fractions of the table width. Refuses anything that isn't a positive number. */
-export function parseColsHint(spec: string): number[] {
+/** Weights, percentages or `fit` → fractions of the non-fit share, and fits. Refuses anything else. */
+export function parseColsHint(spec: string): ColSpec[] {
   const parts = spec.split(/[\s,]+/).filter(Boolean);
-  const weights = parts.map((p) => Number(p.replace(/%$/, "")));
-  if (parts.length === 0 || weights.some((w) => !Number.isFinite(w) || w <= 0)) {
+  const raw: ColSpec[] = parts.map((p) => (/^fit$/i.test(p) ? "fit" : Number(p.replace(/%$/, ""))));
+  if (parts.length === 0 || raw.some((w) => w !== "fit" && (!Number.isFinite(w) || w <= 0))) {
     throw new AxiError(
       `Can't read the column widths in \`<!-- cols: ${spec} -->\``,
       "VALIDATION_ERROR",
       [
-        "Give one positive number per column, as weights (`1 3`) or percentages (`25% 75%`)",
+        "Give one entry per column: a weight (`1 3`), a percentage (`25% 75%`), or `fit` to size a column to its content",
         "Nothing was written",
       ],
     );
   }
-  const sum = weights.reduce((a, b) => a + b, 0);
-  return weights.map((w) => w / sum);
+  const sum = raw.reduce<number>((a, b) => (b === "fit" ? a : a + b), 0);
+  return raw.map((w) => (w === "fit" ? "fit" : w / sum));
 }
 
 /** Docs' default page: 612pt wide with 72pt side margins. */
@@ -374,7 +380,7 @@ function parseBlocks(
   listKey: { next: number },
 ): void {
   /** A `<!-- cols: … -->` waiting for its table; anything else in between is refused. */
-  let pendingCols: { cols: number[]; raw: string } | undefined;
+  let pendingCols: { cols: ColSpec[]; raw: string } | undefined;
   for (const token of tokens) {
     if (pendingCols && token.type !== "space" && token.type !== "table") {
       throw new AxiError(
@@ -790,10 +796,16 @@ export function phase1Requests(input: Block[], placement: Placement): Phase1 {
       footnotes.push(fn.content);
     }
   }
-  for (const t of tables) {
+  const tableAt = tables.map((t) => (t.at === "end" ? cursor - 1 : t.at));
+  tables.forEach((t, i) => {
     const rows = t.block.rows.length;
     const columns = Math.max(1, ...t.block.rows.map((r) => r.length));
-    const at = t.at === "end" ? cursor - 1 : t.at;
+    const at = tableAt[i];
+    // Adjacent tables share an insertion index. The first in document order
+    // is inserted last and may merge its stray into the paragraph above; the
+    // others sit between tables, where the stray can only be shrunk — and a
+    // merge there would put the next insert on a table's own start index.
+    const firstOfGroup = !tableAt.some((other, j) => j < i && other === at);
     shifts.push({
       at,
       order: order++,
@@ -813,10 +825,10 @@ export function phase1Requests(input: Block[], placement: Placement): Phase1 {
           },
         },
         { deleteParagraphBullets: { range: { startIndex: at, endIndex: at + 1, tabId } } },
-        ...(at > 1 ? [strayDelete(at, tabId)] : strayShrink(at, tabId)),
+        ...(at > 1 && firstOfGroup ? [strayDelete(at, tabId)] : strayShrink(at, tabId)),
       ],
     });
-  }
+  });
   // Bullets: one request per run of consecutive paragraphs sharing a list.
   let run: { key: number; kind: ListKind; start: number; end: number } | undefined;
   const flush = () => {
@@ -913,6 +925,69 @@ export interface Phase2Input {
   footnoteIds: string[];
   /** The tab's page width minus its side margins — what a `cols` hint divides. */
   contentWidthPt?: number;
+  /** The tab's NORMAL_TEXT font size — what a `fit` column is measured at. */
+  bodyFontPt?: number;
+}
+
+/** Docs' default body size, and its cell padding and bulleted-paragraph indent inside a cell (observed). */
+export const DEFAULT_BODY_FONT_PT = 11;
+const CELL_PADDING_PT = 5;
+const CELL_LIST_INDENT_PT = 36;
+const MIN_COLUMN_PT = 24;
+
+/**
+ * Column widths in points for a hinted table (specs/behaviors/markdown-to-doc.md
+ * § Fitted columns). Pure: the fits are measured from the cells' text, the
+ * rest is shared by proportion.
+ */
+export function columnWidths(
+  block: TableBlock,
+  contentWidthPt: number,
+  bodyFontPt: number,
+): number[] {
+  const cols = block.cols ?? [];
+  const widths = cols.map((spec, c) => {
+    if (spec !== "fit") return 0;
+    let widest = 0;
+    block.rows.forEach((row, r) => {
+      const cell = row[c];
+      if (!cell) return;
+      for (const p of cell.paragraphs) {
+        // One measured line per hard-break segment of the paragraph.
+        const segments: Array<Array<{ text: string; bold: boolean }>> = [[]];
+        for (const run of p.inline.runs) {
+          const pieces = run.text.split("\u000b");
+          pieces.forEach((piece, i) => {
+            if (i > 0) segments.push([]);
+            segments[segments.length - 1].push({ text: piece, bold: r === 0 || !!run.style.bold });
+          });
+        }
+        for (const seg of segments) {
+          const line =
+            seg.reduce((n, s) => n + measureText(s.text, { bold: s.bold, sizePt: bodyFontPt }), 0) +
+            (p.list ? CELL_LIST_INDENT_PT : 0);
+          widest = Math.max(widest, line);
+        }
+      }
+    });
+    return Math.max(MIN_COLUMN_PT, Math.ceil(widest * 1.06 + 2 + 2 * CELL_PADDING_PT));
+  });
+  const flexCount = cols.filter((s) => s !== "fit").length;
+  let fitTotal = widths.reduce((a, b) => a + b, 0);
+  // Fits must leave every proportional column at least the minimum.
+  const room = contentWidthPt - flexCount * MIN_COLUMN_PT;
+  if (flexCount && fitTotal > room) {
+    const scale = room / fitTotal;
+    cols.forEach((spec, c) => {
+      if (spec === "fit") widths[c] = Math.floor(widths[c] * scale);
+    });
+    fitTotal = widths.reduce((a, b) => a + b, 0);
+  }
+  const remaining = Math.max(0, contentWidthPt - fitTotal);
+  cols.forEach((spec, c) => {
+    if (spec !== "fit") widths[c] = Math.round(remaining * spec);
+  });
+  return widths;
 }
 
 /**
@@ -999,17 +1074,21 @@ export function phase2Requests(phase1: Phase1, input: Phase2Input): Request[] {
         },
       });
     }
-    // Column widths: fixed points per column from the hint's fractions. Index-free.
+    // Column widths: fixed points per column from the hint. Index-free.
     if (block.cols && start !== undefined) {
-      const width = input.contentWidthPt ?? DEFAULT_CONTENT_WIDTH_PT;
-      block.cols.forEach((fraction, i) => {
+      const widths = columnWidths(
+        block,
+        input.contentWidthPt ?? DEFAULT_CONTENT_WIDTH_PT,
+        input.bodyFontPt ?? DEFAULT_BODY_FONT_PT,
+      );
+      widths.forEach((magnitude, i) => {
         requests.push({
           updateTableColumnProperties: {
             tableStartLocation: { index: start, tabId },
             columnIndices: [i],
             tableColumnProperties: {
               widthType: "FIXED_WIDTH",
-              width: { magnitude: Math.round(width * fraction), unit: "PT" },
+              width: { magnitude, unit: "PT" },
             },
             fields: "widthType,width",
           },
