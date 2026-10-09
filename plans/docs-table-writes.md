@@ -1,10 +1,11 @@
 ---
-status: in-progress
+status: done
 depends: []
 specs:
   - specs/behaviors/markdown-to-doc.md
   - specs/commands/docs-write.md
 issues: [104, 105, 109]
+pr: 112
 ---
 
 # Plan: Table writes — no stray paragraphs, clean cells, no leaked tab
@@ -55,16 +56,16 @@ All in `phase1Requests` / `phase2Requests` (`src/commands/docs/md-to-doc.ts`) an
 
 ## Validation
 
-- [ ] `bun run build`, `lint`, `format:check`, `test` pass.
-- [ ] Unit: table-only body → no `insertText`; stray delete follows each table insert (not at
+- [x] `bun run build`, `lint`, `format:check`, `test` pass.
+- [x] Unit: table-only body → no `insertText`; stray delete follows each table insert (not at
       the tab's first index); `spaceAbove` on the paragraph after a table (not on a heading,
       not the top-of-tab zero); phase 2 resets every cell before run styles.
-- [ ] Live (scratch Doc, <chris@jarv.us>): the three repro files from the issues write cleanly;
+- [x] Live (scratch Doc, <chris@jarv.us>): the three repro files from the issues write cleanly;
       `text/plain` export shows no blank line between `Title` and the table; cells after a
       heading read back unbolded; the paragraph after a table has `spaceAbove` 10pt.
-- [ ] Live: a table as the first block of a tab; a table at the end of an `append`; two
+- [x] Live: a table as the first block of a tab; a table at the end of an `append`; two
       adjacent tables.
-- [ ] Live: a forced failure after `--new-tab` (an image URL Google refuses, placed so phase 1
+- [x] Live: a forced failure after `--new-tab` (an image URL Google refuses, placed so phase 1
       passes locally) leaves no tab and the error says the tab was removed.
 
 ## Risks / unknowns
@@ -77,8 +78,29 @@ All in `phase1Requests` / `phase2Requests` (`src/commands/docs/md-to-doc.ts`) an
 
 ## Notes
 
-(At closeout.)
+- **The merge keeps the preceding paragraph's style** — a `HEADING_1` stays a heading with the
+  table directly below it, and a list item before a table keeps its bullet. Probed before
+  the spec was amended; held on every live shape.
+- **Two adjacent tables mid-document end up with nothing between them**: the second table
+  (inserted first, descending order) merges its stray into the preceding paragraph, and the
+  first table's insert at the second table's start index then does the same. At the *top* of a
+  tab the strays can't merge into anything, so each is shrunk (1pt, zero spacing); `docs read`
+  skips them. Visible only as structure in `documents.get`.
+- **The gap after a table is read from the tab's named style** (`NORMAL_TEXT.spaceBelow`),
+  so a Doc whose owner set 6pt gets 6pt; the Docs default is 10pt. A new tab from
+  `--new-tab` has no state yet and uses the default.
+- **The pre-add dry run** (`phase1Requests` against a fake placement) is pure and cheap; the
+  compensating `deleteTab` was exercised live by an image URL Google refuses, which passes
+  the local check and fails in the batch.
+- Scratch Doc `1zqNMgGxn3w97bFfWIPsFE7FyPphou_Vashbu4gFRcHA` (<chris@jarv.us>), trashed
+  afterwards.
 
 ## Follow-ups
 
-(At closeout.)
+- Issue: #106 multi-line cells, #107 column widths, #108 `edit-cell` / `replace-text` —
+  reviewed together with these; each is its own plan.
+- Tracked as: house spacing values on the named styles of tabs gws-axi creates (`docs create`,
+  `--new-tab`), once the owner picks values; the principle and `updateNamedStyle` facts are
+  recorded in the behavior spec.
+- Tracked as: `docs write`'s `TAB_REQUIRED` still embeds a TOON listing in a suggestion string
+  (carried from `plans/docs-tabs.md`).
