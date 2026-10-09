@@ -1,5 +1,5 @@
 ---
-status: planned
+status: in-progress
 depends: []
 specs:
   - specs/commands/docs-tabs.md
@@ -65,8 +65,8 @@ first tab from `docs create`, any content operation.
 
 - **Depth cap**: the fetch is masked three levels deep (as `drive upload`'s guard). A target
   below that is reported not found; acceptable, disclosed in the spec.
-- **`--last` arithmetic across parents**: sibling count excludes the moving tab only when it
-  already sits in the destination parent. Unit-pinned.
+- **`--last` arithmetic**: the index sent is the destination parent's sibling count, counting
+  the moving tab when it is already there (the API accepts `index == count`). Unit-pinned.
 
 ## Notes
 
