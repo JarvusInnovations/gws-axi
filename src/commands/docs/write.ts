@@ -240,7 +240,8 @@ export async function readSource(flags: WriteFlags): Promise<string | undefined>
 export interface TabTarget extends TabInfo {
   /** The tab body's end index (2 for an empty tab; unknown on a properties-only read). */
   end: number;
-  /** The tab's NORMAL_TEXT space-below, in points — the gap the converter puts under a table. */
+  /** The tab's NORMAL_TEXT space-above / space-below, in points; the latter is the gap under a table. */
+  spaceAbovePt?: number;
   spaceBelowPt?: number;
   /** Page width minus side margins, in points — what a table's `cols` hint divides. */
   contentWidthPt?: number;
@@ -257,15 +258,18 @@ export interface DocState {
 }
 
 const stateFields = (withBodies: boolean) => {
+  const styles =
+    "namedStyles(styles(namedStyleType,paragraphStyle(spaceAbove,spaceBelow),textStyle(fontSize,weightedFontFamily)))";
   const tab = withBodies
-    ? `${TAB_PROPERTIES_MASK},documentTab(body(content(endIndex)),namedStyles(styles(namedStyleType,paragraphStyle(spaceBelow),textStyle(fontSize,weightedFontFamily))),documentStyle(pageSize,marginLeft,marginRight))`
-    : TAB_PROPERTIES_MASK;
+    ? `${TAB_PROPERTIES_MASK},documentTab(body(content(endIndex)),${styles},documentStyle(pageSize,marginLeft,marginRight))`
+    : `${TAB_PROPERTIES_MASK},documentTab(${styles})`;
   return `documentId,title,revisionId,tabs(${tab},childTabs(${tab},childTabs(${tab})))`;
 };
 
 function tabTargets(tabs: docs_v1.Schema$Tab[] | undefined): TabTarget[] {
   const ends = new Map<string, number>();
   const gaps = new Map<string, number>();
+  const aboves = new Map<string, number>();
   const widths = new Map<string, number>();
   const fonts = new Map<string, { size?: number; family?: string }>();
   const walk = (list: docs_v1.Schema$Tab[] | undefined) => {
@@ -278,6 +282,8 @@ function tabTargets(tabs: docs_v1.Schema$Tab[] | undefined): TabTarget[] {
       );
       const below = normal?.paragraphStyle?.spaceBelow?.magnitude;
       if (typeof below === "number") gaps.set(id, below);
+      const above = normal?.paragraphStyle?.spaceAbove?.magnitude;
+      if (typeof above === "number") aboves.set(id, above);
       const size = normal?.textStyle?.fontSize?.magnitude;
       const family = normal?.textStyle?.weightedFontFamily?.fontFamily;
       if (typeof size === "number" || family) {
@@ -295,6 +301,7 @@ function tabTargets(tabs: docs_v1.Schema$Tab[] | undefined): TabTarget[] {
   return flattenTabInfos(tabs).map((info) => ({
     ...info,
     end: ends.get(info.id) ?? 2,
+    spaceAbovePt: aboves.get(info.id),
     spaceBelowPt: gaps.get(info.id),
     contentWidthPt: widths.get(info.id),
     bodyFontPt: fonts.get(info.id)?.size,
@@ -518,7 +525,13 @@ function render(
   action: string,
   account: string,
   result: WriteResult,
-  extra: { previousRevision?: string; newTab?: boolean; tabs?: TabInfo[] },
+  extra: {
+    previousRevision?: string;
+    newTab?: boolean;
+    tabs?: TabInfo[];
+    /** Normal text got Docs' default spacing because the template had none. */
+    spacingSet?: boolean;
+  },
 ): string {
   const { state, tab, phase1, lossy } = result;
   const blocks: string[] = [];
@@ -578,6 +591,15 @@ function render(
   if (tables) help.push(tables);
   const fitNote = fitFontHelp(phase1.tables, (tab as TabTarget).bodyFontFamily);
   if (fitNote) help.push(fitNote);
+  if (extra.spacingSet) {
+    help.push(
+      `This tab's Normal text had no paragraph spacing (the Doc template's default); it was set to ${DEFAULT_PARAGRAPH_SPACING_PT}pt after, Docs' own default`,
+    );
+  } else if (needsParagraphSpacing(tab as TabTarget)) {
+    help.push(
+      `This tab's Normal text has no paragraph spacing, so paragraphs run together: \`gws-axi docs tabs update ${state.id} ${tab.id} --paragraph-spacing ${DEFAULT_PARAGRAPH_SPACING_PT} --account ${account}\` sets Docs' default`,
+    );
+  }
   help.push(`Open in browser: https://docs.google.com/document/d/${state.id}/edit`);
   blocks.push(renderHelp(help));
   return joinBlocks(...blocks);
@@ -593,6 +615,56 @@ export function tableHelp(tables: Array<{ cols?: ColSpec[] }>): string | undefin
   const unhinted = tables.filter((t) => !t.cols).length;
   if (!unhinted) return undefined;
   return `${unhinted === 1 ? "A table was" : `${unhinted} tables were`} written with equal column widths; put \`<!-- cols: 1 3 -->\` (weights or percentages) on the line above a table to set them. Inside a cell, <br> breaks lines and "- item" lines make a list`;
+}
+
+/** Docs' own default space-below for Normal text, applied to a tab whose template gave it none. */
+export const DEFAULT_PARAGRAPH_SPACING_PT = 10;
+
+/** A tab whose NORMAL_TEXT has no space above and none below runs every paragraph together. */
+export function needsParagraphSpacing(tab: {
+  spaceAbovePt?: number;
+  spaceBelowPt?: number;
+}): boolean {
+  return (tab.spaceAbovePt ?? 0) === 0 && (tab.spaceBelowPt ?? 0) === 0;
+}
+
+/** The request that sets a tab's Normal-text space-below (verified live: the mask must name the type). */
+export function paragraphSpacingRequest(tabId: string, pt: number): docs_v1.Schema$Request {
+  return {
+    updateNamedStyle: {
+      tabId,
+      namedStyle: {
+        namedStyleType: "NORMAL_TEXT",
+        paragraphStyle: { spaceBelow: { magnitude: pt, unit: "PT" } },
+      },
+      fields: "namedStyleType,paragraphStyle.spaceBelow",
+    },
+  };
+}
+
+/**
+ * Guarantee paragraph spacing on a tab gws-axi created
+ * (specs/behaviors/markdown-to-doc.md § Spacing): when the account's template
+ * gave Normal text no spacing, set Docs' default before writing. Returns
+ * whether it did, for the response.
+ */
+async function ensureParagraphSpacing(
+  api: docs_v1.Docs,
+  account: string,
+  state: DocState,
+  tab: TabTarget,
+): Promise<boolean> {
+  if (!needsParagraphSpacing(tab)) return false;
+  const reply = await batch(
+    api,
+    account,
+    state.id,
+    [paragraphSpacingRequest(tab.id, DEFAULT_PARAGRAPH_SPACING_PT)],
+    state.revisionId,
+  );
+  state.revisionId = reply.writeControl?.requiredRevisionId ?? state.revisionId;
+  tab.spaceBelowPt = DEFAULT_PARAGRAPH_SPACING_PT;
+  return true;
 }
 
 /** Fonts whose metrics the fit measurement actually has (Arial is metric-compatible with Helvetica). */
@@ -620,6 +692,7 @@ export async function docsWriteCommand(account: string, args: string[]): Promise
 
   let tab: TabTarget;
   let tabs: TabInfo[] | undefined;
+  let spacingSet = false;
   if (flags.newTab) {
     // Convert first: anything the converter refuses fails with no tab added.
     phase1Requests(parseMarkdown(markdown).blocks, {
@@ -654,6 +727,17 @@ export async function docsWriteCommand(account: string, args: string[]): Promise
       end: 2,
     };
     state.revisionId = reply.writeControl?.requiredRevisionId ?? state.revisionId;
+    // The new tab's styles come from the Doc template, not the reply.
+    const fresh = (await readState(api, account, state.id, { properties: true })).tabs.find(
+      (t) => t.id === tab.id,
+    );
+    if (fresh) {
+      tab.spaceAbovePt = fresh.spaceAbovePt;
+      tab.spaceBelowPt = fresh.spaceBelowPt;
+      tab.bodyFontPt = fresh.bodyFontPt;
+      tab.bodyFontFamily = fresh.bodyFontFamily;
+    }
+    spacingSet = await ensureParagraphSpacing(api, account, state, tab);
   } else {
     tab = chooseTab(state, flags.tab, "write", account);
   }
@@ -682,7 +766,12 @@ export async function docsWriteCommand(account: string, args: string[]): Promise
     // The listing is the proof of placement; one properties-only read.
     tabs = (await readState(api, account, state.id, { properties: true })).tabs;
   }
-  return render("written", account, result, { previousRevision, newTab: !!flags.newTab, tabs });
+  return render("written", account, result, {
+    previousRevision,
+    newTab: !!flags.newTab,
+    tabs,
+    spacingSet,
+  });
 }
 
 export async function docsAppendCommand(account: string, args: string[]): Promise<string> {
@@ -738,6 +827,7 @@ export async function docsCreateCommand(account: string, args: string[]): Promis
   const api = await docsClient(account);
   const state = await readState(api, account, documentId);
   const tab = state.tabs[0] ?? { id: "", title: "", index: 0, parent: "", emoji: "", end: 2 };
+  const spacingSet = await ensureParagraphSpacing(api, account, state, tab);
   const result = await writeTab(api, account, state, tab, markdown, "replace");
-  return render("created", account, result, {});
+  return render("created", account, result, { spacingSet });
 }
