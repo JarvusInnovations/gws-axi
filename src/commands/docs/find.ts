@@ -41,7 +41,7 @@ interface ParsedFlags {
   limit: number;
 }
 
-interface RawMatch {
+export interface RawMatch {
   paragraph: number;
   start: number;
   end: number;
@@ -103,64 +103,83 @@ function flatTabIndex(doc: docs_v1.Schema$Document): Map<string, docs_v1.Schema$
   return out;
 }
 
-// Walk the body and, for each paragraph, collect the concatenated text plus
-// the global start index of each contributing text run so we can resolve
-// match offsets back to Docs API character positions (used by mutations).
-function findMatches(
-  body: docs_v1.Schema$Body | undefined,
+export interface MatchOptions {
+  /** Case-sensitive match. `docs find` is lenient (false); `replace-text` exact (true). */
+  matchCase: boolean;
+  limit?: number;
+}
+
+/**
+ * Walk structural elements — paragraphs, and table cells recursively — and
+ * collect every occurrence of `query`. Each paragraph's runs are concatenated
+ * so a match across a style boundary counts once (as `replaceAllText` treats
+ * it), and the global start index of each run is kept so an offset resolves
+ * back to a Docs API character position (used by mutations). Paragraphs are
+ * numbered in walk order, cells included.
+ */
+export function collectMatches(
+  elements: docs_v1.Schema$StructuralElement[] | undefined,
   query: string,
-  limit: number,
+  options: MatchOptions,
 ): RawMatch[] {
-  if (!body?.content) return [];
-  const needle = query.toLowerCase();
+  const limit = options.limit ?? Infinity;
+  const needle = options.matchCase ? query : query.toLowerCase();
   const matches: RawMatch[] = [];
   let paragraphIndex = 0;
 
-  for (const el of body.content) {
-    if (!el.paragraph) continue;
-    const para = el.paragraph;
-
-    let paraText = "";
-    const runOffsets: Array<{ paraOffset: number; docOffset: number }> = [];
-    for (const pe of para.elements ?? []) {
-      if (!pe.textRun) continue;
-      const content = pe.textRun.content ?? "";
-      const docStart = pe.startIndex ?? 0;
-      runOffsets.push({ paraOffset: paraText.length, docOffset: docStart });
-      paraText += content;
-    }
-
-    let scanFrom = 0;
-    while (scanFrom < paraText.length && matches.length < limit) {
-      const hit = paraText.toLowerCase().indexOf(needle, scanFrom);
-      if (hit === -1) break;
-      // Translate the paragraph-local offset back to a document offset by
-      // finding the run this hit falls inside.
-      let docStart = 0;
-      for (let i = runOffsets.length - 1; i >= 0; i--) {
-        if (runOffsets[i].paraOffset <= hit) {
-          docStart = runOffsets[i].docOffset + (hit - runOffsets[i].paraOffset);
-          break;
+  const walk = (list: docs_v1.Schema$StructuralElement[] | undefined): void => {
+    for (const el of list ?? []) {
+      if (matches.length >= limit) return;
+      if (el.table) {
+        for (const row of el.table.tableRows ?? []) {
+          for (const cell of row.tableCells ?? []) walk(cell.content ?? undefined);
         }
+        continue;
       }
-      matches.push({
-        paragraph: paragraphIndex,
-        start: docStart,
-        end: docStart + needle.length,
-        paragraphText: paraText,
-        offsetInParagraph: hit,
-      });
-      scanFrom = hit + needle.length;
+      if (!el.paragraph) continue;
+      const para = el.paragraph;
+
+      let paraText = "";
+      const runOffsets: Array<{ paraOffset: number; docOffset: number }> = [];
+      for (const pe of para.elements ?? []) {
+        if (!pe.textRun) continue;
+        const content = pe.textRun.content ?? "";
+        const docStart = pe.startIndex ?? 0;
+        runOffsets.push({ paraOffset: paraText.length, docOffset: docStart });
+        paraText += content;
+      }
+      const haystack = options.matchCase ? paraText : paraText.toLowerCase();
+
+      let scanFrom = 0;
+      while (scanFrom < paraText.length && matches.length < limit) {
+        const hit = haystack.indexOf(needle, scanFrom);
+        if (hit === -1) break;
+        // Translate the paragraph-local offset back to a document offset by
+        // finding the run this hit falls inside.
+        let docStart = 0;
+        for (let i = runOffsets.length - 1; i >= 0; i--) {
+          if (runOffsets[i].paraOffset <= hit) {
+            docStart = runOffsets[i].docOffset + (hit - runOffsets[i].paraOffset);
+            break;
+          }
+        }
+        matches.push({
+          paragraph: paragraphIndex,
+          start: docStart,
+          end: docStart + needle.length,
+          paragraphText: paraText,
+          offsetInParagraph: hit,
+        });
+        scanFrom = hit + needle.length;
+      }
+      paragraphIndex += 1;
     }
-
-    paragraphIndex += 1;
-    if (matches.length >= limit) break;
-  }
-
+  };
+  walk(elements);
   return matches;
 }
 
-function buildContext(paragraphText: string, offset: number, queryLength: number): string {
+export function buildContext(paragraphText: string, offset: number, queryLength: number): string {
   const before = paragraphText.slice(Math.max(0, offset - CONTEXT_RADIUS), offset);
   const hit = paragraphText.slice(offset, offset + queryLength);
   const after = paragraphText.slice(
@@ -238,7 +257,7 @@ export async function docsFindCommand(account: string, args: string[]): Promise<
     body = doc.body ?? undefined;
   }
 
-  const raw = findMatches(body, flags.query, flags.limit);
+  const raw = collectMatches(body?.content, flags.query, { matchCase: false, limit: flags.limit });
   const items = raw.map((m, i) => ({
     ref: `@${i + 1}`,
     paragraph: m.paragraph,

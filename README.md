@@ -216,6 +216,7 @@ gws-axi docs append <documentId> --content "## Update" --tab t.0 --account you@e
 gws-axi docs tabs <documentId>                                                               # list tabs (id, title, index, parent, emoji)
 gws-axi docs tabs update <documentId> t.k3j2 --first --title "Current" --account you@example.com   # move / rename / mark a tab
 gws-axi docs tabs delete <documentId> t.k3j2 --account you@example.com                       # delete a tab (children need --with-children)
+gws-axi docs replace-text <documentId> --find "Generating" --replace "Refining" --tab t.0 --account you@example.com   # change text in place, formatting kept
 ```
 
 Every `docs read` carries the document's recent revisions and points at `docs revisions` / `docs download --revision` / `docs diff` — so an agent always knows which version it read. Non-native files (uploaded `.docx`, `.pdf`, etc.) get pointed at `docs download` automatically rather than failing with a cryptic Google API error.
@@ -223,6 +224,8 @@ Every `docs read` carries the document's recent revisions and points at `docs re
 `docs create` / `write` / `append` turn Markdown into a Doc through gws-axi's own converter — headings, emphasis, code, links, lists, tasks, quotes, tables, rules, images by URL, footnotes — and touch exactly one tab, so `docs read --tab` → edit → `docs write --tab` is a safe loop on a multi-tab Doc. What the Docs API can't represent (a checked task, a code block's language) is written as text and listed under `lossy[]`. The write is refused if the Doc changed since it was read. Prefer these over `drive upload --convert` for Markdown: the result reads back with `docs read`, and opens without the gap Google's importer leaves above a first heading.
 
 `--new-tab` takes a placement — `--first`, `--last`, `--before <tabId>`, `--after <tabId>`, `--under <tabId>` — and `--emoji`, so a "regenerate into a new tab each round" workflow lands the newest round where readers open the Doc. `docs tabs update` moves, nests, renames or marks an existing tab with the same flags (plus `--top-level`, `--no-emoji`), is idempotent, and lists the resulting order with an undo line; `docs tabs delete` lists everything it removed and points at version history.
+
+`docs replace-text` is the surgical alternative to rewriting a tab: a literal find/replace scoped to one tab, keeping every style around it (a bold cell stays bold). It counts matches first — more than one is refused unless `--all`, none is `action: no_match` — and lists each occurrence as it read before the change. `--ignore-case` relaxes the match; `--replace ""` deletes.
 
 ### Drive
 
