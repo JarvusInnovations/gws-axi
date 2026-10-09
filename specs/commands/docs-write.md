@@ -40,7 +40,9 @@ than one → `VALIDATION_ERROR`. An empty body for `write` is allowed (it emptie
   `drive upload --update --replace-all-tabs`, by name.
 - `--new-tab <title>` (`write` only) — add a tab with that title and write into it. Cannot be
   combined with `--tab`. Re-running adds another tab with the same title; the response says so.
-  Where it goes is the next section.
+  Where it goes is the next section. The Markdown is converted before the tab is added, and a
+  write that fails after the add deletes the tab again — a failed call never leaves an empty tab
+  behind ([markdown-to-doc](../behaviors/markdown-to-doc.md) § Atomicity).
 
 **Placing a new tab** (`write` with `--new-tab`):
 
@@ -131,7 +133,7 @@ move shows the order it produced*).
 | `INVALID_EMOJI` | Google refused the `--emoji` value; no tab was added |
 | `IMAGE_NOT_FETCHABLE` | A non-`http(s)` image source, or a URL Google refused; nothing written |
 | `DOCUMENT_CHANGED` | The Doc's revision moved between the read and the write; nothing written. Suggests re-running |
-| `WRITE_INCOMPLETE` | The first batch applied but the table/footnote fill did not; names the revision before the write for `docs diff` |
+| `WRITE_INCOMPLETE` | The first batch applied but the table/footnote fill did not; names the revision before the write for `docs diff`. With `--new-tab`, the tab is deleted first and the error says so |
 | `FILE_NOT_FOUND` | `--parent` folder absent or inaccessible (`create`) |
 
 All Google failures pass through `translateGoogleError`.
