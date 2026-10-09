@@ -1,10 +1,11 @@
 ---
-status: in-progress
+status: done
 depends: []
 specs:
   - specs/commands/docs-tabs.md
   - specs/commands/docs-write.md
 issues: [101]
+pr: 102
 ---
 
 # Plan: Tab management — placement on `--new-tab`, and `docs tabs`
@@ -46,20 +47,20 @@ first tab from `docs create`, any content operation.
 
 ## Validation
 
-- [ ] `bun run build`, `lint`, `format:check`, `test` pass.
-- [ ] Unit: placement resolver — each flag against a fixture tree (first/last/before/after,
+- [x] `bun run build`, `lint`, `format:check`, `test` pass.
+- [x] Unit: placement resolver — each flag against a fixture tree (first/last/before/after,
       under, top-level, same-parent no-op, cross-parent move, cycle, unknown anchor).
-- [ ] Unit: `docs write` flag parsing — placement without `--new-tab` is refused with the
+- [x] Unit: `docs write` flag parsing — placement without `--new-tab` is refused with the
       hint; conflicting placement flags refused.
-- [ ] Live (scratch Doc, <chris@jarv.us>): `docs write --new-tab "R2" --first --emoji 📝`
+- [x] Live (scratch Doc, <chris@jarv.us>): `docs write --new-tab "R2" --first --emoji 📝`
       lands at index 0 with the icon and the response lists the tabs.
-- [ ] Live: `docs tabs` lists a nested Doc with `parent` and `emoji`; `update --after`,
+- [x] Live: `docs tabs` lists a nested Doc with `parent` and `emoji`; `update --after`,
       `--under`, `--top-level --first`, `--title`, `--no-emoji` each produce the documented
       response; re-running the same call is `unchanged`; the undo line restores the
       previous state.
-- [ ] Live: `delete` on a parent → `TAB_HAS_CHILDREN`; with `--with-children` lists both;
+- [x] Live: `delete` on a parent → `TAB_HAS_CHILDREN`; with `--with-children` lists both;
       the only tab → `LAST_TAB`; an unknown id → `TAB_NOT_FOUND`.
-- [ ] Live: `docs tabs update … --emoji "🚀🚀"` → `INVALID_EMOJI`, nothing else changed.
+- [x] Live: `docs tabs update … --emoji "🚀🚀"` → `INVALID_EMOJI`, nothing else changed.
 
 ## Risks / unknowns
 
@@ -70,8 +71,29 @@ first tab from `docs create`, any content operation.
 
 ## Notes
 
-(At closeout.)
+- **Index semantics were the one thing the reference didn't say.** Probed before the spec:
+  `index` is "insert before the tab currently at this slot", so `--last` sends the sibling
+  count *including* the moving tab (A→4 on four tabs puts A last), and no direction
+  adjustment is ever needed. The first draft of the spec said the opposite; the live probe
+  caught it before any code did.
+- **`LAST_TAB` needed the subtree case.** A parent-with-children can be the whole Doc, and
+  `deleteTab --with-children` on it would ask Google to leave zero tabs. The check is
+  "children + 1 == tab count", not "tab count == 1".
+- **Error suggestions carry ids inline**, not a TOON block: a multi-line suggestion renders as
+  one escaped string inside `help[]`, which is unreadable. `TAB_REQUIRED` in `docs write`
+  still embeds the block (pre-existing).
+- **Two-word subcommands** (`tabs update`, `tabs delete`) are plain `SUBCOMMANDS` entries; the
+  dispatcher tries the two-word name first, so `flag-declarations.test.ts` covers them with no
+  special casing and write protection applies to exactly the two that write.
+- Live validation on scratch Doc `1u3YJWDTALTKwgfcZKJ8coQ8FCboAhZE-ITeSRmmpy84`
+  (chris@jarv.us, trashed afterwards): every row of the Validation list, plus `TAB_CYCLE`
+  on self-anchoring and the write-side hint for a placement flag without `--new-tab`.
 
 ## Follow-ups
 
-(At closeout.)
+- Tracked as: `TAB_REQUIRED` / the write-side `TAB_NOT_FOUND` in `docs write` still embed a
+  TOON listing in a suggestion; switch them to the inline `id (title)` form the tab commands
+  use.
+- Tracked as: `docs create --tab-title` / `--emoji` for the first tab, if someone asks; today
+  it is `docs tabs update <id> t.0 --title …` afterwards.
+- None: the four tab properties are the complete mutable set; no further tab verb is planned.
