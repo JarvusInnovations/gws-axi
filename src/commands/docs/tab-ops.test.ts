@@ -84,3 +84,26 @@ describe("docs tabs listing arguments", () => {
     expect(code).toBe("VALIDATION_ERROR");
   });
 });
+
+describe("paragraph spacing", () => {
+  it("is needed only when Normal text has neither space above nor below", async () => {
+    const { needsParagraphSpacing } = await import("./write.js");
+    expect(needsParagraphSpacing({})).toBe(true);
+    expect(needsParagraphSpacing({ spaceAbovePt: 0, spaceBelowPt: 0 })).toBe(true);
+    expect(needsParagraphSpacing({ spaceAbovePt: 0, spaceBelowPt: 10 })).toBe(false);
+    expect(needsParagraphSpacing({ spaceAbovePt: 6, spaceBelowPt: 0 })).toBe(false);
+  });
+
+  it("parses --paragraph-spacing as non-negative points", () => {
+    expect(parseUpdateFlags(["1Doc", "t.1", "--paragraph-spacing", "10"]).paragraphSpacing).toBe(
+      10,
+    );
+    expect(parseUpdateFlags(["1Doc", "t.1", "--paragraph-spacing", "0"]).paragraphSpacing).toBe(0);
+    expect(codeOf(() => parseUpdateFlags(["1Doc", "t.1", "--paragraph-spacing", "-1"]))).toBe(
+      "VALIDATION_ERROR",
+    );
+    expect(codeOf(() => parseUpdateFlags(["1Doc", "t.1", "--paragraph-spacing", "x"]))).toBe(
+      "VALIDATION_ERROR",
+    );
+  });
+});

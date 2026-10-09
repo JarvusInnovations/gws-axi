@@ -13,7 +13,13 @@ import {
   renderTabListing,
   resolvePlacement,
 } from "./tabs.js";
-import { type DocState, batch, readState } from "./write.js";
+import {
+  type DocState,
+  type TabTarget,
+  batch,
+  paragraphSpacingRequest,
+  readState,
+} from "./write.js";
 
 /**
  * `docs tabs`, `docs tabs update`, `docs tabs delete`
@@ -47,6 +53,9 @@ flags[10]:
   --title <title>      Rename the tab
   --emoji <emoji>      Set the tab's icon (one emoji)
   --no-emoji           Clear the icon
+  --paragraph-spacing <pt>
+                       Space after every Normal-text paragraph in the tab (the
+                       tab's Normal text style); 0 removes it. Docs' default is 10
   --first              Move to the start of its parent (or of --under / --top-level)
   --last               Move to the end of its parent (or of --under / --top-level)
   --before <tabId>     Move next to an existing tab, into that tab's parent —
@@ -84,7 +93,7 @@ notes:
 
 export const TABS_FLAGS: FlagSpec = { value: [], boolean: [] };
 export const TABS_UPDATE_FLAGS: FlagSpec = {
-  value: ["--title", "--emoji", ...(PLACEMENT_FLAGS.value ?? [])],
+  value: ["--title", "--emoji", "--paragraph-spacing", ...(PLACEMENT_FLAGS.value ?? [])],
   boolean: ["--no-emoji", ...(PLACEMENT_FLAGS.boolean ?? [])],
 };
 export const TABS_DELETE_FLAGS: FlagSpec = { boolean: ["--with-children"] };
@@ -119,7 +128,7 @@ function requireTabId(positionals: string[], usage: string): string {
   return id;
 }
 
-function findTab(state: DocState, tabId: string): TabInfo {
+function findTab(state: DocState, tabId: string): TabTarget {
   const found = state.tabs.find((t) => t.id === tabId);
   if (found) return found;
   throw new AxiError(`Tab '${tabId}' not found in document '${state.id}'`, "TAB_NOT_FOUND", [
@@ -133,8 +142,15 @@ function accountFlag(account: string): string {
 }
 
 /** The five listed properties, without the state's internal fields. */
-function tabView(tab: TabInfo): TabInfo {
-  return { id: tab.id, title: tab.title, index: tab.index, parent: tab.parent, emoji: tab.emoji };
+function tabView(tab: TabInfo & { spaceBelowPt?: number }): Record<string, unknown> {
+  return {
+    id: tab.id,
+    title: tab.title,
+    index: tab.index,
+    parent: tab.parent,
+    emoji: tab.emoji,
+    paragraph_spacing: tab.spaceBelowPt ?? 0,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -180,6 +196,8 @@ interface UpdateFlags {
   /** `""` clears. */
   emoji?: string;
   placement?: Placement;
+  /** Points of space after Normal-text paragraphs; the tab's named style. */
+  paragraphSpacing?: number;
 }
 
 const UPDATE_USAGE =
@@ -204,9 +222,26 @@ export function parseUpdateFlags(args: string[]): UpdateFlags {
   if (parsed.values["--emoji"] !== undefined) flags.emoji = parsed.values["--emoji"];
   if (parsed.booleans.has("--no-emoji")) flags.emoji = "";
   flags.placement = parsePlacement(parsed);
-  if (flags.title === undefined && flags.emoji === undefined && !flags.placement) {
+  const spacing = parsed.values["--paragraph-spacing"];
+  if (spacing !== undefined) {
+    const pt = Number(spacing);
+    if (!Number.isFinite(pt) || pt < 0) {
+      throw new AxiError(
+        `--paragraph-spacing expects points (0 or more), got: ${spacing}`,
+        "VALIDATION_ERROR",
+        ["Docs' default is 10"],
+      );
+    }
+    flags.paragraphSpacing = pt;
+  }
+  if (
+    flags.title === undefined &&
+    flags.emoji === undefined &&
+    !flags.placement &&
+    flags.paragraphSpacing === undefined
+  ) {
     throw new AxiError("Nothing to update: no property flags given", "VALIDATION_ERROR", [
-      "Pass --title <title>, --emoji <emoji> / --no-emoji, and/or a placement (--first, --last, --before <tabId>, --after <tabId>, --under <tabId>, --top-level)",
+      "Pass --title <title>, --emoji <emoji> / --no-emoji, --paragraph-spacing <pt>, and/or a placement (--first, --last, --before <tabId>, --after <tabId>, --under <tabId>, --top-level)",
       `Run \`gws-axi docs tabs ${documentId}\` to see the tabs`,
     ]);
   }
@@ -243,6 +278,16 @@ export async function docsTabsUpdateCommand(account: string, args: string[]): Pr
     changed.push("emoji");
     undo.push(before.emoji ? `--emoji ${before.emoji}` : "--no-emoji");
   }
+  // The one knob past the tab's properties: its Normal-text style's space-below.
+  const extraRequests: docs_v1.Schema$Request[] = [];
+  if (
+    flags.paragraphSpacing !== undefined &&
+    flags.paragraphSpacing !== (before.spaceBelowPt ?? 0)
+  ) {
+    extraRequests.push(paragraphSpacingRequest(before.id, flags.paragraphSpacing));
+    changed.push("paragraph_spacing");
+    undo.push(`--paragraph-spacing ${before.spaceBelowPt ?? 0}`);
+  }
   if (flags.placement) {
     const placed = resolvePlacement(flags.placement, state.tabs, before);
     if (placed !== "unchanged") {
@@ -258,7 +303,7 @@ export async function docsTabsUpdateCommand(account: string, args: string[]): Pr
     }
   }
 
-  if (!fields.length) {
+  if (!fields.length && !extraRequests.length) {
     return joinBlocks(
       renderObject({ account, action: "unchanged" }),
       renderObject({ tab: tabView(before), revision_id: state.revisionId }),
@@ -271,7 +316,12 @@ export async function docsTabsUpdateCommand(account: string, args: string[]): Pr
     api,
     account,
     state.id,
-    [{ updateDocumentTabProperties: { tabProperties: props, fields: fields.join(",") } }],
+    [
+      ...(fields.length
+        ? [{ updateDocumentTabProperties: { tabProperties: props, fields: fields.join(",") } }]
+        : []),
+      ...extraRequests,
+    ],
     state.revisionId,
   );
   const after = await readState(api, account, state.id, { properties: true });
