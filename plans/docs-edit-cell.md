@@ -1,9 +1,10 @@
 ---
-status: in-progress
+status: done
 depends: [docs-table-cells]
 specs:
   - specs/commands/docs-edit-cell.md
 issues: [108]
+pr: 117
 ---
 
 # Plan: docs edit-cell — replace one table cell by row label
@@ -36,10 +37,10 @@ nothing else.
 
 ## Validation
 
-- [ ] `bun run build`, `lint`, `format:check`, `test` pass.
-- [ ] Unit: flag parsing; row resolution (label, `**label**`, `#n`, ambiguous, missing);
+- [x] `bun run build`, `lint`, `format:check`, `test` pass.
+- [x] Unit: flag parsing; row resolution (label, `**label**`, `#n`, ambiguous, missing);
       the request sequence for an edit (delete range, clear bullets, fill).
-- [ ] Live (scratch Doc, chris@jarv.us): edit the value cell of a bold-labelled row on a
+- [x] Live (scratch Doc, <chris@jarv.us>): edit the value cell of a bold-labelled row on a
       table with a `cols` hint — widths and other cells untouched, the new text carries only
       its own styles; a multi-line `--text` with items lands as bullets; `--text ""` empties;
       a second identical run is `unchanged`; the undo line restores the previous Markdown;
@@ -54,8 +55,23 @@ nothing else.
 
 ## Notes
 
-(At closeout.)
+- A delete spanning several cell paragraphs (the three-item Inputs cell) went through in one
+  `deleteContentRange`; the per-paragraph fallback was not needed.
+- The `cols` widths (117/351) survived every edit, which is the point of the command.
+- `--text ""` had to be validated through `node dist/bin/gws-axi.js` — the `bun run dev`
+  empty-argument drop recorded in CLAUDE.md.
+- Stacked on `docs-table-cols` (PR #116) → `docs-table-cells` (#115): `parseCell` comes from
+  #115 and the phase-2 refactor overlaps #116's width requests. Stacked PRs get no CI run
+  (`ci.yml` triggers on PRs to `main`/`develop` only) until GitHub retargets them after the
+  base merges.
+- Third copy of the `documents.get` error translation and tab choice (with `find`,
+  `replace-text`): the shared-helper follow-up from `plans/docs-replace-text.md` now has
+  three callers.
+- Scratch Doc `1tXa2754OcQx0Z4piI0-ASllkgh8bKBZ5HcK4MW5dVWQ` (<chris@jarv.us>), trashed.
 
 ## Follow-ups
 
-(At closeout.)
+- Tracked as: one `readDocumentForEdit(api, account, id)` + `chooseTab(doc, requested,
+  usage)` helper for `find`, `replace-text`, `edit-cell` (and `write`'s `readState`).
+- Tracked as: `--col` by column header label, once a table with more than two columns needs
+  it.
