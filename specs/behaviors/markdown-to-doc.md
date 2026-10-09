@@ -66,6 +66,7 @@ at once.
 | `\| table \|` | Table, first row bold and pinned as the header row; cells carry only the style their own Markdown asks for | ✅ | `docs read` does not re-emit the header row's bold, since a GFM header is bold by construction. A table may be the only block, the first, or the last |
 | `<br>` inside a cell | A hard line break (`\u000b`) in the cell's paragraph — the same encoding as a hard break outside a table | ✅ as `<br>` | GFM's de facto multi-line cell. A line break, not a paragraph: no paragraph spacing opens up between the lines |
 | `<!-- cols: 1 3 -->` or `<!-- cols: 25% 75% -->` on the line(s) before a table | Fixed column widths: the tab's content width (page width minus the side margins) split in those proportions | ✅ as percentages | Markdown has no width syntax, so this is a gws-axi extension in the one form every other renderer ignores. The hint must name exactly one width per column and must be followed by a table — anything else is refused before the write (`VALIDATION_ERROR`), never written as text. Without a hint, columns are evenly distributed (Docs' default) |
+| `fit` in a `cols` hint (`<!-- cols: fit 1 -->`) | That column sized to its widest line (§ Fitted columns); the other columns share what is left in their proportions | ✅ as a percentage | The fit is computed at write time from measured text, not by Docs; a column a human later lengthens does not grow. All-`fit` makes a table narrower than the page |
 | `- item<br>- item` (or `1. `, `- [ ] `) inside a cell | One bulleted paragraph per item in the cell, with the list preset of the marker; a non-item line before or after the items is its own paragraph | ✅ | Flat lists only: the API's nesting-by-leading-tab does not take inside a cell, so an indented item is written at level 0 and disclosed. Images and footnotes in a cell are still written as text |
 | `---` | An empty paragraph with a bottom border | ✅ | Google's exporter drops it. There is no API request that inserts Docs' own horizontal rule |
 | `![alt](https://…)` | Inline image fetched by Google from the URL | ✅ as `[image]` (alt can't be written; an image that has alt reads back as `[image: alt]`) | Only `http(s)` URLs; a local path or `data:` URL is refused (`IMAGE_NOT_FETCHABLE`). A URL Google cannot fetch fails the write with the same code. The API's insert takes no alt text; a non-empty `alt` is disclosed as dropped |
@@ -75,6 +76,29 @@ at once.
 
 Anything not in the table is written as its plain text, never dropped, and counted in the
 disclosure.
+
+### Fitted columns
+
+A `fit` column is as wide as its widest line needs, measured by gws-axi — the Docs API has no
+auto-fit. The measurement:
+
+- **Metrics:** Helvetica and Helvetica-Bold advance widths (Adobe's Core 14 AFM tables; Arial,
+  Docs' default body font, is metric-compatible with Helvetica). ASCII is exact; an accented
+  Latin letter measures as its base letter (`é` as `e`); anything outside Latin (CJK, emoji)
+  measures as one em. Bold runs — and every cell of the header row — use the bold table.
+- **Size** is the tab's `NORMAL_TEXT` font size (11pt by default).
+- **A line** is a cell paragraph, or one segment of it between hard breaks; a list item adds
+  the 36pt a bulleted cell paragraph is indented.
+- **Width** = widest line × 1.06 + 2pt + Docs' cell padding (5pt a side), floored at 24pt and
+  rounded up; the 6% + 2pt is the margin for any proportional font a tab may use instead of
+  Arial — they sit in the same range, and a too-narrow column wraps while a slightly wide one
+  costs nothing. When the tab's body font is neither Arial nor Helvetica the response says
+  the fit was measured as Arial, so a wrapped column is explained and the hint can be widened.
+- The non-`fit` columns share the remaining content width in their proportions; if the fits
+  alone would leave them under 24pt each, the fits are scaled down to leave that.
+
+This is a gws-axi-side estimate of Docs' layout, and it is not a house style: no font other
+than the platform default is assumed, by design.
 
 ### Spacing is a paragraph property
 
@@ -90,9 +114,10 @@ the one paragraph where a structure interrupts that rhythm:
   paragraph appended below existing content keeps its style's normal spacing.
 - **Nothing before a table.** `insertTable` splits off an empty paragraph above the table; the
   converter removes it by deleting the newline that ends the preceding paragraph, which keeps
-  that paragraph's style. The one place it cannot — a table that opens a tab, where the
-  paragraph above it is the tab's first — the paragraph is kept at zero spacing and a 1pt
-  font so it takes no visible room; `docs read` never renders it as a blank line.
+  that paragraph's style. Where it cannot — a table that opens a tab, where the paragraph
+  above it is the tab's first, or the second of two adjacent tables, whose stray sits between
+  the tables — the paragraph is kept at zero spacing and a 1pt font so it takes no visible
+  room; `docs read` never renders it as a blank line.
 - **Space after a table.** A Docs table has no bottom margin, so the paragraph that follows one
   gets `spaceAbove` equal to the tab's `NORMAL_TEXT` space-below — unless it is a heading,
   whose own style already carries space above.
