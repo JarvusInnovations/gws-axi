@@ -277,7 +277,7 @@ describe("markdown-to-doc: phase 2", () => {
       [5, "h1"],
     ]);
     const bold = requests
-      .filter((r) => r.updateTextStyle)
+      .filter((r) => r.updateTextStyle?.fields === "bold")
       .map((r) => r.updateTextStyle!.range!.startIndex);
     expect(bold).toEqual([10, 7, 5]);
     expect(requests.at(-1)?.pinTableHeaderRows).toEqual({
@@ -323,5 +323,103 @@ describe("markdown-to-doc: empty input", () => {
     const { requests, phase1 } = run("");
     expect(requests).toEqual([]);
     expect(phase1.blocks).toBe(0);
+  });
+});
+
+describe("markdown-to-doc: tables leave no stray paragraphs (#104, #105, #109)", () => {
+  it("a table-only body inserts no text; the tab's own paragraph is the one the table splits", () => {
+    const { requests, phase1 } = run("| a | b |\n| - | - |\n| 1 | 2 |");
+    expect(requests.some((r) => r.insertText)).toBe(false);
+    expect(phase1.tables).toHaveLength(1);
+    expect(requests.find((r) => r.insertTable)?.insertTable?.location?.index).toBe(1);
+  });
+
+  it("removes the paragraph above a table by deleting the preceding newline", () => {
+    const { requests } = run("# Title\n\n| a |\n| - |\n| 1 |\n\nafter");
+    // "Title\n" = [1,7); "after" starts at 7, the table goes before it.
+    const i = requests.findIndex((r) => r.insertTable);
+    expect(requests[i].insertTable?.location?.index).toBe(7);
+    const del = requests.slice(i + 1, i + 4).find((r) => r.deleteContentRange);
+    expect(del?.deleteContentRange?.range).toEqual({ startIndex: 6, endIndex: 7, tabId: TAB });
+  });
+
+  it("shrinks, rather than deletes, the paragraph above a table that opens the tab", () => {
+    const { requests } = run("| a |\n| - |\n| 1 |\n\nafter");
+    const i = requests.findIndex((r) => r.insertTable);
+    expect(requests[i].insertTable?.location?.index).toBe(1);
+    const after = requests.slice(i + 1);
+    expect(after.some((r) => r.deleteContentRange)).toBe(false);
+    expect(after.some((r) => r.updateTextStyle?.textStyle?.fontSize?.magnitude === 1)).toBe(true);
+  });
+
+  it("gives the paragraph under a table the tab's gap, not the top-of-tab zero; a heading keeps its own", () => {
+    const { requests } = run("| a |\n| - |\n| 1 |\n\nafter", { ...top, tableGapPt: 8 });
+    // Paragraph styles come before the index-shifting inserts; the stray's
+    // own shrink (also 0pt at index 1) comes after the table insert.
+    const beforeShifts = requests.slice(
+      0,
+      requests.findIndex((r) => r.insertTable),
+    );
+    const styles = beforeShifts
+      .filter((r) => r.updateParagraphStyle?.paragraphStyle?.spaceAbove)
+      .map((r) => [
+        r.updateParagraphStyle!.range!.startIndex,
+        r.updateParagraphStyle!.paragraphStyle!.spaceAbove!.magnitude,
+      ]);
+    // "after" is at 1 (the table shifts it later); it gets 8pt, never the 0pt top rule.
+    expect(styles).toEqual([[1, 8]]);
+
+    const heading = run("intro\n\n| a |\n| - |\n| 1 |\n\n## After");
+    const h = heading.requests
+      .slice(
+        0,
+        heading.requests.findIndex((r) => r.insertTable),
+      )
+      .filter((r) => r.updateParagraphStyle?.range?.startIndex === 7);
+    expect(h.some((r) => r.updateParagraphStyle!.fields!.includes("spaceAbove"))).toBe(false);
+  });
+
+  it("phase 2 resets every cell before styling it, header bold included", () => {
+    const { phase1 } = run("| h |\n| - |\n| **a** |\n| |");
+    const content: docs_v1.Schema$StructuralElement[] = [
+      { startIndex: 1, endIndex: 2, paragraph: {} },
+      {
+        startIndex: 2,
+        endIndex: 20,
+        table: {
+          tableRows: [
+            { tableCells: [{ content: [{ startIndex: 5 }] }] },
+            { tableCells: [{ content: [{ startIndex: 8 }] }] },
+            { tableCells: [{ content: [{ startIndex: 11 }] }] },
+          ],
+        },
+      },
+    ];
+    const requests = phase2Requests(phase1, {
+      tabId: TAB,
+      ...locateTables(content, 1),
+      footnoteIds: [],
+    });
+    const kinds = requests.map((r) =>
+      r.insertText
+        ? `insert@${r.insertText.location!.index}`
+        : r.updateParagraphStyle
+          ? `para@${r.updateParagraphStyle.range!.startIndex}`
+          : r.updateTextStyle
+            ? `${r.updateTextStyle.fields === "bold" ? "bold" : "reset"}@${r.updateTextStyle.range!.startIndex}`
+            : "pin",
+    );
+    expect(kinds).toEqual([
+      "para@11", // the empty cell: paragraph reset only
+      "insert@8",
+      "para@8",
+      "reset@8",
+      "bold@8",
+      "insert@5",
+      "para@5",
+      "reset@5",
+      "bold@5",
+      "pin",
+    ]);
   });
 });

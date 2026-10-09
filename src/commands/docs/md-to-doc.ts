@@ -431,7 +431,16 @@ export interface Placement {
   emptyTab: boolean;
   /** Remove the space above the first paragraph (it opens the tab). */
   atTop: boolean;
+  /**
+   * Space, in points, to put above the paragraph that follows a table — the
+   * tab's NORMAL_TEXT space-below, so the gap matches the rest of the body.
+   * A Docs table has no bottom margin of its own.
+   */
+  tableGapPt?: number;
 }
+
+/** Docs' default NORMAL_TEXT space-below, used when the tab's named style isn't known. */
+export const DEFAULT_TABLE_GAP_PT = 10;
 
 export interface Phase1 {
   requests: Request[];
@@ -451,6 +460,8 @@ interface PlacedParagraph {
   /** Text length excluding the newline (tabs for nesting included). */
   length: number;
   prefix: number;
+  /** A table is inserted directly above this paragraph. */
+  followsTable: boolean;
 }
 
 function textStyleRequest(range: docs_v1.Schema$Range, style: InlineStyle): Request | undefined {
@@ -535,8 +546,9 @@ export function phase1Requests(input: Block[], placement: Placement): Phase1 {
     }
     const prefix = block.list ? block.list.level : 0;
     const text = "\t".repeat(prefix) + block.inline.runs.map((r) => r.text).join("");
+    const followsTable = tables.some((t) => t.at === -1);
     for (const t of tables) if (t.at === -1) t.at = cursor;
-    paragraphs.push({ block, start: cursor, length: text.length, prefix });
+    paragraphs.push({ block, start: cursor, length: text.length, prefix, followsTable });
     pieces.push(text);
     cursor += text.length + 1;
   }
@@ -548,14 +560,18 @@ export function phase1Requests(input: Block[], placement: Placement): Phase1 {
     return { requests, chars: 0, blocks: 0, footnoteRequestIndices: [], tables: [], footnotes: [] };
   }
 
-  // 1. The text, in one piece.
+  // 1. The text, in one piece. An empty body on an empty tab (a table-only
+  // write) inserts nothing — the API refuses empty text, and the tab's own
+  // empty paragraph is the one the table splits.
   if (paragraphs.length > 0) {
-    requests.push({
-      insertText: {
-        location: { index: placement.emptyTab ? base : base - 1, tabId },
-        text: placement.emptyTab ? body : `\n${body}`,
-      },
-    });
+    if (body.length > 0 || !placement.emptyTab) {
+      requests.push({
+        insertText: {
+          location: { index: placement.emptyTab ? base : base - 1, tabId },
+          text: placement.emptyTab ? body : `\n${body}`,
+        },
+      });
+    }
     // 2. Inserted text inherits the style of what it was inserted next to; start clean.
     const whole = { startIndex: base, endIndex: cursor, tabId };
     requests.push({
@@ -594,7 +610,15 @@ export function phase1Requests(input: Block[], placement: Placement): Phase1 {
       };
       fields.push("borderBottom");
     }
-    if (i === 0 && placement.atTop) {
+    // The paragraph under a table gets the body's normal gap (a table has no
+    // bottom margin); a heading already carries its own. The top-of-tab rule
+    // doesn't apply to it — the table opens the tab, not this paragraph.
+    if (p.followsTable) {
+      if (!p.block.heading) {
+        style.spaceAbove = { magnitude: placement.tableGapPt ?? DEFAULT_TABLE_GAP_PT, unit: "PT" };
+        fields.push("spaceAbove");
+      }
+    } else if (i === 0 && placement.atTop) {
       style.spaceAbove = { magnitude: 0, unit: "PT" };
       fields.push("spaceAbove");
     }
@@ -661,7 +685,11 @@ export function phase1Requests(input: Block[], placement: Placement): Phase1 {
       order: order++,
       request: { insertTable: { rows, columns, location: { index: at, tabId } } },
       // The insert makes a new empty paragraph at `at` that inherits the style
-      // (and any bullet) of the paragraph it split off; give it a clean one.
+      // (and any bullet) of the paragraph it split off. Reset it, then remove
+      // it by deleting the newline that ends the paragraph before it — the
+      // stray's own range can't be deleted, but the merge can, and the merged
+      // paragraph keeps the preceding one's style. At the very top of a body
+      // there is nothing before it to merge into, so it is shrunk instead.
       after: [
         {
           updateParagraphStyle: {
@@ -671,6 +699,7 @@ export function phase1Requests(input: Block[], placement: Placement): Phase1 {
           },
         },
         { deleteParagraphBullets: { range: { startIndex: at, endIndex: at + 1, tabId } } },
+        ...(at > 1 ? [strayDelete(at, tabId)] : strayShrink(at, tabId)),
       ],
     });
   }
@@ -731,6 +760,35 @@ export function phase1Requests(input: Block[], placement: Placement): Phase1 {
   };
 }
 
+function strayDelete(at: number, tabId: string): Request {
+  return { deleteContentRange: { range: { startIndex: at - 1, endIndex: at, tabId } } };
+}
+
+/** Zero spacing and a 1pt newline: the unavoidable paragraph above a tab-opening table takes no room. */
+function strayShrink(at: number, tabId: string): Request[] {
+  const range = { startIndex: at, endIndex: at + 1, tabId };
+  return [
+    {
+      updateParagraphStyle: {
+        range,
+        paragraphStyle: {
+          spaceAbove: { magnitude: 0, unit: "PT" },
+          spaceBelow: { magnitude: 0, unit: "PT" },
+          lineSpacing: 100,
+        },
+        fields: "spaceAbove,spaceBelow,lineSpacing",
+      },
+    },
+    {
+      updateTextStyle: {
+        range,
+        textStyle: { fontSize: { magnitude: 1, unit: "PT" } },
+        fields: "fontSize",
+      },
+    },
+  ];
+}
+
 /** Phase 2 input: where Docs put the tables (cell paragraph starts, row-major) and the footnote ids. */
 export interface Phase2Input {
   tabId: string;
@@ -756,8 +814,21 @@ export function phase2Requests(phase1: Phase1, input: Phase2Input): Request[] {
         if (at === undefined) continue;
         const inline = block.rows[r][c];
         const text = inline.runs.map((x) => x.text).join("");
+        // A new cell's paragraph inherits the style of the paragraph the table
+        // split off (a heading, bold runs) — reset it before styling the text.
+        const cell = { startIndex: at, endIndex: at + Math.max(text.length, 1), tabId };
+        if (text) requests.push({ insertText: { location: { index: at, tabId }, text } });
+        requests.push({
+          updateParagraphStyle: {
+            range: cell,
+            paragraphStyle: { namedStyleType: "NORMAL_TEXT" },
+            fields: "namedStyleType,indentStart,indentFirstLine,indentEnd,borderBottom",
+          },
+        });
         if (!text) continue;
-        requests.push({ insertText: { location: { index: at, tabId }, text } });
+        requests.push({
+          updateTextStyle: { range: cell, textStyle: {}, fields: RESET_TEXT_FIELDS },
+        });
         requests.push(
           ...runStyleRequests(inline, at, tabId, undefined, r === 0 ? { bold: true } : {}),
         );
