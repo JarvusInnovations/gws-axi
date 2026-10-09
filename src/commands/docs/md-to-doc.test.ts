@@ -514,3 +514,80 @@ describe("markdown-to-doc: multi-line table cells (#106)", () => {
     expect(bulletAt).toBeLessThan(nextInsert);
   });
 });
+
+describe("markdown-to-doc: column-width hints (#107)", () => {
+  const TABLE = "| a | b |\n| - | - |\n| 1 | 2 |";
+  const colsOf = (md: string) => {
+    const { parsed } = run(md);
+    const t = parsed.blocks.find((b) => b.kind === "table");
+    return t && t.kind === "table" ? t.cols : undefined;
+  };
+  const code = (fn: () => unknown) => {
+    try {
+      fn();
+    } catch (err) {
+      return (err as AxiError).code;
+    }
+    return "none";
+  };
+
+  it("takes weights or percentages, with or without a blank line before the table", () => {
+    expect(colsOf(`<!-- cols: 1 3 -->\n${TABLE}`)).toEqual([0.25, 0.75]);
+    expect(colsOf(`<!-- cols: 25% 75% -->\n\n${TABLE}`)).toEqual([0.25, 0.75]);
+    expect(colsOf(`intro\n\n<!--cols: 2, 1-->\n${TABLE}`)).toEqual([2 / 3, 1 / 3]);
+    expect(colsOf(TABLE)).toBeUndefined();
+  });
+
+  it("refuses a bad count, a hint without a table, and unreadable widths — before any request", () => {
+    expect(code(() => run(`<!-- cols: 1 2 3 -->\n${TABLE}`))).toBe("VALIDATION_ERROR");
+    expect(code(() => run(`<!-- cols: 1 3 -->\n\nparagraph\n\n${TABLE}`))).toBe("VALIDATION_ERROR");
+    expect(code(() => run(`${TABLE}\n\n<!-- cols: 1 3 -->`))).toBe("VALIDATION_ERROR");
+    expect(code(() => run(`<!-- cols: 1 x -->\n${TABLE}`))).toBe("VALIDATION_ERROR");
+    expect(code(() => run(`<!-- cols: 0 3 -->\n${TABLE}`))).toBe("VALIDATION_ERROR");
+  });
+
+  it("leaves other HTML comments alone", () => {
+    const { parsed } = run(`<!-- note -->\n${TABLE}`);
+    expect(parsed.lossy.map((l) => l.construct)).toEqual(["html_block"]);
+  });
+
+  it("phase 2 sets fixed widths per column from the tab's content width", () => {
+    const { phase1 } = run(`<!-- cols: 1 3 -->\n${TABLE}`);
+    const content: docs_v1.Schema$StructuralElement[] = [
+      { startIndex: 1, endIndex: 2, paragraph: {} },
+      {
+        startIndex: 2,
+        endIndex: 20,
+        table: {
+          tableRows: [
+            { tableCells: [{ content: [{ startIndex: 5 }] }, { content: [{ startIndex: 7 }] }] },
+            { tableCells: [{ content: [{ startIndex: 10 }] }, { content: [{ startIndex: 12 }] }] },
+          ],
+        },
+      },
+    ];
+    const requests = phase2Requests(phase1, {
+      tabId: TAB,
+      ...locateTables(content, 1),
+      footnoteIds: [],
+      contentWidthPt: 468,
+    });
+    const widths = requests
+      .filter((r) => r.updateTableColumnProperties)
+      .map((r) => r.updateTableColumnProperties!)
+      .map((u) => [
+        u.columnIndices![0],
+        u.tableColumnProperties!.width!.magnitude,
+        u.tableStartLocation!.index,
+      ]);
+    expect(widths).toEqual([
+      [0, 117, 2],
+      [1, 351, 2],
+    ]);
+    // Defaults to Docs' page when the width isn't known.
+    const d = phase2Requests(phase1, { tabId: TAB, ...locateTables(content, 1), footnoteIds: [] })
+      .filter((r) => r.updateTableColumnProperties)
+      .map((r) => r.updateTableColumnProperties!.tableColumnProperties!.width!.magnitude);
+    expect(d).toEqual([117, 351]);
+  });
+});

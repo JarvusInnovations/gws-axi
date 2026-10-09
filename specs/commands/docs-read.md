@@ -57,7 +57,10 @@ The rendering is the inverse of the [markdown-to-doc](../behaviors/markdown-to-d
 - Ordered items render as `1.` at every level; bullets as `-`. A blank line follows the last item of a list.
 - A table's header row is rendered without its bold markers. A cell's paragraphs are joined
   with `<br>`, a hard line break inside a cell is `<br>`, and a bulleted paragraph in a cell
-  is a `- `, `1. ` or `- [ ] ` line — the inverse of the writer's multi-line cells.
+  is a `- `, `1. ` or `- [ ] ` line — the inverse of the writer's multi-line cells. A table
+  whose columns have fixed, unequal widths is preceded by `<!-- cols: 25% 75% -->` (whole
+  percentages of the table's width), the writer's width hint; evenly distributed columns get
+  no line.
 - Footnote definitions are rendered at the end as `[^N]: text`, numbered in citation order.
 
 ## help[] suggestions

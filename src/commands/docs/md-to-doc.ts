@@ -79,7 +79,33 @@ export interface TableBlock {
   kind: "table";
   /** rows[0] is the header row. */
   rows: TableCell[][];
+  /** Column widths as fractions of the content width (sum 1), from a `<!-- cols: … -->` hint. */
+  cols?: number[];
 }
+
+/** `<!-- cols: 1 3 -->` or `<!-- cols: 25% 75% -->` on the line before a table. */
+const COLS_HINT = /^\s*<!--\s*cols:\s*([^>]*?)\s*-->\s*$/i;
+
+/** Weights or percentages → fractions of the table width. Refuses anything that isn't a positive number. */
+export function parseColsHint(spec: string): number[] {
+  const parts = spec.split(/[\s,]+/).filter(Boolean);
+  const weights = parts.map((p) => Number(p.replace(/%$/, "")));
+  if (parts.length === 0 || weights.some((w) => !Number.isFinite(w) || w <= 0)) {
+    throw new AxiError(
+      `Can't read the column widths in \`<!-- cols: ${spec} -->\``,
+      "VALIDATION_ERROR",
+      [
+        "Give one positive number per column, as weights (`1 3`) or percentages (`25% 75%`)",
+        "Nothing was written",
+      ],
+    );
+  }
+  const sum = weights.reduce((a, b) => a + b, 0);
+  return weights.map((w) => w / sum);
+}
+
+/** Docs' default page: 612pt wide with 72pt side margins. */
+export const DEFAULT_CONTENT_WIDTH_PT = 468;
 
 export type Block = ParagraphBlock | TableBlock;
 
@@ -347,7 +373,16 @@ function parseBlocks(
   out: Block[],
   listKey: { next: number },
 ): void {
+  /** A `<!-- cols: … -->` waiting for its table; anything else in between is refused. */
+  let pendingCols: { cols: number[]; raw: string } | undefined;
   for (const token of tokens) {
+    if (pendingCols && token.type !== "space" && token.type !== "table") {
+      throw new AxiError(
+        `\`${pendingCols.raw}\` must be followed by a table, not ${token.type === "paragraph" ? "a paragraph" : `a ${token.type}`}`,
+        "VALIDATION_ERROR",
+        ["Put the hint on the line directly above the table it sizes", "Nothing was written"],
+      );
+    }
     switch (token.type) {
       case "space":
       case "def":
@@ -432,10 +467,30 @@ function parseBlocks(
       case "table": {
         const t = token as Tokens.Table;
         const cell = (c: Tokens.TableCell): TableCell => parseCell(c.text, ctx);
-        out.push({ kind: "table", rows: [t.header.map(cell), ...t.rows.map((r) => r.map(cell))] });
+        const rows = [t.header.map(cell), ...t.rows.map((r) => r.map(cell))];
+        const block: TableBlock = { kind: "table", rows };
+        if (pendingCols) {
+          const columns = Math.max(1, ...rows.map((r) => r.length));
+          if (pendingCols.cols.length !== columns) {
+            throw new AxiError(
+              `\`${pendingCols.raw}\` names ${pendingCols.cols.length} widths for a ${columns}-column table`,
+              "VALIDATION_ERROR",
+              ["Give exactly one width per column", "Nothing was written"],
+            );
+          }
+          block.cols = pendingCols.cols;
+          pendingCols = undefined;
+        }
+        out.push(block);
         break;
       }
       case "html": {
+        const hint = COLS_HINT.exec((token as Tokens.HTML).text);
+        if (hint) {
+          // A width hint for the table that follows (specs/behaviors/markdown-to-doc.md).
+          pendingCols = { cols: parseColsHint(hint[1]), raw: (token as Tokens.HTML).text.trim() };
+          break;
+        }
         ctx.lossy.add("html_block");
         for (const line of (token as Tokens.HTML).text.replace(/\n$/, "").split("\n")) {
           out.push(
@@ -451,6 +506,12 @@ function parseBlocks(
           out.push(plainParagraph(textInline(g.raw.replace(/\n$/, "")), { list: bctx.list }));
       }
     }
+  }
+  if (pendingCols) {
+    throw new AxiError(`\`${pendingCols.raw}\` has no table after it`, "VALIDATION_ERROR", [
+      "Put the hint on the line directly above the table it sizes",
+      "Nothing was written",
+    ]);
   }
 }
 
@@ -850,6 +911,8 @@ export interface Phase2Input {
   /** Table start indices, matching `tableCells`. */
   tableStarts: number[];
   footnoteIds: string[];
+  /** The tab's page width minus its side margins — what a `cols` hint divides. */
+  contentWidthPt?: number;
 }
 
 /** Phase 2: fill tables and footnotes. Descending index order inside each segment. */
@@ -908,12 +971,30 @@ export function phase2Requests(phase1: Phase1, input: Phase2Input): Request[] {
         }
       }
     }
-    if (block.rows.length > 1 && input.tableStarts[t] !== undefined) {
+    const start = input.tableStarts[t];
+    if (block.rows.length > 1 && start !== undefined) {
       requests.push({
         pinTableHeaderRows: {
-          tableStartLocation: { index: input.tableStarts[t], tabId },
+          tableStartLocation: { index: start, tabId },
           pinnedHeaderRowsCount: 1,
         },
+      });
+    }
+    // Column widths: fixed points per column from the hint's fractions. Index-free.
+    if (block.cols && start !== undefined) {
+      const width = input.contentWidthPt ?? DEFAULT_CONTENT_WIDTH_PT;
+      block.cols.forEach((fraction, i) => {
+        requests.push({
+          updateTableColumnProperties: {
+            tableStartLocation: { index: start, tabId },
+            columnIndices: [i],
+            tableColumnProperties: {
+              widthType: "FIXED_WIDTH",
+              width: { magnitude: Math.round(width * fraction), unit: "PT" },
+            },
+            fields: "widthType,width",
+          },
+        });
       });
     }
   }
