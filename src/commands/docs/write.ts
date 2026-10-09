@@ -144,7 +144,7 @@ export function parseWriteFlags(args: string[], mode: WriteMode): WriteFlags {
   if ((flags.placement || flags.emoji !== undefined) && !flags.newTab) {
     const given = NEW_TAB_FLAGS.filter((f) => args.includes(f));
     throw new AxiError(
-      `${given.join(", ")} place a new tab — pass --new-tab <title> with ${given.length > 1 ? "them" : "it"}`,
+      `${given.join(", ")} ${given.length > 1 ? "place" : "places"} a new tab — pass --new-tab <title> with ${given.length > 1 ? "them" : "it"}`,
       "VALIDATION_ERROR",
       [
         "To move, rename or mark an existing tab: `gws-axi docs tabs update <documentId> <tabId> --first|--title …`",

@@ -191,10 +191,14 @@ export function parsePlacement(parsed: ParsedArgs): Placement | undefined {
   return p;
 }
 
+/** `t.0 (Intro), t.k3 (Notes)` — the ids an error can offer inline. */
+export function describeTabs(tabs: TabInfo[]): string {
+  return tabs.map((t) => `${t.id} (${t.title})`).join(", ") || "(none)";
+}
+
 function tabNotFound(which: string, id: string, tabs: TabInfo[]): AxiError {
   return new AxiError(`${which} '${id}' names no tab in this document`, "TAB_NOT_FOUND", [
-    renderTabListing(tabs),
-    "Pass one of the ids above",
+    `Available tabs: ${describeTabs(tabs)}`,
   ]);
 }
 

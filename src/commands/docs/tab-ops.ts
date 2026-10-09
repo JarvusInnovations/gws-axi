@@ -8,6 +8,7 @@ import {
   type Placement,
   type TabInfo,
   descendantIds,
+  describeTabs,
   parsePlacement,
   renderTabListing,
   resolvePlacement,
@@ -122,8 +123,8 @@ function findTab(state: DocState, tabId: string): TabInfo {
   const found = state.tabs.find((t) => t.id === tabId);
   if (found) return found;
   throw new AxiError(`Tab '${tabId}' not found in document '${state.id}'`, "TAB_NOT_FOUND", [
-    renderTabListing(state.tabs),
-    "Pass one of the ids above",
+    `Available tabs: ${describeTabs(state.tabs)}`,
+    `Run \`gws-axi docs tabs ${state.id}\` to see the tabs list`,
   ]);
 }
 
@@ -301,9 +302,15 @@ export async function docsTabsDeleteCommand(account: string, args: string[]): Pr
   const api = await docsClient(account);
   const state = await readState(api, account, documentId, { properties: true });
   const target = findTab(state, tabId);
-  if (state.tabs.length === 1) {
+  const children = descendantIds(state.tabs, target.id).map(
+    (id) => state.tabs.find((t) => t.id === id)!,
+  );
+  // A Doc always has a tab: refuse the only tab, or a parent whose subtree is every tab.
+  if (children.length + 1 === state.tabs.length) {
     throw new AxiError(
-      `'${target.title}' is the only tab in document '${state.id}' — it can't be deleted`,
+      children.length
+        ? `'${target.title}' and its ${children.length} child tab${children.length === 1 ? "" : "s"} are every tab in document '${state.id}' — a Doc can't be left with none`
+        : `'${target.title}' is the only tab in document '${state.id}' — it can't be deleted`,
       "LAST_TAB",
       [
         `Run \`gws-axi docs write ${state.id} --tab ${target.id} --content ""${accountFlag(account)}\` to empty it instead`,
@@ -311,19 +318,12 @@ export async function docsTabsDeleteCommand(account: string, args: string[]): Pr
       ],
     );
   }
-  const children = descendantIds(state.tabs, target.id).map(
-    (id) => state.tabs.find((t) => t.id === id)!,
-  );
   if (children.length && !withChildren) {
     throw new AxiError(
       `'${target.title}' has ${children.length} child tab${children.length === 1 ? "" : "s"} that would be deleted with it — nothing was deleted`,
       "TAB_HAS_CHILDREN",
       [
-        renderList("children", children as unknown as Array<Record<string, unknown>>, [
-          field("id"),
-          field("title"),
-          field("parent"),
-        ]),
+        `Child tabs: ${describeTabs(children)}`,
         `Run \`gws-axi docs tabs delete ${state.id} ${target.id} --with-children${accountFlag(account)}\` to delete them too`,
         `Or move them out first: \`gws-axi docs tabs update ${state.id} <childId> --top-level${accountFlag(account)}\``,
       ],

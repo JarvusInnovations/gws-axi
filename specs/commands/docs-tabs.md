@@ -93,13 +93,15 @@ visible.
 
 One `documents.get`, then one `deleteTab` under `writeControl.requiredRevisionId`.
 
-- A tab with child tabs is refused with `TAB_HAS_CHILDREN`, listing them, unless
+- A tab with child tabs is refused with `TAB_HAS_CHILDREN`, naming them, unless
   `--with-children` is passed — the API deletes them silently, and a tab's children are not
   something the caller necessarily saw.
-- The Doc's only tab is `LAST_TAB`; the suggestion is `docs write <id> --tab <tabId>
-  --content ""` to empty it, or `drive trash <id>` for the whole Doc.
-- An unknown id is `TAB_NOT_FOUND` with the listing. It is **not** a no-op: a tab that was
-  already deleted and a mistyped id look the same, and the mistyped id is the likelier one.
+- A Doc always keeps at least one tab: the only tab, or a parent whose subtree is every tab
+  in the Doc, is `LAST_TAB`; the suggestion is `docs write <id> --tab <tabId> --content ""`
+  to empty it, or `drive trash <id>` for the whole Doc.
+- An unknown id is `TAB_NOT_FOUND`, naming the available ids. It is **not** a no-op: a tab
+  that was already deleted and a mistyped id look the same, and the mistyped id is the
+  likelier one.
 - The content is gone from the live Doc but remains in version history; the response says
   so and points at `docs revisions`.
 
@@ -181,10 +183,10 @@ help[2]:
 | --- | --- |
 | `VALIDATION_ERROR` | Missing id; unknown subcommand or flag; two placement flags; `--under`/`--top-level` with `--before`/`--after`; `--emoji` with `--no-emoji`; empty `--title`; `update` with no property flags |
 | `DOCUMENT_NOT_FOUND`, `NON_NATIVE_DOCUMENT` | As `docs write` |
-| `TAB_NOT_FOUND` | The target, or a `--before`/`--after`/`--under` anchor, names no tab; says which; carries the listing. Nothing is written |
+| `TAB_NOT_FOUND` | The target, or a `--before`/`--after`/`--under` anchor, names no tab; says which and names the available ids. Nothing is written |
 | `TAB_CYCLE` | `--under`, `--before` or `--after` points at the tab itself or one of its descendants. Nothing is written |
-| `TAB_HAS_CHILDREN` | `delete` without `--with-children` on a tab that has child tabs; lists them |
-| `LAST_TAB` | `delete` on a Doc's only tab |
+| `TAB_HAS_CHILDREN` | `delete` without `--with-children` on a tab that has child tabs; names them |
+| `LAST_TAB` | `delete` that would leave the Doc with no tab: its only tab, or a parent whose subtree is every tab |
 | `INVALID_EMOJI` | Google refused the `--emoji` value |
 | `DOCUMENT_CHANGED` | The Doc's revision moved between the read and the write; nothing written |
 
