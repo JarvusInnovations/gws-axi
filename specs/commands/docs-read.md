@@ -60,7 +60,8 @@ The rendering is the inverse of the [markdown-to-doc](../behaviors/markdown-to-d
   is a `- `, `1. ` or `- [ ] ` line — the inverse of the writer's multi-line cells. A table
   whose columns have fixed, unequal widths is preceded by `<!-- cols: 25% 75% -->` (whole
   percentages of the table's width), the writer's width hint; evenly distributed columns get
-  no line.
+  no line. A column written as `fit` reads back as its resulting percentage — the layout
+  round-trips, the intent does not.
 - Footnote definitions are rendered at the end as `[^N]: text`, numbered in citation order.
 
 ## help[] suggestions

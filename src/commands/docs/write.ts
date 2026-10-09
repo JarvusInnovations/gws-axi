@@ -15,6 +15,7 @@ import {
 } from "./tabs.js";
 import { parseArgs } from "../../util/flags.js";
 import {
+  type ColSpec,
   locateTables,
   parseMarkdown,
   phase1Requests,
@@ -60,7 +61,8 @@ markdown:
   Google's importer), the one \`docs read\` round-trips.
   Tables take two extensions no other renderer minds:
     <!-- cols: 1 3 -->          on the line above a table: column widths as
-    <!-- cols: 25% 75% -->      weights or percentages (default: equal)
+    <!-- cols: 25% 75% -->      weights or percentages (default: equal), or
+    <!-- cols: fit 1 -->        fit — a column sized to its content, the rest shared
     a<br>b, - item<br>- item    inside a cell: line breaks, and bulleted /
                                 numbered / checkbox items (flat lists only)
 notes:
@@ -242,6 +244,9 @@ export interface TabTarget extends TabInfo {
   spaceBelowPt?: number;
   /** Page width minus side margins, in points — what a table's `cols` hint divides. */
   contentWidthPt?: number;
+  /** The tab's NORMAL_TEXT font size and family — what a `fit` column is measured at. */
+  bodyFontPt?: number;
+  bodyFontFamily?: string;
 }
 
 export interface DocState {
@@ -253,7 +258,7 @@ export interface DocState {
 
 const stateFields = (withBodies: boolean) => {
   const tab = withBodies
-    ? `${TAB_PROPERTIES_MASK},documentTab(body(content(endIndex)),namedStyles(styles(namedStyleType,paragraphStyle(spaceBelow))),documentStyle(pageSize,marginLeft,marginRight))`
+    ? `${TAB_PROPERTIES_MASK},documentTab(body(content(endIndex)),namedStyles(styles(namedStyleType,paragraphStyle(spaceBelow),textStyle(fontSize,weightedFontFamily))),documentStyle(pageSize,marginLeft,marginRight))`
     : TAB_PROPERTIES_MASK;
   return `documentId,title,revisionId,tabs(${tab},childTabs(${tab},childTabs(${tab})))`;
 };
@@ -262,6 +267,7 @@ function tabTargets(tabs: docs_v1.Schema$Tab[] | undefined): TabTarget[] {
   const ends = new Map<string, number>();
   const gaps = new Map<string, number>();
   const widths = new Map<string, number>();
+  const fonts = new Map<string, { size?: number; family?: string }>();
   const walk = (list: docs_v1.Schema$Tab[] | undefined) => {
     for (const tab of list ?? []) {
       const id = tab.tabProperties?.tabId ?? "";
@@ -272,6 +278,11 @@ function tabTargets(tabs: docs_v1.Schema$Tab[] | undefined): TabTarget[] {
       );
       const below = normal?.paragraphStyle?.spaceBelow?.magnitude;
       if (typeof below === "number") gaps.set(id, below);
+      const size = normal?.textStyle?.fontSize?.magnitude;
+      const family = normal?.textStyle?.weightedFontFamily?.fontFamily;
+      if (typeof size === "number" || family) {
+        fonts.set(id, { size: size ?? undefined, family: family ?? undefined });
+      }
       const ds = tab.documentTab?.documentStyle;
       const page = ds?.pageSize?.width?.magnitude;
       if (typeof page === "number") {
@@ -286,6 +297,8 @@ function tabTargets(tabs: docs_v1.Schema$Tab[] | undefined): TabTarget[] {
     end: ends.get(info.id) ?? 2,
     spaceBelowPt: gaps.get(info.id),
     contentWidthPt: widths.get(info.id),
+    bodyFontPt: fonts.get(info.id)?.size,
+    bodyFontFamily: fonts.get(info.id)?.family,
   }));
 }
 
@@ -467,6 +480,7 @@ async function writeTab(
         ...located,
         footnoteIds,
         contentWidthPt: tab.contentWidthPt,
+        bodyFontPt: tab.bodyFontPt,
       });
       if (phase2.length) {
         const second = await batch(api, account, state.id, phase2, revisionId);
@@ -562,6 +576,8 @@ function render(
   }
   const tables = tableHelp(phase1.tables);
   if (tables) help.push(tables);
+  const fitNote = fitFontHelp(phase1.tables, (tab as TabTarget).bodyFontFamily);
+  if (fitNote) help.push(fitNote);
   help.push(`Open in browser: https://docs.google.com/document/d/${state.id}/edit`);
   blocks.push(renderHelp(help));
   return joinBlocks(...blocks);
@@ -573,10 +589,23 @@ function render(
  * how to set them. Nothing when no table was written, or every table had a
  * hint (specs/commands/docs-write.md § help[]).
  */
-export function tableHelp(tables: Array<{ cols?: number[] }>): string | undefined {
+export function tableHelp(tables: Array<{ cols?: ColSpec[] }>): string | undefined {
   const unhinted = tables.filter((t) => !t.cols).length;
   if (!unhinted) return undefined;
   return `${unhinted === 1 ? "A table was" : `${unhinted} tables were`} written with equal column widths; put \`<!-- cols: 1 3 -->\` (weights or percentages) on the line above a table to set them. Inside a cell, <br> breaks lines and "- item" lines make a list`;
+}
+
+/** Fonts whose metrics the fit measurement actually has (Arial is metric-compatible with Helvetica). */
+const MEASURED_FONTS = /^(arial|helvetica)/i;
+
+/** When a `fit` column was measured for a tab whose body font isn't the one measured, say so. */
+export function fitFontHelp(
+  tables: Array<{ cols?: ColSpec[] }>,
+  bodyFontFamily: string | undefined,
+): string | undefined {
+  const fitted = tables.some((t) => t.cols?.includes("fit"));
+  if (!fitted || !bodyFontFamily || MEASURED_FONTS.test(bodyFontFamily)) return undefined;
+  return `fit columns were measured as Arial; this tab's body font is ${bodyFontFamily}, so a column that wraps needs a wider hint (\`<!-- cols: 30% 70% -->\`)`;
 }
 
 // ---------------------------------------------------------------------------
