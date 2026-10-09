@@ -251,17 +251,29 @@ function renderTable(table: Table, ctx: RenderCtx): string {
   const rows = table.tableRows ?? [];
   if (rows.length === 0) return "";
   const cellText = (cell: docs_v1.Schema$TableCell): string => {
-    const parts: string[] = [];
+    // One line per cell paragraph, joined with `<br>` (GFM's multi-line
+    // cell); a hard break inside a paragraph is `<br>` too, and a bulleted
+    // paragraph carries its marker — the inverse of the writer's cells.
+    const lines: string[] = [];
     for (const el of cell.content ?? []) {
-      // Flatten paragraphs into single-line cells — GFM tables can't carry
-      // block content.
-      if (el.paragraph?.elements) {
-        for (const pe of el.paragraph.elements) {
-          parts.push(renderParagraphElement(pe, ctx));
-        }
+      if (!el.paragraph) continue;
+      const text = (el.paragraph.elements ?? [])
+        .map((pe) => renderParagraphElement(pe, ctx))
+        .join("")
+        .replace(/\n+$/, "")
+        .replace(/ {2}\n/g, "<br>")
+        .replace(/[\n|]/g, " ")
+        .trim();
+      const bullet = el.paragraph.bullet;
+      if (bullet) {
+        const marker = bulletMarker(bullet.listId ?? "", bullet.nestingLevel ?? 0, ctx.lists);
+        if (marker === "- [ ]") ctx.taskCount += 1;
+        lines.push(`${marker} ${text}`);
+      } else {
+        lines.push(text);
       }
     }
-    return parts.join("").replace(/[\n|]/g, " ").trim();
+    return lines.join("<br>").trim();
   };
   // A header row is bold by construction (GFM renders it so); emitting the
   // markers would double it on the way back in.

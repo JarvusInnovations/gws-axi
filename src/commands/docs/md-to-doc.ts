@@ -64,10 +64,21 @@ export interface ParagraphBlock {
   list?: { key: number; kind: ListKind; level: number };
 }
 
+/** One paragraph inside a table cell: a line, or a flat list item. */
+export interface CellParagraph {
+  inline: Inline;
+  list?: ListKind;
+}
+
+/** A cell holds one or more paragraphs; plain lines separated by `<br>` share one. */
+export interface TableCell {
+  paragraphs: CellParagraph[];
+}
+
 export interface TableBlock {
   kind: "table";
   /** rows[0] is the header row. */
-  rows: Inline[][];
+  rows: TableCell[][];
 }
 
 export type Block = ParagraphBlock | TableBlock;
@@ -93,6 +104,7 @@ const HANDLING: Record<string, string> = {
   nested_list_kind: "uses the outer list's kind",
   list_depth: `flattened to level ${MAX_NESTING}`,
   table_cell_block: "written as text",
+  table_cell_nested_list: "flattened to one level",
 };
 
 // ---------------------------------------------------------------------------
@@ -270,6 +282,51 @@ function parseInline(
   return inline;
 }
 
+/** `<br>`, `<br/>`, `<br />` — GFM's de facto line break inside a cell. */
+const CELL_BREAK = /<br\s*\/?>/i;
+/** A list marker opening a cell line: `- `, `* `, `1. `, `1) `, with an optional task box. */
+const CELL_ITEM = /^(\s*)(?:([-*])|(\d+)[.)])\s+(?:\[([ xX])\]\s+)?(.*)$/;
+
+/**
+ * A cell's Markdown: lines split on `<br>`; a line that opens with a list
+ * marker is its own paragraph with a bullet, consecutive plain lines share
+ * one paragraph joined by hard breaks. Nesting can't be written inside a
+ * cell (specs/behaviors/markdown-to-doc.md § Upstream), so an indented
+ * marker is flattened and disclosed.
+ */
+function parseCell(raw: string, ctx: ParseCtx): TableCell {
+  const lexLine = (text: string): Inline => {
+    const inline = parseInline(marked.Lexer.lexInline(text.trim(), { gfm: true }), ctx);
+    if (inline.images.length || inline.footnotes.length) ctx.lossy.add("table_cell_block");
+    return { runs: inline.runs, images: [], footnotes: [] };
+  };
+  const paragraphs: CellParagraph[] = [];
+  let pending: Inline | undefined;
+  for (const line of raw.split(CELL_BREAK)) {
+    const m = CELL_ITEM.exec(line);
+    if (m) {
+      if (pending) paragraphs.push({ inline: pending });
+      pending = undefined;
+      if (m[1].length >= 2) ctx.lossy.add("table_cell_nested_list");
+      const box = m[4];
+      const list: ListKind =
+        box !== undefined ? "checkbox" : m[3] !== undefined ? "number" : "bullet";
+      if (box !== undefined && box.toLowerCase() === "x") ctx.lossy.add("checked_task");
+      paragraphs.push({ inline: lexLine(m[5]), list });
+      continue;
+    }
+    const inline = lexLine(line);
+    if (pending) {
+      pending.runs.push({ text: "\u000b", style: {} }, ...inline.runs);
+    } else {
+      pending = inline;
+    }
+  }
+  if (pending) paragraphs.push({ inline: pending });
+  if (paragraphs.length === 0) paragraphs.push({ inline: textInline("") });
+  return { paragraphs };
+}
+
 function plainParagraph(inline: Inline, extra: Partial<ParagraphBlock> = {}): ParagraphBlock {
   return { kind: "paragraph", inline, ...extra };
 }
@@ -374,11 +431,7 @@ function parseBlocks(
         break;
       case "table": {
         const t = token as Tokens.Table;
-        const cell = (c: Tokens.TableCell): Inline => {
-          const inline = parseInline(c.tokens, ctx);
-          if (inline.images.length || inline.footnotes.length) ctx.lossy.add("table_cell_block");
-          return { runs: inline.runs, images: [], footnotes: [] };
-        };
+        const cell = (c: Tokens.TableCell): TableCell => parseCell(c.text, ctx);
         out.push({ kind: "table", rows: [t.header.map(cell), ...t.rows.map((r) => r.map(cell))] });
         break;
       }
@@ -812,8 +865,10 @@ export function phase2Requests(phase1: Phase1, input: Phase2Input): Request[] {
       for (let c = block.rows[r].length - 1; c >= 0; c--) {
         const at = cells[r]?.[c];
         if (at === undefined) continue;
-        const inline = block.rows[r][c];
-        const text = inline.runs.map((x) => x.text).join("");
+        const { paragraphs } = block.rows[r][c];
+        const texts = paragraphs.map((p) => p.inline.runs.map((x) => x.text).join(""));
+        // Cell paragraphs are lines of one insert; the cell's own newline ends the last.
+        const text = texts.join("\n");
         // A new cell's paragraph inherits the style of the paragraph the table
         // split off (a heading, bold runs) — reset it before styling the text.
         const cell = { startIndex: at, endIndex: at + Math.max(text.length, 1), tabId };
@@ -829,9 +884,28 @@ export function phase2Requests(phase1: Phase1, input: Phase2Input): Request[] {
         requests.push({
           updateTextStyle: { range: cell, textStyle: {}, fields: RESET_TEXT_FIELDS },
         });
-        requests.push(
-          ...runStyleRequests(inline, at, tabId, undefined, r === 0 ? { bold: true } : {}),
-        );
+        // Styles per paragraph at its offset, then one bullets request per run
+        // of same-kind items. Level 0 only, so nothing shifts.
+        const lists: Array<{ kind: ListKind; start: number; end: number }> = [];
+        let offset = at;
+        for (const [i, p] of paragraphs.entries()) {
+          requests.push(
+            ...runStyleRequests(p.inline, offset, tabId, undefined, r === 0 ? { bold: true } : {}),
+          );
+          const end = offset + texts[i].length + 1;
+          const last = lists[lists.length - 1];
+          if (p.list && last && last.kind === p.list && last.end === offset) last.end = end;
+          else if (p.list) lists.push({ kind: p.list, start: offset, end });
+          offset = end;
+        }
+        for (const l of lists) {
+          requests.push({
+            createParagraphBullets: {
+              range: { startIndex: l.start, endIndex: l.end, tabId },
+              bulletPreset: BULLET_PRESET[l.kind],
+            },
+          });
+        }
       }
     }
     if (block.rows.length > 1 && input.tableStarts[t] !== undefined) {

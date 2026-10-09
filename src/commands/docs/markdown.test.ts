@@ -138,3 +138,44 @@ describe("docs read: images and tasks", () => {
     expect(out.task_count).toBe(2);
   });
 });
+
+describe("docs read markdown renderer: multi-line table cells (#106)", () => {
+  const cell = (...content: Element[]): docs_v1.Schema$TableCell => ({ content });
+  const lists = {
+    "kix.b": { listProperties: { nestingLevels: [{ glyphSymbol: "●" }] } },
+    "kix.t": { listProperties: { nestingLevels: [{ glyphType: "GLYPH_TYPE_UNSPECIFIED" }] } },
+  };
+
+  it("joins cell paragraphs and hard breaks with <br>, and marks bulleted cell paragraphs", () => {
+    const table: Element = {
+      table: {
+        tableRows: [
+          {
+            tableCells: [
+              cell(para([["Label\n", { bold: true }]])),
+              cell(para([["Value\n", { bold: true }]])),
+            ],
+          },
+          {
+            tableCells: [
+              cell(para([["Inputs\n", { bold: true }]])),
+              cell(
+                para(["intro\u000bmore\n"]),
+                para(
+                  [["Brief\n", { link: { url: "https://h/b" } }]],
+                  {},
+                  { listId: "kix.b", nestingLevel: 0 },
+                ),
+                para(["Transcript\n"], {}, { listId: "kix.b", nestingLevel: 0 }),
+                para(["open\n"], {}, { listId: "kix.t", nestingLevel: 0 }),
+              ),
+            ],
+          },
+        ],
+      },
+    };
+    expect(render([table], lists)).toBe(
+      "| Label | Value |\n| --- | --- |\n| **Inputs** | intro<br>more<br>- [Brief](https://h/b)<br>- Transcript<br>- [ ] open |",
+    );
+  });
+});

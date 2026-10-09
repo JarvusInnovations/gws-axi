@@ -423,3 +423,94 @@ describe("markdown-to-doc: tables leave no stray paragraphs (#104, #105, #109)",
     ]);
   });
 });
+
+describe("markdown-to-doc: multi-line table cells (#106)", () => {
+  const cellOf = (md: string, row = 1, col = 1) => {
+    const { parsed } = run(md);
+    const table = parsed.blocks.find((b) => b.kind === "table");
+    if (!table || table.kind !== "table") throw new Error("no table");
+    return { cell: table.rows[row][col], lossy: parsed.lossy };
+  };
+  const texts = (cell: { paragraphs: Array<{ inline: { runs: Array<{ text: string }> } }> }) =>
+    cell.paragraphs.map((p) => p.inline.runs.map((r) => r.text).join(""));
+
+  it("joins plain lines with a hard break in one paragraph, for every <br> spelling", () => {
+    const { cell } = cellOf("| k | v |\n| - | - |\n| a | one<br>two<br/>three<br />four |");
+    expect(texts(cell)).toEqual(["one\u000btwo\u000bthree\u000bfour"]);
+    expect(cell.paragraphs[0].list).toBeUndefined();
+  });
+
+  it("makes a bulleted paragraph per item line and keeps inline styles", () => {
+    const { cell, lossy } = cellOf(
+      "| k | v |\n| - | - |\n| a | - [Brief](https://h/b)<br>- **Transcript**<br>- NEW: x |",
+    );
+    expect(texts(cell)).toEqual(["Brief", "Transcript", "NEW: x"]);
+    expect(cell.paragraphs.map((p) => p.list)).toEqual(["bullet", "bullet", "bullet"]);
+    expect(cell.paragraphs[0].inline.runs[0].style.link).toBe("https://h/b");
+    expect(cell.paragraphs[1].inline.runs[0].style.bold).toBe(true);
+    expect(lossy).toEqual([]);
+  });
+
+  it("mixes plain lines and items, and tells the three list kinds apart", () => {
+    const { cell } = cellOf(
+      "| k | v |\n| - | - |\n| a | intro<br>1. one<br>2) two<br>- [ ] task<br>outro |",
+    );
+    expect(texts(cell)).toEqual(["intro", "one", "two", "task", "outro"]);
+    expect(cell.paragraphs.map((p) => p.list)).toEqual([
+      undefined,
+      "number",
+      "number",
+      "checkbox",
+      undefined,
+    ]);
+  });
+
+  it("flattens an indented item and discloses it; a checked task is disclosed too", () => {
+    const { cell, lossy } = cellOf(
+      "| k | v |\n| - | - |\n| a | - top<br>  - nested<br>- [x] done |",
+    );
+    expect(cell.paragraphs.map((p) => p.list)).toEqual(["bullet", "bullet", "checkbox"]);
+    expect(lossy.map((l) => l.construct).sort()).toEqual([
+      "checked_task",
+      "table_cell_nested_list",
+    ]);
+  });
+
+  it("phase 2 inserts the lines as one text and bullets each run of items", () => {
+    const { phase1 } = run("| k | v |\n| - | - |\n| a | intro<br>- one<br>- two |");
+    const content: docs_v1.Schema$StructuralElement[] = [
+      { startIndex: 1, endIndex: 2, paragraph: {} },
+      {
+        startIndex: 2,
+        endIndex: 40,
+        table: {
+          tableRows: [
+            { tableCells: [{ content: [{ startIndex: 5 }] }, { content: [{ startIndex: 7 }] }] },
+            { tableCells: [{ content: [{ startIndex: 10 }] }, { content: [{ startIndex: 12 }] }] },
+          ],
+        },
+      },
+    ];
+    const requests = phase2Requests(phase1, {
+      tabId: TAB,
+      ...locateTables(content, 1),
+      footnoteIds: [],
+    });
+    const first = requests[0].insertText!;
+    expect(first).toEqual({ location: { index: 12, tabId: TAB }, text: "intro\none\ntwo" });
+    const bullets = requests
+      .filter((r) => r.createParagraphBullets)
+      .map((r) => r.createParagraphBullets!);
+    // "intro\n" is 6 chars: items span [18, 26) — "one\n" + "two" + the cell's own newline.
+    expect(bullets).toEqual([
+      {
+        range: { startIndex: 18, endIndex: 26, tabId: TAB },
+        bulletPreset: "BULLET_DISC_CIRCLE_SQUARE",
+      },
+    ]);
+    // The bullets request comes after that cell's styles and before the next cell's insert.
+    const bulletAt = requests.findIndex((r) => r.createParagraphBullets);
+    const nextInsert = requests.findIndex((r, i) => i > 0 && r.insertText);
+    expect(bulletAt).toBeLessThan(nextInsert);
+  });
+});
