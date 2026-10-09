@@ -5,6 +5,9 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main, develop ]
+    # `edited` covers a stacked PR being retargeted onto develop after its base
+    # merges; the job-level `if` below skips plain title/body edits.
+    types: [ opened, synchronize, reopened, edited ]
 
 permissions:
   contents: read
@@ -12,6 +15,7 @@ permissions:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    if: github.event.action != 'edited' || github.event.changes.base != null
     steps:
 
     - uses: actions/checkout@v6
