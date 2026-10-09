@@ -38,6 +38,8 @@ the same Markdown, after normalization:
 - A table's alignment row is `| --- |` per column; the header row carries no emphasis markers.
 - Inside a table cell, lines are joined with `<br>` (a `<br/>` or `<br />` in the source reads
   back as `<br>`); list items in a cell read back as `- `, `1. ` or `- [ ] ` lines.
+- A column-width hint reads back as whole percentages (`<!-- cols: 25% 75% -->`), whatever
+  form it was written in; a table with evenly distributed columns reads back with no hint.
 - Every list item is on its own line, indented two spaces per level.
 - Trailing whitespace on a line and runs of more than one blank line are collapsed.
 
@@ -63,6 +65,7 @@ at once.
 | Fenced or indented code block | One `NORMAL_TEXT` paragraph per line, every run in `Roboto Mono` | ✅ (fence, no language) | **Not** a native Docs code block. Docs has one (with a language selector), and Google's importer creates it, but the Docs API can neither create one nor read one back, so the language is disclosed as dropped |
 | `\| table \|` | Table, first row bold and pinned as the header row; cells carry only the style their own Markdown asks for | ✅ | `docs read` does not re-emit the header row's bold, since a GFM header is bold by construction. A table may be the only block, the first, or the last |
 | `<br>` inside a cell | A hard line break (`\u000b`) in the cell's paragraph — the same encoding as a hard break outside a table | ✅ as `<br>` | GFM's de facto multi-line cell. A line break, not a paragraph: no paragraph spacing opens up between the lines |
+| `<!-- cols: 1 3 -->` or `<!-- cols: 25% 75% -->` on the line(s) before a table | Fixed column widths: the tab's content width (page width minus the side margins) split in those proportions | ✅ as percentages | Markdown has no width syntax, so this is a gws-axi extension in the one form every other renderer ignores. The hint must name exactly one width per column and must be followed by a table — anything else is refused before the write (`VALIDATION_ERROR`), never written as text. Without a hint, columns are evenly distributed (Docs' default) |
 | `- item<br>- item` (or `1. `, `- [ ] `) inside a cell | One bulleted paragraph per item in the cell, with the list preset of the marker; a non-item line before or after the items is its own paragraph | ✅ | Flat lists only: the API's nesting-by-leading-tab does not take inside a cell, so an indented item is written at level 0 and disclosed. Images and footnotes in a cell are still written as text |
 | `---` | An empty paragraph with a bottom border | ✅ | Google's exporter drops it. There is no API request that inserts Docs' own horizontal rule |
 | `![alt](https://…)` | Inline image fetched by Google from the URL | ✅ as `[image]` (alt can't be written; an image that has alt reads back as `[image: alt]`) | Only `http(s)` URLs; a local path or `data:` URL is refused (`IMAGE_NOT_FETCHABLE`). A URL Google cannot fetch fails the write with the same code. The API's insert takes no alt text; a non-empty `alt` is disclosed as dropped |
@@ -132,6 +135,7 @@ nothing is left behind unmentioned.
 | Fact | Status |
 | --- | --- |
 | `addDocumentTab`, `updateDocumentTabProperties`, `deleteTab` exist and work under user OAuth; the add reply carries the new `tabId` | **Observed 2026-10-02** |
+| `updateTableColumnProperties` with `columnIndices` and `widthType: FIXED_WIDTH` + `width` (PT) sets one column's width and reads back as `tableStyle.tableColumnProperties[i]`; `EVENLY_DISTRIBUTED` restores the default; a tab's `documentStyle` carries `pageSize.width` and `marginLeft`/`marginRight` (612 − 72 − 72 = 468pt on a default page) | **Observed 2026-10-08** |
 | `insertText` into a table cell with `\n` in the text makes one cell paragraph per line; `\u000b` is a hard break there as in the body; `createParagraphBullets` over cell paragraphs bullets them at level 0; the leading-tab nesting trick does **not** nest inside a cell (the tab is kept as text, the level stays 0) | **Observed 2026-10-08** |
 | `insertText`, `updateParagraphStyle`, `updateTextStyle`, `createParagraphBullets`, `insertTable`, `createFootnote`, `insertInlineImage`, `deleteContentRange` all accept `tabId` and act on that tab only | Observed |
 | `deleteContentRange` from index 1 to the body's end − 1 empties a tab, leaving one empty paragraph; list definitions left behind are harmless | Observed |
