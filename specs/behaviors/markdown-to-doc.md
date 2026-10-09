@@ -59,7 +59,7 @@ at once.
 | `- [ ] task`, `- [x] task` | List item with preset `BULLET_CHECKBOX` | ✅ as `- [ ]` | **The checked state cannot be set through the API**; every task is written unchecked and the count of checked tasks is disclosed |
 | `> quote` | `NORMAL_TEXT` paragraph indented 30pt start, first line, and end | ✅ | The exact indents Google's importer uses, which is what its exporter turns back into `>` |
 | Fenced or indented code block | One `NORMAL_TEXT` paragraph per line, every run in `Roboto Mono` | ✅ (fence, no language) | **Not** a native Docs code block. Docs has one (with a language selector), and Google's importer creates it, but the Docs API can neither create one nor read one back, so the language is disclosed as dropped |
-| `\| table \|` | Table, first row bold and pinned as the header row | ✅ | Cell content is inline-only; block content in a cell is written as text. `docs read` does not re-emit the header row's bold, since a GFM header is bold by construction |
+| `\| table \|` | Table, first row bold and pinned as the header row; cells carry only the style their own Markdown asks for | ✅ | Cell content is inline-only; block content in a cell is written as text. `docs read` does not re-emit the header row's bold, since a GFM header is bold by construction. A table may be the only block, the first, or the last |
 | `---` | An empty paragraph with a bottom border | ✅ | Google's exporter drops it. There is no API request that inserts Docs' own horizontal rule |
 | `![alt](https://…)` | Inline image fetched by Google from the URL | ✅ as `[image]` (alt can't be written; an image that has alt reads back as `[image: alt]`) | Only `http(s)` URLs; a local path or `data:` URL is refused (`IMAGE_NOT_FETCHABLE`). A URL Google cannot fetch fails the write with the same code. The API's insert takes no alt text; a non-empty `alt` is disclosed as dropped |
 | `[^1]` and its definition | A Docs footnote | ✅ | `docs read` renders the definitions at the end, numbered in citation order |
@@ -69,13 +69,28 @@ at once.
 Anything not in the table is written as its plain text, never dropped, and counted in the
 disclosure.
 
-### No gap at the top
+### Spacing is a paragraph property
 
-The first paragraph written at the start of a tab has **no space above it**, whatever its
-style. Docs' heading styles carry space-above, so a Doc that opens with a heading — as most
-written from Markdown do — otherwise starts with a blank gap that has to be removed by hand
-every time. Google's importer leaves that gap; this converter does not. A paragraph appended
-below existing content keeps its style's normal spacing.
+The converter never writes an empty paragraph to make vertical space, and never leaves behind
+one that the API created. Space between blocks comes from the tab's named styles (Docs' own
+default is `NORMAL_TEXT` with 10pt below), and from an explicit `spaceAbove`/`spaceBelow` on
+the one paragraph where a structure interrupts that rhythm:
+
+- **No gap at the top.** The first paragraph written at the start of a tab has no space above
+  it, whatever its style. Docs' heading styles carry space-above, so a Doc that opens with a
+  heading — as most written from Markdown do — otherwise starts with a blank gap that has to
+  be removed by hand every time. Google's importer leaves that gap; this converter does not. A
+  paragraph appended below existing content keeps its style's normal spacing.
+- **Nothing before a table.** `insertTable` splits off an empty paragraph above the table; the
+  converter removes it by deleting the newline that ends the preceding paragraph, which keeps
+  that paragraph's style. The one place it cannot — a table that opens a tab, where the
+  paragraph above it is the tab's first — the paragraph is kept at zero spacing and a 1pt
+  font so it takes no visible room; `docs read` never renders it as a blank line.
+- **Space after a table.** A Docs table has no bottom margin, so the paragraph that follows one
+  gets `spaceAbove` equal to the tab's `NORMAL_TEXT` space-below — unless it is a heading,
+  whose own style already carries space above.
+
+A `docs read` of a Doc written this way has no blank-line artifacts to round-trip.
 
 ## Upstream gaps
 
@@ -103,6 +118,11 @@ Every write names the document revision it read before converting, so a document
 someone else in the meantime is refused (`DOCUMENT_CHANGED`) rather than overwritten; the
 suggestion is to re-read and re-run.
 
+A `--new-tab` write converts before it adds the tab, so anything the converter refuses fails
+with no tab added. If the content write fails after the tab exists, the tab is deleted again
+and the error says so; a failed deletion is named in the same error, with the tab id, so
+nothing is left behind unmentioned.
+
 ## Upstream behavior relied on
 
 | Fact | Status |
@@ -118,7 +138,10 @@ suggestion is to re-read and re-run.
 | A heading at the top of a Doc shows its named style's space-above as a visible gap; `paragraphStyle.spaceAbove: 0pt` on that paragraph removes it without changing the style | **Observed 2026-10-02**: the paragraph reads back with `spaceAbove` 0 and the style intact |
 | Google's exporter drops a continuous section break, and drops a bottom-bordered empty paragraph too | Observed: neither comes back as `---` |
 | Because of the row above, Google's exporter fences only native code blocks: monospace paragraphs written through the API come back as inline code per line, whatever their spacing or newline styling | Observed: three encodings tried, none fenced |
-| `insertTable` at a paragraph's start inserts a newline before the table; the new empty paragraph inherits the style and bullet of the paragraph it split off | Observed: a rule paragraph doubled until the new one was reset |
+| `insertTable` at a paragraph's start inserts a newline before the table; the new empty paragraph inherits the style and bullet of the paragraph it split off, and **the new cells' paragraphs inherit its text style too** (bold text after the table makes every cell bold) | Observed: a rule paragraph doubled until the new one was reset; **Observed 2026-10-08**: cells read back `bold: true` with no text of their own |
+| The empty paragraph before an inserted table cannot be deleted by its own range (400 `Cannot delete the requested range`), but deleting the newline that ends the *preceding* paragraph merges the two, and the merged paragraph keeps the preceding one's style — a `HEADING_1` stays a heading with the table directly below it | **Observed 2026-10-08** |
+| `insertText` with empty `text` is a 400 (`Insert text requests must specify text to insert`) | **Observed 2026-10-08** |
+| A fresh Doc's `NORMAL_TEXT` named style is 0pt above / 10pt below / line spacing 115; named styles are per tab, and `updateNamedStyle` with `tabId` changes one tab's (the mask must include `namedStyleType`) | **Observed 2026-10-08** |
 | `batchUpdate` is atomic: all requests apply or none | Documented |
 | `writeControl.requiredRevisionId` refuses a request against a stale revision with a 400 whose message says the id "does not match the latest" | **Observed 2026-10-02** |
 | A vertical tab in `insertText` is accepted and stored as a hard line break; Google's exporter renders it as two trailing spaces and a newline | Observed |
@@ -146,3 +169,12 @@ suggestion is to re-read and re-run.
 - **Round-trip beats parity.** The converter is measured against `docs read`, not against what
   Google's importer would have produced. Matching Google's output is a treadmill with no owner;
   a round-trip is a test gws-axi can run.
+
+- **Space is a paragraph property, never an empty paragraph.** The converter makes vertical
+  space with `spaceAbove`/`spaceBelow` — the tab's named styles, or an explicit value where a
+  structure interrupts them — and removes the empty paragraphs the API creates on the way.
+
+  > **Why:** blank paragraphs are the formatting the owner removes by hand from every Doc that
+  > arrives with them. They are invisible structure that `docs read` has to guess about, they
+  > break when a style changes, and a Doc written through gws-axi is meant to carry the owner's
+  > style preferences, not Google's importer's.

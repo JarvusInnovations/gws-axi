@@ -58,6 +58,17 @@ export function renderBodyAsMarkdown(
       continue;
     }
     closeCode();
+    // An empty paragraph directly above a table is the API's insertion
+    // artifact (or the shrunk one a tab-opening table keeps), not content.
+    if (
+      element.paragraph &&
+      !element.paragraph.bullet &&
+      !(element.paragraph.paragraphStyle?.borderBottom?.width?.magnitude ?? 0) &&
+      body.content[i + 1]?.table &&
+      !(element.paragraph.elements ?? []).some((pe) => (pe.textRun?.content ?? "").trim())
+    ) {
+      continue;
+    }
     // List items are single lines; whatever follows a list needs a blank line first.
     const isItem = !!element.paragraph?.bullet;
     const itemList = element.paragraph?.bullet?.listId ?? "";
