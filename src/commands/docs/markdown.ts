@@ -281,6 +281,8 @@ function renderTable(table: Table, ctx: RenderCtx): string {
     cellText(cell).replace(/^\*\*(.+)\*\*$/, "$1");
 
   const lines: string[] = [];
+  const hint = colsHint(table.tableStyle?.tableColumnProperties ?? []);
+  if (hint) lines.push(hint);
   for (let i = 0; i < rows.length; i++) {
     const cells = (rows[i].tableCells ?? []).map(i === 0 ? headerText : cellText);
     lines.push(`| ${cells.join(" | ")} |`);
@@ -289,6 +291,24 @@ function renderTable(table: Table, ctx: RenderCtx): string {
     }
   }
   return `\n${lines.join("\n")}\n\n`;
+}
+
+/**
+ * The writer's width hint, read back: fixed, unequal column widths become
+ * whole percentages of their sum (the last takes the rounding remainder).
+ * Evenly distributed or equal columns need no line.
+ */
+function colsHint(columns: docs_v1.Schema$TableColumnProperties[]): string | undefined {
+  if (columns.length < 2) return undefined;
+  const widths = columns.map((c) =>
+    c.widthType === "FIXED_WIDTH" ? (c.width?.magnitude ?? 0) : 0,
+  );
+  if (widths.some((w) => w <= 0)) return undefined;
+  if (widths.every((w) => w === widths[0])) return undefined;
+  const total = widths.reduce((a, b) => a + b, 0);
+  const pct = widths.map((w) => Math.round((w / total) * 100));
+  pct[pct.length - 1] += 100 - pct.reduce((a, b) => a + b, 0);
+  return `<!-- cols: ${pct.map((p) => `${p}%`).join(" ")} -->`;
 }
 
 function headingLevelFor(namedStyleType: string): number {

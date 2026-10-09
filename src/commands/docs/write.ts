@@ -231,6 +231,8 @@ export interface TabTarget extends TabInfo {
   end: number;
   /** The tab's NORMAL_TEXT space-below, in points — the gap the converter puts under a table. */
   spaceBelowPt?: number;
+  /** Page width minus side margins, in points — what a table's `cols` hint divides. */
+  contentWidthPt?: number;
 }
 
 export interface DocState {
@@ -242,7 +244,7 @@ export interface DocState {
 
 const stateFields = (withBodies: boolean) => {
   const tab = withBodies
-    ? `${TAB_PROPERTIES_MASK},documentTab(body(content(endIndex)),namedStyles(styles(namedStyleType,paragraphStyle(spaceBelow))))`
+    ? `${TAB_PROPERTIES_MASK},documentTab(body(content(endIndex)),namedStyles(styles(namedStyleType,paragraphStyle(spaceBelow))),documentStyle(pageSize,marginLeft,marginRight))`
     : TAB_PROPERTIES_MASK;
   return `documentId,title,revisionId,tabs(${tab},childTabs(${tab},childTabs(${tab})))`;
 };
@@ -250,6 +252,7 @@ const stateFields = (withBodies: boolean) => {
 function tabTargets(tabs: docs_v1.Schema$Tab[] | undefined): TabTarget[] {
   const ends = new Map<string, number>();
   const gaps = new Map<string, number>();
+  const widths = new Map<string, number>();
   const walk = (list: docs_v1.Schema$Tab[] | undefined) => {
     for (const tab of list ?? []) {
       const id = tab.tabProperties?.tabId ?? "";
@@ -260,6 +263,11 @@ function tabTargets(tabs: docs_v1.Schema$Tab[] | undefined): TabTarget[] {
       );
       const below = normal?.paragraphStyle?.spaceBelow?.magnitude;
       if (typeof below === "number") gaps.set(id, below);
+      const ds = tab.documentTab?.documentStyle;
+      const page = ds?.pageSize?.width?.magnitude;
+      if (typeof page === "number") {
+        widths.set(id, page - (ds?.marginLeft?.magnitude ?? 0) - (ds?.marginRight?.magnitude ?? 0));
+      }
       walk(tab.childTabs ?? undefined);
     }
   };
@@ -268,6 +276,7 @@ function tabTargets(tabs: docs_v1.Schema$Tab[] | undefined): TabTarget[] {
     ...info,
     end: ends.get(info.id) ?? 2,
     spaceBelowPt: gaps.get(info.id),
+    contentWidthPt: widths.get(info.id),
   }));
 }
 
@@ -444,7 +453,12 @@ async function writeTab(
       const res = await api.documents.get({ documentId: state.id, includeTabsContent: true });
       const content = findTab(res.data.tabs ?? undefined, tab.id)?.documentTab?.body?.content ?? [];
       const located = locateTables(content, placement.base);
-      phase2 = phase2Requests(phase1, { tabId: tab.id, ...located, footnoteIds });
+      phase2 = phase2Requests(phase1, {
+        tabId: tab.id,
+        ...located,
+        footnoteIds,
+        contentWidthPt: tab.contentWidthPt,
+      });
       if (phase2.length) {
         const second = await batch(api, account, state.id, phase2, revisionId);
         revisionId = second.writeControl?.requiredRevisionId ?? revisionId;

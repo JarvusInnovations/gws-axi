@@ -179,3 +179,34 @@ describe("docs read markdown renderer: multi-line table cells (#106)", () => {
     );
   });
 });
+
+describe("docs read markdown renderer: column-width hints (#107)", () => {
+  const twoByOne = (cols: docs_v1.Schema$TableColumnProperties[]): Element => ({
+    table: {
+      tableStyle: { tableColumnProperties: cols },
+      tableRows: [{ tableCells: [{ content: [para(["a\n"])] }, { content: [para(["b\n"])] }] }],
+    },
+  });
+  const fixed = (pt: number): docs_v1.Schema$TableColumnProperties => ({
+    widthType: "FIXED_WIDTH",
+    width: { magnitude: pt, unit: "PT" },
+  });
+
+  it("emits percentages for fixed, unequal columns and nothing otherwise", () => {
+    expect(render([twoByOne([fixed(117), fixed(351)])])).toBe(
+      "<!-- cols: 25% 75% -->\n| a | b |\n| --- | --- |",
+    );
+    expect(render([twoByOne([fixed(156), fixed(156), fixed(156)].slice(0, 2))])).toBe(
+      "| a | b |\n| --- | --- |",
+    );
+    expect(
+      render([
+        twoByOne([{ widthType: "EVENLY_DISTRIBUTED" }, { widthType: "EVENLY_DISTRIBUTED" }]),
+      ]),
+    ).toBe("| a | b |\n| --- | --- |");
+    // Rounding remainder lands on the last column so the hint totals 100.
+    expect(render([twoByOne([fixed(100), fixed(200)])])).toBe(
+      "<!-- cols: 33% 67% -->\n| a | b |\n| --- | --- |",
+    );
+  });
+});
