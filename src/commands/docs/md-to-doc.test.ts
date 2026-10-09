@@ -591,3 +591,23 @@ describe("markdown-to-doc: column-width hints (#107)", () => {
     expect(d).toEqual([117, 351]);
   });
 });
+
+describe("markdown-to-doc: adjacent tables mid-document", () => {
+  it("merges only the first table's stray upward; the one between the tables is shrunk", () => {
+    const { requests } = run("intro\n\n| a |\n| - |\n| 1 |\n\n| b |\n| - |\n| 2 |\n\nafter");
+    const inserts = requests
+      .map((r, i) => ({ r, i }))
+      .filter(({ r }) => r.insertTable)
+      .map(({ i }) => i);
+    expect(inserts).toHaveLength(2);
+    // Descending order: the second table (document order) is inserted first…
+    const afterSecond = requests.slice(inserts[0] + 1, inserts[1]);
+    expect(afterSecond.some((r) => r.deleteContentRange)).toBe(false);
+    expect(afterSecond.some((r) => r.updateTextStyle?.textStyle?.fontSize?.magnitude === 1)).toBe(
+      true,
+    );
+    // …and the first table, inserted last, merges into "intro".
+    const afterFirst = requests.slice(inserts[1] + 1, inserts[1] + 5);
+    expect(afterFirst.some((r) => r.deleteContentRange?.range?.startIndex === 6)).toBe(true);
+  });
+});

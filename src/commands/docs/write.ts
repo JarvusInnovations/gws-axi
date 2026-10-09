@@ -15,6 +15,7 @@ import {
 } from "./tabs.js";
 import { parseArgs } from "../../util/flags.js";
 import {
+  type ColSpec,
   locateTables,
   parseMarkdown,
   phase1Requests,
@@ -54,15 +55,23 @@ examples:
   gws-axi docs write 1BxAbc... --content "# Decisions" --new-tab Decisions --account you@example.com
   gws-axi docs write 1BxAbc... ./round-3.md --new-tab "Round 3" --first --emoji 📝 --account you@example.com
   gws-axi docs read 1BxAbc... --tab t.0 --out ./tab.md && … && gws-axi docs write 1BxAbc... ./tab.md --tab t.0 --account you@example.com
+markdown:
+  GitHub-flavored: headings, emphasis, code, links, lists, tasks, quotes,
+  tables, rules, images by URL, footnotes — through gws-axi's converter (not
+  Google's importer), the one \`docs read\` round-trips.
+  Tables take two extensions no other renderer minds:
+    <!-- cols: 1 3 -->          on the line above a table: column widths as
+    <!-- cols: 25% 75% -->      weights or percentages (default: equal), or
+    <!-- cols: fit 1 -->        fit — a column sized to its content, the rest shared
+    a<br>b, - item<br>- item    inside a cell: line breaks, and bulleted /
+                                numbered / checkbox items (flat lists only)
 notes:
-  Replaces the content of ONE tab; every other tab is untouched. Markdown goes
-  through gws-axi's converter (not Google's importer), the one \`docs read\`
-  round-trips: headings, emphasis, code, links, lists, tasks, quotes, tables,
-  rules, images by URL, footnotes. What cannot be represented is written as text
-  and reported under lossy[]. Checked tasks are written unchecked (no API for the
-  state). The write is refused if the Doc changed since it was read.
-  Re-running with --new-tab adds another tab; \`docs tabs update\` moves, renames
-  or marks an existing one with the same placement flags.
+  Replaces the content of ONE tab; every other tab is untouched. What cannot be
+  represented is written as text and reported under lossy[]. Checked tasks are
+  written unchecked (no API for the state). The write is refused if the Doc
+  changed since it was read. Re-running with --new-tab adds another tab;
+  \`docs tabs update\` moves, renames or marks an existing one with the same
+  placement flags.
 `;
 
 export const APPEND_HELP = `usage: gws-axi docs append <documentId> (<file> | - | --content <markdown>) [--tab <id>] [flags]
@@ -77,7 +86,8 @@ examples:
   gws-axi docs append 1BxAbc... ./minutes.md --tab t.0 --account you@example.com
 notes:
   Adds the Markdown at the end of one tab, after the existing content, through
-  the same converter as \`docs write\` (see \`docs write --help\`).
+  the same converter as \`docs write\` (see \`docs write --help\` for the Markdown
+  dialect, table extensions included).
 `;
 
 export const CREATE_HELP = `usage: gws-axi docs create --title <title> [<file> | - | --content <markdown>] [--parent <folder-id>] [flags]
@@ -92,7 +102,8 @@ examples:
   gws-axi docs create --title "Decision log" --parent 1FoLdEr... --account you@example.com
 notes:
   Creates a native Google Doc and writes the Markdown through gws-axi's
-  converter (see \`docs write --help\`). Prefer this over \`drive upload --convert\`
+  converter (see \`docs write --help\` for the Markdown dialect, table
+  extensions included). Prefer this over \`drive upload --convert\`
   for Markdown: the result reads back with \`docs read\`, opens without a gap
   above the first heading, and the same converter can later target one tab.
   Re-running creates another Doc with the same title.
@@ -233,6 +244,9 @@ export interface TabTarget extends TabInfo {
   spaceBelowPt?: number;
   /** Page width minus side margins, in points — what a table's `cols` hint divides. */
   contentWidthPt?: number;
+  /** The tab's NORMAL_TEXT font size and family — what a `fit` column is measured at. */
+  bodyFontPt?: number;
+  bodyFontFamily?: string;
 }
 
 export interface DocState {
@@ -244,7 +258,7 @@ export interface DocState {
 
 const stateFields = (withBodies: boolean) => {
   const tab = withBodies
-    ? `${TAB_PROPERTIES_MASK},documentTab(body(content(endIndex)),namedStyles(styles(namedStyleType,paragraphStyle(spaceBelow))),documentStyle(pageSize,marginLeft,marginRight))`
+    ? `${TAB_PROPERTIES_MASK},documentTab(body(content(endIndex)),namedStyles(styles(namedStyleType,paragraphStyle(spaceBelow),textStyle(fontSize,weightedFontFamily))),documentStyle(pageSize,marginLeft,marginRight))`
     : TAB_PROPERTIES_MASK;
   return `documentId,title,revisionId,tabs(${tab},childTabs(${tab},childTabs(${tab})))`;
 };
@@ -253,6 +267,7 @@ function tabTargets(tabs: docs_v1.Schema$Tab[] | undefined): TabTarget[] {
   const ends = new Map<string, number>();
   const gaps = new Map<string, number>();
   const widths = new Map<string, number>();
+  const fonts = new Map<string, { size?: number; family?: string }>();
   const walk = (list: docs_v1.Schema$Tab[] | undefined) => {
     for (const tab of list ?? []) {
       const id = tab.tabProperties?.tabId ?? "";
@@ -263,6 +278,11 @@ function tabTargets(tabs: docs_v1.Schema$Tab[] | undefined): TabTarget[] {
       );
       const below = normal?.paragraphStyle?.spaceBelow?.magnitude;
       if (typeof below === "number") gaps.set(id, below);
+      const size = normal?.textStyle?.fontSize?.magnitude;
+      const family = normal?.textStyle?.weightedFontFamily?.fontFamily;
+      if (typeof size === "number" || family) {
+        fonts.set(id, { size: size ?? undefined, family: family ?? undefined });
+      }
       const ds = tab.documentTab?.documentStyle;
       const page = ds?.pageSize?.width?.magnitude;
       if (typeof page === "number") {
@@ -277,6 +297,8 @@ function tabTargets(tabs: docs_v1.Schema$Tab[] | undefined): TabTarget[] {
     end: ends.get(info.id) ?? 2,
     spaceBelowPt: gaps.get(info.id),
     contentWidthPt: widths.get(info.id),
+    bodyFontPt: fonts.get(info.id)?.size,
+    bodyFontFamily: fonts.get(info.id)?.family,
   }));
 }
 
@@ -458,6 +480,7 @@ async function writeTab(
         ...located,
         footnoteIds,
         contentWidthPt: tab.contentWidthPt,
+        bodyFontPt: tab.bodyFontPt,
       });
       if (phase2.length) {
         const second = await batch(api, account, state.id, phase2, revisionId);
@@ -551,9 +574,38 @@ function render(
       `The Doc was written; ${top.count} ${top.construct}${top.count === 1 ? "" : "s"} ${top.handling} (see lossy[] above)`,
     );
   }
+  const tables = tableHelp(phase1.tables);
+  if (tables) help.push(tables);
+  const fitNote = fitFontHelp(phase1.tables, (tab as TabTarget).bodyFontFamily);
+  if (fitNote) help.push(fitNote);
   help.push(`Open in browser: https://docs.google.com/document/d/${state.id}/edit`);
   blocks.push(renderHelp(help));
   return joinBlocks(...blocks);
+}
+
+/**
+ * The one place an agent can learn the table extensions from the tool itself:
+ * when a table was just written with the default (equal) column widths, say
+ * how to set them. Nothing when no table was written, or every table had a
+ * hint (specs/commands/docs-write.md § help[]).
+ */
+export function tableHelp(tables: Array<{ cols?: ColSpec[] }>): string | undefined {
+  const unhinted = tables.filter((t) => !t.cols).length;
+  if (!unhinted) return undefined;
+  return `${unhinted === 1 ? "A table was" : `${unhinted} tables were`} written with equal column widths; put \`<!-- cols: 1 3 -->\` (weights or percentages) on the line above a table to set them. Inside a cell, <br> breaks lines and "- item" lines make a list`;
+}
+
+/** Fonts whose metrics the fit measurement actually has (Arial is metric-compatible with Helvetica). */
+const MEASURED_FONTS = /^(arial|helvetica)/i;
+
+/** When a `fit` column was measured for a tab whose body font isn't the one measured, say so. */
+export function fitFontHelp(
+  tables: Array<{ cols?: ColSpec[] }>,
+  bodyFontFamily: string | undefined,
+): string | undefined {
+  const fitted = tables.some((t) => t.cols?.includes("fit"));
+  if (!fitted || !bodyFontFamily || MEASURED_FONTS.test(bodyFontFamily)) return undefined;
+  return `fit columns were measured as Arial; this tab's body font is ${bodyFontFamily}, so a column that wraps needs a wider hint (\`<!-- cols: 30% 70% -->\`)`;
 }
 
 // ---------------------------------------------------------------------------

@@ -119,6 +119,12 @@ move shows the order it produced*).
 - When `--new-tab` was used: a note that re-running adds another tab, the `--tab <id>` form
   to write to this one, and `docs tabs update <id> <tab>` for moving, renaming or marking it.
 - When `lossy` is non-empty: a line naming the heaviest loss and that the Doc was still written.
+- When a table was written **without** a `<!-- cols: … -->` hint: one line saying it got equal
+  column widths and showing the hint, plus the `<br>` / `- item` cell forms. This is the
+  surface where an agent learns the table extensions from the tool itself
+  ([contextual-help-suggestions](../principles.md#contextual-help-suggestions)); it never
+  appears when no table was written or every table carried a hint. `docs write --help`
+  documents the same dialect in full, under `markdown:`.
 
 ## Errors
 

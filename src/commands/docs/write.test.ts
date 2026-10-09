@@ -128,3 +128,15 @@ describe("docs write --new-tab placement", () => {
     );
   });
 });
+
+describe("docs write table help line", () => {
+  it("appears only when a table was written without a cols hint", async () => {
+    const { tableHelp } = await import("./write.js");
+    expect(tableHelp([])).toBeUndefined();
+    expect(tableHelp([{ cols: [0.25, 0.75] }])).toBeUndefined();
+    expect(tableHelp([{}])).toMatch(
+      /^A table was written with equal column widths; put `<!-- cols: 1 3 -->`/,
+    );
+    expect(tableHelp([{}, { cols: [0.5, 0.5] }, {}])).toMatch(/^2 tables were written/);
+  });
+});
