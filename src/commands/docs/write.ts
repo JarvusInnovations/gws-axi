@@ -4,7 +4,16 @@ import { AxiError } from "axi-sdk-js";
 import type { docs_v1 } from "googleapis";
 import { docsClient, driveClient, translateGoogleError } from "../../google/client.js";
 import { field, joinBlocks, renderHelp, renderList, renderObject } from "../../output/index.js";
-import type { TabSummary } from "./tabs.js";
+import {
+  type Placement,
+  type TabInfo,
+  TAB_PROPERTIES_MASK,
+  flattenTabInfos,
+  parsePlacement,
+  renderTabListing,
+  resolvePlacement,
+} from "./tabs.js";
+import { parseArgs } from "../../util/flags.js";
 import {
   locateTables,
   parseMarkdown,
@@ -25,19 +34,25 @@ const SOURCE_HELP = `  <file> | - | --content <markdown>
                        Markdown to write: a local file, \`-\` for stdin, or an
                        inline string. Exactly one.`;
 
-export const WRITE_HELP = `usage: gws-axi docs write <documentId> (<file> | - | --content <markdown>) [--tab <id> | --new-tab <title>] [flags]
+export const WRITE_HELP = `usage: gws-axi docs write <documentId> (<file> | - | --content <markdown>) [--tab <id> | --new-tab <title> [placement] [--emoji <emoji>]] [flags]
 args[1]:
   <documentId>         The Doc to write into
-flags[5]:
+flags[11]:
 ${SOURCE_HELP}
   --tab <id>           The tab to replace (id as \`docs read\` lists it). Omit on a
                        single-tab Doc; required on a multi-tab Doc.
   --new-tab <title>    Add a tab with this title and write into it instead
+  --first | --last     Where the new tab goes (default: last). With --new-tab only
+  --before <tabId>     … or next to an existing tab, in that tab's parent
+  --after <tabId>
+  --under <tabId>      … or as a child of that tab (last child, or --first)
+  --emoji <emoji>      The new tab's icon
   --account <email>    REQUIRED when 2+ accounts are authenticated
 examples:
   gws-axi docs write 1BxAbc... ./notes.md --account you@example.com
   gws-axi docs write 1BxAbc... ./notes.md --tab t.k3j2 --account you@example.com
   gws-axi docs write 1BxAbc... --content "# Decisions" --new-tab Decisions --account you@example.com
+  gws-axi docs write 1BxAbc... ./round-3.md --new-tab "Round 3" --first --emoji 📝 --account you@example.com
   gws-axi docs read 1BxAbc... --tab t.0 --out ./tab.md && … && gws-axi docs write 1BxAbc... ./tab.md --tab t.0 --account you@example.com
 notes:
   Replaces the content of ONE tab; every other tab is untouched. Markdown goes
@@ -46,6 +61,8 @@ notes:
   rules, images by URL, footnotes. What cannot be represented is written as text
   and reported under lossy[]. Checked tasks are written unchecked (no API for the
   state). The write is refused if the Doc changed since it was read.
+  Re-running with --new-tab adds another tab; \`docs tabs update\` moves, renames
+  or marks an existing one with the same placement flags.
 `;
 
 export const APPEND_HELP = `usage: gws-axi docs append <documentId> (<file> | - | --content <markdown>) [--tab <id>] [flags]
@@ -90,58 +107,50 @@ export interface WriteFlags {
   content?: string;
   tab?: string;
   newTab?: string;
+  /** Where `--new-tab` goes (specs/commands/docs-write.md § Placing a new tab). */
+  placement?: Placement;
+  emoji?: string;
   title?: string;
   parent?: string;
 }
 
-const VALUE_FLAGS: Record<WriteMode, string[]> = {
-  write: ["--content", "--tab", "--new-tab"],
-  append: ["--content", "--tab"],
-  create: ["--content", "--title", "--parent"],
+const NEW_TAB_FLAGS = ["--first", "--last", "--before", "--after", "--under", "--emoji"];
+
+const FLAGS: Record<WriteMode, { value: string[]; boolean: string[] }> = {
+  write: {
+    value: ["--content", "--tab", "--new-tab", "--before", "--after", "--under", "--emoji"],
+    boolean: ["--first", "--last"],
+  },
+  append: { value: ["--content", "--tab"], boolean: [] },
+  create: { value: ["--content", "--title", "--parent"], boolean: [] },
 };
 
 export function parseWriteFlags(args: string[], mode: WriteMode): WriteFlags {
   const flags: WriteFlags = { stdin: false };
+  // `-` is stdin; parseArgs already treats it as a positional.
+  const parsed = parseArgs(args, FLAGS[mode], `docs ${mode}`);
   const positionals: string[] = [];
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg === "-") {
-      flags.stdin = true;
-      continue;
-    }
-    if (!arg.startsWith("--")) {
-      positionals.push(arg);
-      continue;
-    }
-    if (!VALUE_FLAGS[mode].includes(arg)) {
-      throw new AxiError(`Unknown flag ${arg} for \`docs ${mode}\``, "VALIDATION_ERROR", [
-        `Valid flags for \`docs ${mode}\`: ${[...VALUE_FLAGS[mode], "--account"].join(", ")}`,
-      ]);
-    }
-    const value = args[i + 1];
-    if (value === undefined || value.startsWith("--")) {
-      throw new AxiError(`${arg} needs a value`, "VALIDATION_ERROR", [
-        `Usage: gws-axi docs ${mode} --help`,
-      ]);
-    }
-    i++;
-    switch (arg) {
-      case "--content":
-        flags.content = value;
-        break;
-      case "--tab":
-        flags.tab = value;
-        break;
-      case "--new-tab":
-        flags.newTab = value;
-        break;
-      case "--title":
-        flags.title = value;
-        break;
-      case "--parent":
-        flags.parent = value;
-        break;
-    }
+  for (const arg of parsed.positionals) {
+    if (arg === "-") flags.stdin = true;
+    else positionals.push(arg);
+  }
+  flags.content = parsed.values["--content"];
+  flags.tab = parsed.values["--tab"];
+  flags.newTab = parsed.values["--new-tab"];
+  flags.title = parsed.values["--title"];
+  flags.parent = parsed.values["--parent"];
+  flags.emoji = parsed.values["--emoji"];
+  flags.placement = parsePlacement(parsed);
+  if ((flags.placement || flags.emoji !== undefined) && !flags.newTab) {
+    const given = NEW_TAB_FLAGS.filter((f) => args.includes(f));
+    throw new AxiError(
+      `${given.join(", ")} ${given.length > 1 ? "place" : "places"} a new tab — pass --new-tab <title> with ${given.length > 1 ? "them" : "it"}`,
+      "VALIDATION_ERROR",
+      [
+        "To move, rename or mark an existing tab: `gws-axi docs tabs update <documentId> <tabId> --first|--title …`",
+        "Nothing was written",
+      ],
+    );
   }
   if (mode !== "create") {
     flags.documentId = positionals.shift();
@@ -217,50 +226,53 @@ export async function readSource(flags: WriteFlags): Promise<string | undefined>
 // ---------------------------------------------------------------------------
 // Document access
 
-interface TabTarget extends TabSummary {
-  /** The tab body's end index (2 for an empty tab). */
+export interface TabTarget extends TabInfo {
+  /** The tab body's end index (2 for an empty tab; unknown on a properties-only read). */
   end: number;
 }
 
-interface DocState {
+export interface DocState {
   id: string;
   title: string;
   revisionId: string;
   tabs: TabTarget[];
 }
 
-const STATE_FIELDS = (() => {
-  const tab = "tabProperties(tabId,title),documentTab(body(content(endIndex)))";
+const stateFields = (withBodies: boolean) => {
+  const tab = withBodies
+    ? `${TAB_PROPERTIES_MASK},documentTab(body(content(endIndex)))`
+    : TAB_PROPERTIES_MASK;
   return `documentId,title,revisionId,tabs(${tab},childTabs(${tab},childTabs(${tab})))`;
-})();
+};
 
 function tabTargets(tabs: docs_v1.Schema$Tab[] | undefined): TabTarget[] {
-  const out: TabTarget[] = [];
+  const ends = new Map<string, number>();
   const walk = (list: docs_v1.Schema$Tab[] | undefined) => {
     for (const tab of list ?? []) {
       const content = tab.documentTab?.body?.content ?? [];
-      out.push({
-        id: tab.tabProperties?.tabId ?? "",
-        title: tab.tabProperties?.title ?? "",
-        end: content[content.length - 1]?.endIndex ?? 2,
-      });
+      ends.set(tab.tabProperties?.tabId ?? "", content[content.length - 1]?.endIndex ?? 2);
       walk(tab.childTabs ?? undefined);
     }
   };
   walk(tabs);
-  return out;
+  return flattenTabInfos(tabs).map((info) => ({ ...info, end: ends.get(info.id) ?? 2 }));
 }
 
-async function readState(
+/**
+ * The Doc's tabs and head revision. `properties: true` skips the bodies — the
+ * tab commands need the tree, not the end indexes.
+ */
+export async function readState(
   api: docs_v1.Docs,
   account: string,
   documentId: string,
+  options: { properties?: boolean } = {},
 ): Promise<DocState> {
   try {
     const res = await api.documents.get({
       documentId,
       includeTabsContent: true,
-      fields: STATE_FIELDS,
+      fields: stateFields(!options.properties),
     });
     return {
       id: res.data.documentId ?? documentId,
@@ -294,14 +306,6 @@ async function readState(
   }
 }
 
-function tabListing(tabs: TabSummary[]): string {
-  return renderList(
-    "tabs",
-    tabs.map((t, index) => ({ id: t.id, title: t.title, index })),
-    [field("id"), field("title"), field("index")],
-  );
-}
-
 function chooseTab(
   state: DocState,
   requested: string | undefined,
@@ -321,7 +325,7 @@ function chooseTab(
     `Document '${state.id}' has ${state.tabs.length} tabs — pass --tab <id> to choose one`,
     "TAB_REQUIRED",
     [
-      tabListing(state.tabs),
+      renderTabListing(state.tabs),
       `Run \`gws-axi docs ${command} ${state.id} <source> --tab <id> --account ${account}\` with one of the ids above`,
       "Nothing was written",
     ],
@@ -333,7 +337,12 @@ function isStaleRevision(err: unknown): boolean {
   return /revision id .* does not match/i.test(message);
 }
 
-async function batch(
+function isInvalidEmoji(err: unknown): boolean {
+  return /not a valid emoji/i.test((err as { message?: string })?.message ?? "");
+}
+
+/** One `batchUpdate` under the revision read; stale and emoji refusals translated. */
+export async function batch(
   api: docs_v1.Docs,
   account: string,
   documentId: string,
@@ -357,6 +366,13 @@ async function batch(
         ["Re-run the command; it reads the current version and writes against it"],
       );
     }
+    if (isInvalidEmoji(err)) {
+      throw new AxiError(
+        "Google refused the --emoji value: it must be exactly one emoji — nothing was written",
+        "INVALID_EMOJI",
+        ["Pass a single emoji character, e.g. --emoji 📝"],
+      );
+    }
     throw translateGoogleError(err, { account, operation: "docs.documents.batchUpdate" });
   }
 }
@@ -366,7 +382,7 @@ async function batch(
 
 interface WriteResult {
   state: DocState;
-  tab: TabSummary;
+  tab: TabInfo;
   revisionId: string;
   phase1: Phase1;
   lossy: Lossy[];
@@ -451,7 +467,7 @@ function render(
   action: string,
   account: string,
   result: WriteResult,
-  extra: { previousRevision?: string; newTab?: boolean },
+  extra: { previousRevision?: string; newTab?: boolean; tabs?: TabInfo[] },
 ): string {
   const { state, tab, phase1, lossy } = result;
   const blocks: string[] = [];
@@ -463,6 +479,7 @@ function render(
         title: state.title,
         tab: tab.id,
         tab_title: tab.title,
+        ...(extra.newTab ? { tab_index: tab.index, tab_parent: tab.parent } : {}),
         revision_id: result.revisionId,
         web_view_link: `https://docs.google.com/document/d/${state.id}/edit`,
       },
@@ -480,6 +497,7 @@ function render(
   } else {
     blocks.push(renderObject({ lossy: "none" }));
   }
+  if (extra.tabs) blocks.push(renderTabListing(extra.tabs));
 
   const help: string[] = [];
   help.push(`Verify: \`gws-axi docs read ${state.id} --tab ${tab.id}\``);
@@ -494,6 +512,9 @@ function render(
   if (extra.newTab) {
     help.push(
       `Re-running with --new-tab adds another tab; to rewrite this one: \`gws-axi docs write ${state.id} <source> --tab ${tab.id} --account ${account}\``,
+    );
+    help.push(
+      `Move, rename or mark it: \`gws-axi docs tabs update ${state.id} ${tab.id} --first|--title "<title>"|--emoji <emoji> --account ${account}\``,
     );
   }
   if (lossy.length) {
@@ -518,22 +539,43 @@ export async function docsWriteCommand(account: string, args: string[]): Promise
   const previousRevision = state.revisionId;
 
   let tab: TabTarget;
+  let tabs: TabInfo[] | undefined;
   if (flags.newTab) {
+    // Placement is resolved against the pre-read; an unknown anchor fails here,
+    // before the tab exists. No placement → no index → the API appends.
+    const placed = flags.placement ? resolvePlacement(flags.placement, state.tabs) : undefined;
+    const tabProperties: docs_v1.Schema$TabProperties = { title: flags.newTab };
+    if (placed && placed !== "unchanged") {
+      tabProperties.index = placed.index;
+      if (placed.parent) tabProperties.parentTabId = placed.parent;
+    }
+    if (flags.emoji !== undefined) tabProperties.iconEmoji = flags.emoji;
     const reply = await batch(
       api,
       account,
       state.id,
-      [{ addDocumentTab: { tabProperties: { title: flags.newTab } } }],
+      [{ addDocumentTab: { tabProperties } }],
       state.revisionId,
     );
-    const props = reply.replies?.[0]?.addDocumentTab?.tabProperties;
-    tab = { id: props?.tabId ?? "", title: props?.title ?? flags.newTab, end: 2 };
+    const props = reply.replies?.[0]?.addDocumentTab?.tabProperties ?? {};
+    tab = {
+      id: props.tabId ?? "",
+      title: props.title ?? flags.newTab,
+      index: props.index ?? 0,
+      parent: props.parentTabId ?? "",
+      emoji: props.iconEmoji ?? "",
+      end: 2,
+    };
     state.revisionId = reply.writeControl?.requiredRevisionId ?? state.revisionId;
   } else {
     tab = chooseTab(state, flags.tab, "write", account);
   }
   const result = await writeTab(api, account, state, tab, markdown, "replace");
-  return render("written", account, result, { previousRevision, newTab: !!flags.newTab });
+  if (flags.newTab) {
+    // The listing is the proof of placement; one properties-only read.
+    tabs = (await readState(api, account, state.id, { properties: true })).tabs;
+  }
+  return render("written", account, result, { previousRevision, newTab: !!flags.newTab, tabs });
 }
 
 export async function docsAppendCommand(account: string, args: string[]): Promise<string> {
@@ -588,7 +630,7 @@ export async function docsCreateCommand(account: string, args: string[]): Promis
 
   const api = await docsClient(account);
   const state = await readState(api, account, documentId);
-  const tab = state.tabs[0] ?? { id: "", title: "", end: 2 };
+  const tab = state.tabs[0] ?? { id: "", title: "", index: 0, parent: "", emoji: "", end: 2 };
   const result = await writeTab(api, account, state, tab, markdown, "replace");
   return render("created", account, result, {});
 }
