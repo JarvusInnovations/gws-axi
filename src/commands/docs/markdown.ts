@@ -58,6 +58,17 @@ export function renderBodyAsMarkdown(
       continue;
     }
     closeCode();
+    // An empty paragraph directly above a table is the API's insertion
+    // artifact (or the shrunk one a tab-opening table keeps), not content.
+    if (
+      element.paragraph &&
+      !element.paragraph.bullet &&
+      !(element.paragraph.paragraphStyle?.borderBottom?.width?.magnitude ?? 0) &&
+      body.content[i + 1]?.table &&
+      !(element.paragraph.elements ?? []).some((pe) => (pe.textRun?.content ?? "").trim())
+    ) {
+      continue;
+    }
     // List items are single lines; whatever follows a list needs a blank line first.
     const isItem = !!element.paragraph?.bullet;
     const itemList = element.paragraph?.bullet?.listId ?? "";
@@ -239,25 +250,15 @@ function renderTextRun(run: TextRun): string {
 function renderTable(table: Table, ctx: RenderCtx): string {
   const rows = table.tableRows ?? [];
   if (rows.length === 0) return "";
-  const cellText = (cell: docs_v1.Schema$TableCell): string => {
-    const parts: string[] = [];
-    for (const el of cell.content ?? []) {
-      // Flatten paragraphs into single-line cells — GFM tables can't carry
-      // block content.
-      if (el.paragraph?.elements) {
-        for (const pe of el.paragraph.elements) {
-          parts.push(renderParagraphElement(pe, ctx));
-        }
-      }
-    }
-    return parts.join("").replace(/[\n|]/g, " ").trim();
-  };
+  const cellText = (cell: docs_v1.Schema$TableCell): string => renderCell(cell, ctx);
   // A header row is bold by construction (GFM renders it so); emitting the
   // markers would double it on the way back in.
   const headerText = (cell: docs_v1.Schema$TableCell): string =>
     cellText(cell).replace(/^\*\*(.+)\*\*$/, "$1");
 
   const lines: string[] = [];
+  const hint = colsHint(table.tableStyle?.tableColumnProperties ?? []);
+  if (hint) lines.push(hint);
   for (let i = 0; i < rows.length; i++) {
     const cells = (rows[i].tableCells ?? []).map(i === 0 ? headerText : cellText);
     lines.push(`| ${cells.join(" | ")} |`);
@@ -266,6 +267,67 @@ function renderTable(table: Table, ctx: RenderCtx): string {
     }
   }
   return `\n${lines.join("\n")}\n\n`;
+}
+
+/**
+ * The writer's width hint, read back: fixed, unequal column widths become
+ * whole percentages of their sum (the last takes the rounding remainder).
+ * Evenly distributed or equal columns need no line.
+ */
+function colsHint(columns: docs_v1.Schema$TableColumnProperties[]): string | undefined {
+  if (columns.length < 2) return undefined;
+  const widths = columns.map((c) =>
+    c.widthType === "FIXED_WIDTH" ? (c.width?.magnitude ?? 0) : 0,
+  );
+  if (widths.some((w) => w <= 0)) return undefined;
+  if (widths.every((w) => w === widths[0])) return undefined;
+  const total = widths.reduce((a, b) => a + b, 0);
+  const pct = widths.map((w) => Math.round((w / total) * 100));
+  pct[pct.length - 1] += 100 - pct.reduce((a, b) => a + b, 0);
+  return `<!-- cols: ${pct.map((p) => `${p}%`).join(" ")} -->`;
+}
+
+/**
+ * One cell as Markdown: one line per cell paragraph, joined with `<br>`
+ * (GFM's multi-line cell); a hard break inside a paragraph is `<br>` too, and
+ * a bulleted paragraph carries its marker — the inverse of the writer's cells.
+ */
+function renderCell(cell: docs_v1.Schema$TableCell, ctx: RenderCtx): string {
+  const lines: string[] = [];
+  for (const el of cell.content ?? []) {
+    if (!el.paragraph) continue;
+    const text = (el.paragraph.elements ?? [])
+      .map((pe) => renderParagraphElement(pe, ctx))
+      .join("")
+      .replace(/\n+$/, "")
+      .replace(/ {2}\n/g, "<br>")
+      .replace(/[\n|]/g, " ")
+      .trim();
+    const bullet = el.paragraph.bullet;
+    if (bullet) {
+      const marker = bulletMarker(bullet.listId ?? "", bullet.nestingLevel ?? 0, ctx.lists);
+      if (marker === "- [ ]") ctx.taskCount += 1;
+      lines.push(`${marker} ${text}`);
+    } else {
+      lines.push(text);
+    }
+  }
+  return lines.join("<br>").trim();
+}
+
+/** A cell's Markdown on its own, the way `docs read` renders it inside a table (`docs edit-cell`). */
+export function renderCellMarkdown(
+  cell: docs_v1.Schema$TableCell,
+  lists: ListsMap | undefined,
+): string {
+  return renderCell(cell, {
+    lists: lists ?? {},
+    imageCount: 0,
+    taskCount: 0,
+    footnotes: {},
+    cited: [],
+    inlineObjects: {},
+  });
 }
 
 function headingLevelFor(namedStyleType: string): number {

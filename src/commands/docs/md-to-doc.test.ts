@@ -277,7 +277,7 @@ describe("markdown-to-doc: phase 2", () => {
       [5, "h1"],
     ]);
     const bold = requests
-      .filter((r) => r.updateTextStyle)
+      .filter((r) => r.updateTextStyle?.fields === "bold")
       .map((r) => r.updateTextStyle!.range!.startIndex);
     expect(bold).toEqual([10, 7, 5]);
     expect(requests.at(-1)?.pinTableHeaderRows).toEqual({
@@ -323,5 +323,271 @@ describe("markdown-to-doc: empty input", () => {
     const { requests, phase1 } = run("");
     expect(requests).toEqual([]);
     expect(phase1.blocks).toBe(0);
+  });
+});
+
+describe("markdown-to-doc: tables leave no stray paragraphs (#104, #105, #109)", () => {
+  it("a table-only body inserts no text; the tab's own paragraph is the one the table splits", () => {
+    const { requests, phase1 } = run("| a | b |\n| - | - |\n| 1 | 2 |");
+    expect(requests.some((r) => r.insertText)).toBe(false);
+    expect(phase1.tables).toHaveLength(1);
+    expect(requests.find((r) => r.insertTable)?.insertTable?.location?.index).toBe(1);
+  });
+
+  it("removes the paragraph above a table by deleting the preceding newline", () => {
+    const { requests } = run("# Title\n\n| a |\n| - |\n| 1 |\n\nafter");
+    // "Title\n" = [1,7); "after" starts at 7, the table goes before it.
+    const i = requests.findIndex((r) => r.insertTable);
+    expect(requests[i].insertTable?.location?.index).toBe(7);
+    const del = requests.slice(i + 1, i + 4).find((r) => r.deleteContentRange);
+    expect(del?.deleteContentRange?.range).toEqual({ startIndex: 6, endIndex: 7, tabId: TAB });
+  });
+
+  it("shrinks, rather than deletes, the paragraph above a table that opens the tab", () => {
+    const { requests } = run("| a |\n| - |\n| 1 |\n\nafter");
+    const i = requests.findIndex((r) => r.insertTable);
+    expect(requests[i].insertTable?.location?.index).toBe(1);
+    const after = requests.slice(i + 1);
+    expect(after.some((r) => r.deleteContentRange)).toBe(false);
+    expect(after.some((r) => r.updateTextStyle?.textStyle?.fontSize?.magnitude === 1)).toBe(true);
+  });
+
+  it("gives the paragraph under a table the tab's gap, not the top-of-tab zero; a heading keeps its own", () => {
+    const { requests } = run("| a |\n| - |\n| 1 |\n\nafter", { ...top, tableGapPt: 8 });
+    // Paragraph styles come before the index-shifting inserts; the stray's
+    // own shrink (also 0pt at index 1) comes after the table insert.
+    const beforeShifts = requests.slice(
+      0,
+      requests.findIndex((r) => r.insertTable),
+    );
+    const styles = beforeShifts
+      .filter((r) => r.updateParagraphStyle?.paragraphStyle?.spaceAbove)
+      .map((r) => [
+        r.updateParagraphStyle!.range!.startIndex,
+        r.updateParagraphStyle!.paragraphStyle!.spaceAbove!.magnitude,
+      ]);
+    // "after" is at 1 (the table shifts it later); it gets 8pt, never the 0pt top rule.
+    expect(styles).toEqual([[1, 8]]);
+
+    const heading = run("intro\n\n| a |\n| - |\n| 1 |\n\n## After");
+    const h = heading.requests
+      .slice(
+        0,
+        heading.requests.findIndex((r) => r.insertTable),
+      )
+      .filter((r) => r.updateParagraphStyle?.range?.startIndex === 7);
+    expect(h.some((r) => r.updateParagraphStyle!.fields!.includes("spaceAbove"))).toBe(false);
+  });
+
+  it("phase 2 resets every cell before styling it, header bold included", () => {
+    const { phase1 } = run("| h |\n| - |\n| **a** |\n| |");
+    const content: docs_v1.Schema$StructuralElement[] = [
+      { startIndex: 1, endIndex: 2, paragraph: {} },
+      {
+        startIndex: 2,
+        endIndex: 20,
+        table: {
+          tableRows: [
+            { tableCells: [{ content: [{ startIndex: 5 }] }] },
+            { tableCells: [{ content: [{ startIndex: 8 }] }] },
+            { tableCells: [{ content: [{ startIndex: 11 }] }] },
+          ],
+        },
+      },
+    ];
+    const requests = phase2Requests(phase1, {
+      tabId: TAB,
+      ...locateTables(content, 1),
+      footnoteIds: [],
+    });
+    const kinds = requests.map((r) =>
+      r.insertText
+        ? `insert@${r.insertText.location!.index}`
+        : r.updateParagraphStyle
+          ? `para@${r.updateParagraphStyle.range!.startIndex}`
+          : r.updateTextStyle
+            ? `${r.updateTextStyle.fields === "bold" ? "bold" : "reset"}@${r.updateTextStyle.range!.startIndex}`
+            : "pin",
+    );
+    expect(kinds).toEqual([
+      "para@11", // the empty cell: paragraph reset only
+      "insert@8",
+      "para@8",
+      "reset@8",
+      "bold@8",
+      "insert@5",
+      "para@5",
+      "reset@5",
+      "bold@5",
+      "pin",
+    ]);
+  });
+});
+
+describe("markdown-to-doc: multi-line table cells (#106)", () => {
+  const cellOf = (md: string, row = 1, col = 1) => {
+    const { parsed } = run(md);
+    const table = parsed.blocks.find((b) => b.kind === "table");
+    if (!table || table.kind !== "table") throw new Error("no table");
+    return { cell: table.rows[row][col], lossy: parsed.lossy };
+  };
+  const texts = (cell: { paragraphs: Array<{ inline: { runs: Array<{ text: string }> } }> }) =>
+    cell.paragraphs.map((p) => p.inline.runs.map((r) => r.text).join(""));
+
+  it("joins plain lines with a hard break in one paragraph, for every <br> spelling", () => {
+    const { cell } = cellOf("| k | v |\n| - | - |\n| a | one<br>two<br/>three<br />four |");
+    expect(texts(cell)).toEqual(["one\u000btwo\u000bthree\u000bfour"]);
+    expect(cell.paragraphs[0].list).toBeUndefined();
+  });
+
+  it("makes a bulleted paragraph per item line and keeps inline styles", () => {
+    const { cell, lossy } = cellOf(
+      "| k | v |\n| - | - |\n| a | - [Brief](https://h/b)<br>- **Transcript**<br>- NEW: x |",
+    );
+    expect(texts(cell)).toEqual(["Brief", "Transcript", "NEW: x"]);
+    expect(cell.paragraphs.map((p) => p.list)).toEqual(["bullet", "bullet", "bullet"]);
+    expect(cell.paragraphs[0].inline.runs[0].style.link).toBe("https://h/b");
+    expect(cell.paragraphs[1].inline.runs[0].style.bold).toBe(true);
+    expect(lossy).toEqual([]);
+  });
+
+  it("mixes plain lines and items, and tells the three list kinds apart", () => {
+    const { cell } = cellOf(
+      "| k | v |\n| - | - |\n| a | intro<br>1. one<br>2) two<br>- [ ] task<br>outro |",
+    );
+    expect(texts(cell)).toEqual(["intro", "one", "two", "task", "outro"]);
+    expect(cell.paragraphs.map((p) => p.list)).toEqual([
+      undefined,
+      "number",
+      "number",
+      "checkbox",
+      undefined,
+    ]);
+  });
+
+  it("flattens an indented item and discloses it; a checked task is disclosed too", () => {
+    const { cell, lossy } = cellOf(
+      "| k | v |\n| - | - |\n| a | - top<br>  - nested<br>- [x] done |",
+    );
+    expect(cell.paragraphs.map((p) => p.list)).toEqual(["bullet", "bullet", "checkbox"]);
+    expect(lossy.map((l) => l.construct).sort()).toEqual([
+      "checked_task",
+      "table_cell_nested_list",
+    ]);
+  });
+
+  it("phase 2 inserts the lines as one text and bullets each run of items", () => {
+    const { phase1 } = run("| k | v |\n| - | - |\n| a | intro<br>- one<br>- two |");
+    const content: docs_v1.Schema$StructuralElement[] = [
+      { startIndex: 1, endIndex: 2, paragraph: {} },
+      {
+        startIndex: 2,
+        endIndex: 40,
+        table: {
+          tableRows: [
+            { tableCells: [{ content: [{ startIndex: 5 }] }, { content: [{ startIndex: 7 }] }] },
+            { tableCells: [{ content: [{ startIndex: 10 }] }, { content: [{ startIndex: 12 }] }] },
+          ],
+        },
+      },
+    ];
+    const requests = phase2Requests(phase1, {
+      tabId: TAB,
+      ...locateTables(content, 1),
+      footnoteIds: [],
+    });
+    const first = requests[0].insertText!;
+    expect(first).toEqual({ location: { index: 12, tabId: TAB }, text: "intro\none\ntwo" });
+    const bullets = requests
+      .filter((r) => r.createParagraphBullets)
+      .map((r) => r.createParagraphBullets!);
+    // "intro\n" is 6 chars: items span [18, 26) — "one\n" + "two" + the cell's own newline.
+    expect(bullets).toEqual([
+      {
+        range: { startIndex: 18, endIndex: 26, tabId: TAB },
+        bulletPreset: "BULLET_DISC_CIRCLE_SQUARE",
+      },
+    ]);
+    // The bullets request comes after that cell's styles and before the next cell's insert.
+    const bulletAt = requests.findIndex((r) => r.createParagraphBullets);
+    const nextInsert = requests.findIndex((r, i) => i > 0 && r.insertText);
+    expect(bulletAt).toBeLessThan(nextInsert);
+  });
+});
+
+describe("markdown-to-doc: column-width hints (#107)", () => {
+  const TABLE = "| a | b |\n| - | - |\n| 1 | 2 |";
+  const colsOf = (md: string) => {
+    const { parsed } = run(md);
+    const t = parsed.blocks.find((b) => b.kind === "table");
+    return t && t.kind === "table" ? t.cols : undefined;
+  };
+  const code = (fn: () => unknown) => {
+    try {
+      fn();
+    } catch (err) {
+      return (err as AxiError).code;
+    }
+    return "none";
+  };
+
+  it("takes weights or percentages, with or without a blank line before the table", () => {
+    expect(colsOf(`<!-- cols: 1 3 -->\n${TABLE}`)).toEqual([0.25, 0.75]);
+    expect(colsOf(`<!-- cols: 25% 75% -->\n\n${TABLE}`)).toEqual([0.25, 0.75]);
+    expect(colsOf(`intro\n\n<!--cols: 2, 1-->\n${TABLE}`)).toEqual([2 / 3, 1 / 3]);
+    expect(colsOf(TABLE)).toBeUndefined();
+  });
+
+  it("refuses a bad count, a hint without a table, and unreadable widths — before any request", () => {
+    expect(code(() => run(`<!-- cols: 1 2 3 -->\n${TABLE}`))).toBe("VALIDATION_ERROR");
+    expect(code(() => run(`<!-- cols: 1 3 -->\n\nparagraph\n\n${TABLE}`))).toBe("VALIDATION_ERROR");
+    expect(code(() => run(`${TABLE}\n\n<!-- cols: 1 3 -->`))).toBe("VALIDATION_ERROR");
+    expect(code(() => run(`<!-- cols: 1 x -->\n${TABLE}`))).toBe("VALIDATION_ERROR");
+    expect(code(() => run(`<!-- cols: 0 3 -->\n${TABLE}`))).toBe("VALIDATION_ERROR");
+  });
+
+  it("leaves other HTML comments alone", () => {
+    const { parsed } = run(`<!-- note -->\n${TABLE}`);
+    expect(parsed.lossy.map((l) => l.construct)).toEqual(["html_block"]);
+  });
+
+  it("phase 2 sets fixed widths per column from the tab's content width", () => {
+    const { phase1 } = run(`<!-- cols: 1 3 -->\n${TABLE}`);
+    const content: docs_v1.Schema$StructuralElement[] = [
+      { startIndex: 1, endIndex: 2, paragraph: {} },
+      {
+        startIndex: 2,
+        endIndex: 20,
+        table: {
+          tableRows: [
+            { tableCells: [{ content: [{ startIndex: 5 }] }, { content: [{ startIndex: 7 }] }] },
+            { tableCells: [{ content: [{ startIndex: 10 }] }, { content: [{ startIndex: 12 }] }] },
+          ],
+        },
+      },
+    ];
+    const requests = phase2Requests(phase1, {
+      tabId: TAB,
+      ...locateTables(content, 1),
+      footnoteIds: [],
+      contentWidthPt: 468,
+    });
+    const widths = requests
+      .filter((r) => r.updateTableColumnProperties)
+      .map((r) => r.updateTableColumnProperties!)
+      .map((u) => [
+        u.columnIndices![0],
+        u.tableColumnProperties!.width!.magnitude,
+        u.tableStartLocation!.index,
+      ]);
+    expect(widths).toEqual([
+      [0, 117, 2],
+      [1, 351, 2],
+    ]);
+    // Defaults to Docs' page when the width isn't known.
+    const d = phase2Requests(phase1, { tabId: TAB, ...locateTables(content, 1), footnoteIds: [] })
+      .filter((r) => r.updateTableColumnProperties)
+      .map((r) => r.updateTableColumnProperties!.tableColumnProperties!.width!.magnitude);
+    expect(d).toEqual([117, 351]);
   });
 });

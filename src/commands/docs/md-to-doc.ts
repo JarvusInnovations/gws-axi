@@ -64,11 +64,48 @@ export interface ParagraphBlock {
   list?: { key: number; kind: ListKind; level: number };
 }
 
+/** One paragraph inside a table cell: a line, or a flat list item. */
+export interface CellParagraph {
+  inline: Inline;
+  list?: ListKind;
+}
+
+/** A cell holds one or more paragraphs; plain lines separated by `<br>` share one. */
+export interface TableCell {
+  paragraphs: CellParagraph[];
+}
+
 export interface TableBlock {
   kind: "table";
   /** rows[0] is the header row. */
-  rows: Inline[][];
+  rows: TableCell[][];
+  /** Column widths as fractions of the content width (sum 1), from a `<!-- cols: … -->` hint. */
+  cols?: number[];
 }
+
+/** `<!-- cols: 1 3 -->` or `<!-- cols: 25% 75% -->` on the line before a table. */
+const COLS_HINT = /^\s*<!--\s*cols:\s*([^>]*?)\s*-->\s*$/i;
+
+/** Weights or percentages → fractions of the table width. Refuses anything that isn't a positive number. */
+export function parseColsHint(spec: string): number[] {
+  const parts = spec.split(/[\s,]+/).filter(Boolean);
+  const weights = parts.map((p) => Number(p.replace(/%$/, "")));
+  if (parts.length === 0 || weights.some((w) => !Number.isFinite(w) || w <= 0)) {
+    throw new AxiError(
+      `Can't read the column widths in \`<!-- cols: ${spec} -->\``,
+      "VALIDATION_ERROR",
+      [
+        "Give one positive number per column, as weights (`1 3`) or percentages (`25% 75%`)",
+        "Nothing was written",
+      ],
+    );
+  }
+  const sum = weights.reduce((a, b) => a + b, 0);
+  return weights.map((w) => w / sum);
+}
+
+/** Docs' default page: 612pt wide with 72pt side margins. */
+export const DEFAULT_CONTENT_WIDTH_PT = 468;
 
 export type Block = ParagraphBlock | TableBlock;
 
@@ -93,6 +130,7 @@ const HANDLING: Record<string, string> = {
   nested_list_kind: "uses the outer list's kind",
   list_depth: `flattened to level ${MAX_NESTING}`,
   table_cell_block: "written as text",
+  table_cell_nested_list: "flattened to one level",
 };
 
 // ---------------------------------------------------------------------------
@@ -270,6 +308,51 @@ function parseInline(
   return inline;
 }
 
+/** `<br>`, `<br/>`, `<br />` — GFM's de facto line break inside a cell. */
+const CELL_BREAK = /<br\s*\/?>/i;
+/** A list marker opening a cell line: `- `, `* `, `1. `, `1) `, with an optional task box. */
+const CELL_ITEM = /^(\s*)(?:([-*])|(\d+)[.)])\s+(?:\[([ xX])\]\s+)?(.*)$/;
+
+/**
+ * A cell's Markdown: lines split on `<br>`; a line that opens with a list
+ * marker is its own paragraph with a bullet, consecutive plain lines share
+ * one paragraph joined by hard breaks. Nesting can't be written inside a
+ * cell (specs/behaviors/markdown-to-doc.md § Upstream), so an indented
+ * marker is flattened and disclosed.
+ */
+function parseCell(raw: string, ctx: ParseCtx): TableCell {
+  const lexLine = (text: string): Inline => {
+    const inline = parseInline(marked.Lexer.lexInline(text.trim(), { gfm: true }), ctx);
+    if (inline.images.length || inline.footnotes.length) ctx.lossy.add("table_cell_block");
+    return { runs: inline.runs, images: [], footnotes: [] };
+  };
+  const paragraphs: CellParagraph[] = [];
+  let pending: Inline | undefined;
+  for (const line of raw.split(CELL_BREAK)) {
+    const m = CELL_ITEM.exec(line);
+    if (m) {
+      if (pending) paragraphs.push({ inline: pending });
+      pending = undefined;
+      if (m[1].length >= 2) ctx.lossy.add("table_cell_nested_list");
+      const box = m[4];
+      const list: ListKind =
+        box !== undefined ? "checkbox" : m[3] !== undefined ? "number" : "bullet";
+      if (box !== undefined && box.toLowerCase() === "x") ctx.lossy.add("checked_task");
+      paragraphs.push({ inline: lexLine(m[5]), list });
+      continue;
+    }
+    const inline = lexLine(line);
+    if (pending) {
+      pending.runs.push({ text: "\u000b", style: {} }, ...inline.runs);
+    } else {
+      pending = inline;
+    }
+  }
+  if (pending) paragraphs.push({ inline: pending });
+  if (paragraphs.length === 0) paragraphs.push({ inline: textInline("") });
+  return { paragraphs };
+}
+
 function plainParagraph(inline: Inline, extra: Partial<ParagraphBlock> = {}): ParagraphBlock {
   return { kind: "paragraph", inline, ...extra };
 }
@@ -290,7 +373,16 @@ function parseBlocks(
   out: Block[],
   listKey: { next: number },
 ): void {
+  /** A `<!-- cols: … -->` waiting for its table; anything else in between is refused. */
+  let pendingCols: { cols: number[]; raw: string } | undefined;
   for (const token of tokens) {
+    if (pendingCols && token.type !== "space" && token.type !== "table") {
+      throw new AxiError(
+        `\`${pendingCols.raw}\` must be followed by a table, not ${token.type === "paragraph" ? "a paragraph" : `a ${token.type}`}`,
+        "VALIDATION_ERROR",
+        ["Put the hint on the line directly above the table it sizes", "Nothing was written"],
+      );
+    }
     switch (token.type) {
       case "space":
       case "def":
@@ -374,15 +466,31 @@ function parseBlocks(
         break;
       case "table": {
         const t = token as Tokens.Table;
-        const cell = (c: Tokens.TableCell): Inline => {
-          const inline = parseInline(c.tokens, ctx);
-          if (inline.images.length || inline.footnotes.length) ctx.lossy.add("table_cell_block");
-          return { runs: inline.runs, images: [], footnotes: [] };
-        };
-        out.push({ kind: "table", rows: [t.header.map(cell), ...t.rows.map((r) => r.map(cell))] });
+        const cell = (c: Tokens.TableCell): TableCell => parseCell(c.text, ctx);
+        const rows = [t.header.map(cell), ...t.rows.map((r) => r.map(cell))];
+        const block: TableBlock = { kind: "table", rows };
+        if (pendingCols) {
+          const columns = Math.max(1, ...rows.map((r) => r.length));
+          if (pendingCols.cols.length !== columns) {
+            throw new AxiError(
+              `\`${pendingCols.raw}\` names ${pendingCols.cols.length} widths for a ${columns}-column table`,
+              "VALIDATION_ERROR",
+              ["Give exactly one width per column", "Nothing was written"],
+            );
+          }
+          block.cols = pendingCols.cols;
+          pendingCols = undefined;
+        }
+        out.push(block);
         break;
       }
       case "html": {
+        const hint = COLS_HINT.exec((token as Tokens.HTML).text);
+        if (hint) {
+          // A width hint for the table that follows (specs/behaviors/markdown-to-doc.md).
+          pendingCols = { cols: parseColsHint(hint[1]), raw: (token as Tokens.HTML).text.trim() };
+          break;
+        }
         ctx.lossy.add("html_block");
         for (const line of (token as Tokens.HTML).text.replace(/\n$/, "").split("\n")) {
           out.push(
@@ -398,6 +506,12 @@ function parseBlocks(
           out.push(plainParagraph(textInline(g.raw.replace(/\n$/, "")), { list: bctx.list }));
       }
     }
+  }
+  if (pendingCols) {
+    throw new AxiError(`\`${pendingCols.raw}\` has no table after it`, "VALIDATION_ERROR", [
+      "Put the hint on the line directly above the table it sizes",
+      "Nothing was written",
+    ]);
   }
 }
 
@@ -431,7 +545,16 @@ export interface Placement {
   emptyTab: boolean;
   /** Remove the space above the first paragraph (it opens the tab). */
   atTop: boolean;
+  /**
+   * Space, in points, to put above the paragraph that follows a table — the
+   * tab's NORMAL_TEXT space-below, so the gap matches the rest of the body.
+   * A Docs table has no bottom margin of its own.
+   */
+  tableGapPt?: number;
 }
+
+/** Docs' default NORMAL_TEXT space-below, used when the tab's named style isn't known. */
+export const DEFAULT_TABLE_GAP_PT = 10;
 
 export interface Phase1 {
   requests: Request[];
@@ -451,6 +574,8 @@ interface PlacedParagraph {
   /** Text length excluding the newline (tabs for nesting included). */
   length: number;
   prefix: number;
+  /** A table is inserted directly above this paragraph. */
+  followsTable: boolean;
 }
 
 function textStyleRequest(range: docs_v1.Schema$Range, style: InlineStyle): Request | undefined {
@@ -535,8 +660,9 @@ export function phase1Requests(input: Block[], placement: Placement): Phase1 {
     }
     const prefix = block.list ? block.list.level : 0;
     const text = "\t".repeat(prefix) + block.inline.runs.map((r) => r.text).join("");
+    const followsTable = tables.some((t) => t.at === -1);
     for (const t of tables) if (t.at === -1) t.at = cursor;
-    paragraphs.push({ block, start: cursor, length: text.length, prefix });
+    paragraphs.push({ block, start: cursor, length: text.length, prefix, followsTable });
     pieces.push(text);
     cursor += text.length + 1;
   }
@@ -548,14 +674,18 @@ export function phase1Requests(input: Block[], placement: Placement): Phase1 {
     return { requests, chars: 0, blocks: 0, footnoteRequestIndices: [], tables: [], footnotes: [] };
   }
 
-  // 1. The text, in one piece.
+  // 1. The text, in one piece. An empty body on an empty tab (a table-only
+  // write) inserts nothing — the API refuses empty text, and the tab's own
+  // empty paragraph is the one the table splits.
   if (paragraphs.length > 0) {
-    requests.push({
-      insertText: {
-        location: { index: placement.emptyTab ? base : base - 1, tabId },
-        text: placement.emptyTab ? body : `\n${body}`,
-      },
-    });
+    if (body.length > 0 || !placement.emptyTab) {
+      requests.push({
+        insertText: {
+          location: { index: placement.emptyTab ? base : base - 1, tabId },
+          text: placement.emptyTab ? body : `\n${body}`,
+        },
+      });
+    }
     // 2. Inserted text inherits the style of what it was inserted next to; start clean.
     const whole = { startIndex: base, endIndex: cursor, tabId };
     requests.push({
@@ -594,7 +724,15 @@ export function phase1Requests(input: Block[], placement: Placement): Phase1 {
       };
       fields.push("borderBottom");
     }
-    if (i === 0 && placement.atTop) {
+    // The paragraph under a table gets the body's normal gap (a table has no
+    // bottom margin); a heading already carries its own. The top-of-tab rule
+    // doesn't apply to it — the table opens the tab, not this paragraph.
+    if (p.followsTable) {
+      if (!p.block.heading) {
+        style.spaceAbove = { magnitude: placement.tableGapPt ?? DEFAULT_TABLE_GAP_PT, unit: "PT" };
+        fields.push("spaceAbove");
+      }
+    } else if (i === 0 && placement.atTop) {
       style.spaceAbove = { magnitude: 0, unit: "PT" };
       fields.push("spaceAbove");
     }
@@ -661,7 +799,11 @@ export function phase1Requests(input: Block[], placement: Placement): Phase1 {
       order: order++,
       request: { insertTable: { rows, columns, location: { index: at, tabId } } },
       // The insert makes a new empty paragraph at `at` that inherits the style
-      // (and any bullet) of the paragraph it split off; give it a clean one.
+      // (and any bullet) of the paragraph it split off. Reset it, then remove
+      // it by deleting the newline that ends the paragraph before it — the
+      // stray's own range can't be deleted, but the merge can, and the merged
+      // paragraph keeps the preceding one's style. At the very top of a body
+      // there is nothing before it to merge into, so it is shrunk instead.
       after: [
         {
           updateParagraphStyle: {
@@ -671,6 +813,7 @@ export function phase1Requests(input: Block[], placement: Placement): Phase1 {
           },
         },
         { deleteParagraphBullets: { range: { startIndex: at, endIndex: at + 1, tabId } } },
+        ...(at > 1 ? [strayDelete(at, tabId)] : strayShrink(at, tabId)),
       ],
     });
   }
@@ -731,6 +874,35 @@ export function phase1Requests(input: Block[], placement: Placement): Phase1 {
   };
 }
 
+function strayDelete(at: number, tabId: string): Request {
+  return { deleteContentRange: { range: { startIndex: at - 1, endIndex: at, tabId } } };
+}
+
+/** Zero spacing and a 1pt newline: the unavoidable paragraph above a tab-opening table takes no room. */
+function strayShrink(at: number, tabId: string): Request[] {
+  const range = { startIndex: at, endIndex: at + 1, tabId };
+  return [
+    {
+      updateParagraphStyle: {
+        range,
+        paragraphStyle: {
+          spaceAbove: { magnitude: 0, unit: "PT" },
+          spaceBelow: { magnitude: 0, unit: "PT" },
+          lineSpacing: 100,
+        },
+        fields: "spaceAbove,spaceBelow,lineSpacing",
+      },
+    },
+    {
+      updateTextStyle: {
+        range,
+        textStyle: { fontSize: { magnitude: 1, unit: "PT" } },
+        fields: "fontSize",
+      },
+    },
+  ];
+}
+
 /** Phase 2 input: where Docs put the tables (cell paragraph starts, row-major) and the footnote ids. */
 export interface Phase2Input {
   tabId: string;
@@ -739,6 +911,65 @@ export interface Phase2Input {
   /** Table start indices, matching `tableCells`. */
   tableStarts: number[];
   footnoteIds: string[];
+  /** The tab's page width minus its side margins — what a `cols` hint divides. */
+  contentWidthPt?: number;
+}
+
+/**
+ * Fill one empty cell paragraph at `at` with a cell's content: the lines as one
+ * insert, a style reset (a new cell inherits the split paragraph's heading or
+ * bold), the Markdown's own styles per paragraph, then one bullets request per
+ * run of same-kind items (level 0 only, so nothing shifts). `docs edit-cell`
+ * uses the same fill after clearing a cell.
+ */
+export function cellFillRequests(
+  cell: TableCell,
+  at: number,
+  tabId: string,
+  force: InlineStyle = {},
+): Request[] {
+  const requests: Request[] = [];
+  const { paragraphs } = cell;
+  const texts = paragraphs.map((p) => p.inline.runs.map((x) => x.text).join(""));
+  // Cell paragraphs are lines of one insert; the cell's own newline ends the last.
+  const text = texts.join("\n");
+  const range = { startIndex: at, endIndex: at + Math.max(text.length, 1), tabId };
+  if (text) requests.push({ insertText: { location: { index: at, tabId }, text } });
+  requests.push({
+    updateParagraphStyle: {
+      range,
+      paragraphStyle: { namedStyleType: "NORMAL_TEXT" },
+      fields: "namedStyleType,indentStart,indentFirstLine,indentEnd,borderBottom",
+    },
+  });
+  if (!text) return requests;
+  requests.push({ updateTextStyle: { range, textStyle: {}, fields: RESET_TEXT_FIELDS } });
+  const lists: Array<{ kind: ListKind; start: number; end: number }> = [];
+  let offset = at;
+  for (const [i, p] of paragraphs.entries()) {
+    requests.push(...runStyleRequests(p.inline, offset, tabId, undefined, force));
+    const end = offset + texts[i].length + 1;
+    const last = lists[lists.length - 1];
+    if (p.list && last && last.kind === p.list && last.end === offset) last.end = end;
+    else if (p.list) lists.push({ kind: p.list, start: offset, end });
+    offset = end;
+  }
+  for (const l of lists) {
+    requests.push({
+      createParagraphBullets: {
+        range: { startIndex: l.start, endIndex: l.end, tabId },
+        bulletPreset: BULLET_PRESET[l.kind],
+      },
+    });
+  }
+  return requests;
+}
+
+/** One cell's Markdown (styles, links, `<br>` lines, items) on its own — for `docs edit-cell`. */
+export function parseCellMarkdown(markdown: string): { cell: TableCell; lossy: Lossy[] } {
+  const ctx: ParseCtx = { lossy: new LossyLedger(), definitions: [] };
+  const cell = parseCell(markdown.replace(/\r\n?/g, "\n").replace(/\n/g, "<br>"), ctx);
+  return { cell, lossy: ctx.lossy.list() };
 }
 
 /** Phase 2: fill tables and footnotes. Descending index order inside each segment. */
@@ -754,21 +985,35 @@ export function phase2Requests(phase1: Phase1, input: Phase2Input): Request[] {
       for (let c = block.rows[r].length - 1; c >= 0; c--) {
         const at = cells[r]?.[c];
         if (at === undefined) continue;
-        const inline = block.rows[r][c];
-        const text = inline.runs.map((x) => x.text).join("");
-        if (!text) continue;
-        requests.push({ insertText: { location: { index: at, tabId }, text } });
         requests.push(
-          ...runStyleRequests(inline, at, tabId, undefined, r === 0 ? { bold: true } : {}),
+          ...cellFillRequests(block.rows[r][c], at, tabId, r === 0 ? { bold: true } : {}),
         );
       }
     }
-    if (block.rows.length > 1 && input.tableStarts[t] !== undefined) {
+    const start = input.tableStarts[t];
+    if (block.rows.length > 1 && start !== undefined) {
       requests.push({
         pinTableHeaderRows: {
-          tableStartLocation: { index: input.tableStarts[t], tabId },
+          tableStartLocation: { index: start, tabId },
           pinnedHeaderRowsCount: 1,
         },
+      });
+    }
+    // Column widths: fixed points per column from the hint's fractions. Index-free.
+    if (block.cols && start !== undefined) {
+      const width = input.contentWidthPt ?? DEFAULT_CONTENT_WIDTH_PT;
+      block.cols.forEach((fraction, i) => {
+        requests.push({
+          updateTableColumnProperties: {
+            tableStartLocation: { index: start, tabId },
+            columnIndices: [i],
+            tableColumnProperties: {
+              widthType: "FIXED_WIDTH",
+              width: { magnitude: Math.round(width * fraction), unit: "PT" },
+            },
+            fields: "widthType,width",
+          },
+        });
       });
     }
   }

@@ -229,6 +229,10 @@ export async function readSource(flags: WriteFlags): Promise<string | undefined>
 export interface TabTarget extends TabInfo {
   /** The tab body's end index (2 for an empty tab; unknown on a properties-only read). */
   end: number;
+  /** The tab's NORMAL_TEXT space-below, in points — the gap the converter puts under a table. */
+  spaceBelowPt?: number;
+  /** Page width minus side margins, in points — what a table's `cols` hint divides. */
+  contentWidthPt?: number;
 }
 
 export interface DocState {
@@ -240,22 +244,40 @@ export interface DocState {
 
 const stateFields = (withBodies: boolean) => {
   const tab = withBodies
-    ? `${TAB_PROPERTIES_MASK},documentTab(body(content(endIndex)))`
+    ? `${TAB_PROPERTIES_MASK},documentTab(body(content(endIndex)),namedStyles(styles(namedStyleType,paragraphStyle(spaceBelow))),documentStyle(pageSize,marginLeft,marginRight))`
     : TAB_PROPERTIES_MASK;
   return `documentId,title,revisionId,tabs(${tab},childTabs(${tab},childTabs(${tab})))`;
 };
 
 function tabTargets(tabs: docs_v1.Schema$Tab[] | undefined): TabTarget[] {
   const ends = new Map<string, number>();
+  const gaps = new Map<string, number>();
+  const widths = new Map<string, number>();
   const walk = (list: docs_v1.Schema$Tab[] | undefined) => {
     for (const tab of list ?? []) {
+      const id = tab.tabProperties?.tabId ?? "";
       const content = tab.documentTab?.body?.content ?? [];
-      ends.set(tab.tabProperties?.tabId ?? "", content[content.length - 1]?.endIndex ?? 2);
+      ends.set(id, content[content.length - 1]?.endIndex ?? 2);
+      const normal = tab.documentTab?.namedStyles?.styles?.find(
+        (s) => s.namedStyleType === "NORMAL_TEXT",
+      );
+      const below = normal?.paragraphStyle?.spaceBelow?.magnitude;
+      if (typeof below === "number") gaps.set(id, below);
+      const ds = tab.documentTab?.documentStyle;
+      const page = ds?.pageSize?.width?.magnitude;
+      if (typeof page === "number") {
+        widths.set(id, page - (ds?.marginLeft?.magnitude ?? 0) - (ds?.marginRight?.magnitude ?? 0));
+      }
       walk(tab.childTabs ?? undefined);
     }
   };
   walk(tabs);
-  return flattenTabInfos(tabs).map((info) => ({ ...info, end: ends.get(info.id) ?? 2 }));
+  return flattenTabInfos(tabs).map((info) => ({
+    ...info,
+    end: ends.get(info.id) ?? 2,
+    spaceBelowPt: gaps.get(info.id),
+    contentWidthPt: widths.get(info.id),
+  }));
 }
 
 /**
@@ -404,6 +426,7 @@ async function writeTab(
     base: mode === "replace" || emptyTab ? 1 : tab.end,
     emptyTab: mode === "replace" || emptyTab,
     atTop: mode === "replace" || emptyTab,
+    tableGapPt: tab.spaceBelowPt,
   };
   const phase1 = phase1Requests(parsed.blocks, placement);
   const requests: docs_v1.Schema$Request[] = [];
@@ -430,7 +453,12 @@ async function writeTab(
       const res = await api.documents.get({ documentId: state.id, includeTabsContent: true });
       const content = findTab(res.data.tabs ?? undefined, tab.id)?.documentTab?.body?.content ?? [];
       const located = locateTables(content, placement.base);
-      phase2 = phase2Requests(phase1, { tabId: tab.id, ...located, footnoteIds });
+      phase2 = phase2Requests(phase1, {
+        tabId: tab.id,
+        ...located,
+        footnoteIds,
+        contentWidthPt: tab.contentWidthPt,
+      });
       if (phase2.length) {
         const second = await batch(api, account, state.id, phase2, revisionId);
         revisionId = second.writeControl?.requiredRevisionId ?? revisionId;
@@ -541,6 +569,13 @@ export async function docsWriteCommand(account: string, args: string[]): Promise
   let tab: TabTarget;
   let tabs: TabInfo[] | undefined;
   if (flags.newTab) {
+    // Convert first: anything the converter refuses fails with no tab added.
+    phase1Requests(parseMarkdown(markdown).blocks, {
+      tabId: "",
+      base: 1,
+      emptyTab: true,
+      atTop: true,
+    });
     // Placement is resolved against the pre-read; an unknown anchor fails here,
     // before the tab exists. No placement → no index → the API appends.
     const placed = flags.placement ? resolvePlacement(flags.placement, state.tabs) : undefined;
@@ -570,7 +605,27 @@ export async function docsWriteCommand(account: string, args: string[]): Promise
   } else {
     tab = chooseTab(state, flags.tab, "write", account);
   }
-  const result = await writeTab(api, account, state, tab, markdown, "replace");
+  let result: WriteResult;
+  try {
+    result = await writeTab(api, account, state, tab, markdown, "replace");
+  } catch (err) {
+    // A failed write must not leave the new, empty tab behind. Best-effort:
+    // the error is reported either way, saying what happened to the tab.
+    if (flags.newTab && tab.id) {
+      let note: string;
+      try {
+        await api.documents.batchUpdate({
+          documentId: state.id,
+          requestBody: { requests: [{ deleteTab: { tabId: tab.id } }] },
+        });
+        note = `The new tab '${tab.title}' was removed again; nothing was added to the Doc`;
+      } catch {
+        note = `The new tab '${tab.title}' (${tab.id}) was added and could not be removed — delete it with \`gws-axi docs tabs delete ${state.id} ${tab.id} --account ${account}\``;
+      }
+      if (err instanceof AxiError) err.suggestions.push(note);
+    }
+    throw err;
+  }
   if (flags.newTab) {
     // The listing is the proof of placement; one properties-only read.
     tabs = (await readState(api, account, state.id, { properties: true })).tabs;
