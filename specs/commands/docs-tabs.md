@@ -19,6 +19,7 @@ gws-axi docs tabs <documentId>
 gws-axi docs tabs update <documentId> <tabId> [--title <title>] [--emoji <emoji> | --no-emoji]
                                               [--first | --last | --before <tabId> | --after <tabId>]
                                               [--under <tabId> | --top-level]
+                                              [--paragraph-spacing <pt>]
 gws-axi docs tabs delete <documentId> <tabId> [--with-children]
 ```
 
@@ -76,6 +77,16 @@ whose field mask is exactly the properties the flags name, under
 **Emoji** — `--emoji <emoji>` sets the icon; `--no-emoji` clears it; both together is a
 `VALIDATION_ERROR`. The value is passed through — Google decides what is one emoji — and its
 refusal is translated to `INVALID_EMOJI`.
+
+**Paragraph spacing** — `--paragraph-spacing <pt>` sets the space after every Normal-text
+paragraph in the tab: the tab's `NORMAL_TEXT` named style's `spaceBelow`, via
+`updateNamedStyle` in the same batch as the property update. `0` removes it; a negative or
+non-numeric value is a `VALIDATION_ERROR`. This is the one knob that reaches past the tab's
+properties into its styles, because a tab whose template gave Normal text no spacing runs
+every paragraph together ([markdown-to-doc](../behaviors/markdown-to-doc.md) § Spacing), and
+the fix belongs with the other tab-level verbs. The update response's `tab{}` carries
+`paragraph_spacing` (points); `changed[]` names it `paragraph_spacing`; the undo line restores
+the previous value.
 
 **Idempotent**: the desired state is compared with the read state before writing. When every
 named property already holds (same title, same emoji, and the placement already describes the
@@ -152,7 +163,7 @@ help[2]:
 ```
 
 `action` is `updated` or `unchanged`. `changed[]` names the properties written (`index`,
-`parent`, `title`, `emoji`); omitted when unchanged. `tab{}` is the tab's state after the
+`parent`, `title`, `emoji`, `paragraph_spacing`); omitted when unchanged. `tab{}` is the tab's state after the
 call, `revision_id` the head revision after it ([provenance-by-default](../principles.md#provenance-by-default)),
 and `tabs[N]` the whole listing afterwards so a move is confirmed without a second read. The
 undo line restores exactly the properties this call changed: the previous title/emoji, and
@@ -181,7 +192,7 @@ help[2]:
 
 | Code | When |
 | --- | --- |
-| `VALIDATION_ERROR` | Missing id; unknown subcommand or flag; two placement flags; `--under`/`--top-level` with `--before`/`--after`; `--emoji` with `--no-emoji`; empty `--title`; `update` with no property flags |
+| `VALIDATION_ERROR` | Missing id; unknown subcommand or flag; two placement flags; `--under`/`--top-level` with `--before`/`--after`; `--emoji` with `--no-emoji`; empty `--title`; a `--paragraph-spacing` that isn't a non-negative number; `update` with no property flags |
 | `DOCUMENT_NOT_FOUND`, `NON_NATIVE_DOCUMENT` | As `docs write` |
 | `TAB_NOT_FOUND` | The target, or a `--before`/`--after`/`--under` anchor, names no tab; says which and names the available ids. Nothing is written |
 | `TAB_CYCLE` | `--under`, `--before` or `--after` points at the tab itself or one of its descendants. Nothing is written |

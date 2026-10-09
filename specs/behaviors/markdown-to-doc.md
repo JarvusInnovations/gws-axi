@@ -121,6 +121,15 @@ the one paragraph where a structure interrupts that rhythm:
 - **Space after a table.** A Docs table has no bottom margin, so the paragraph that follows one
   gets `spaceAbove` equal to the tab's `NORMAL_TEXT` space-below — unless it is a heading,
   whose own style already carries space above.
+- **Paragraph spacing is guaranteed on tabs gws-axi creates.** An account's Doc template may
+  give `NORMAL_TEXT` no space above or below at all; a Doc written into such a tab has no
+  paragraph spacing anywhere — paragraphs, and the paragraph after a list, run together. So
+  when `docs create` or `--new-tab` finds a tab whose `NORMAL_TEXT` has 0pt above **and**
+  0pt below, it sets `spaceBelow` to 10pt — Docs' own default for a fresh Doc, not a house
+  value — on that tab's named style (`updateNamedStyle`) before writing, and the response
+  says so. A tab with any paragraph spacing of its own is left as it is. A `docs write --tab`
+  into an existing tab never restyles it; when that tab's Normal text has no paragraph
+  spacing, the response says so and names `docs tabs update <id> <tab> --paragraph-spacing 10`.
 
 A `docs read` of a Doc written this way has no blank-line artifacts to round-trip.
 
@@ -176,6 +185,7 @@ nothing is left behind unmentioned.
 | The empty paragraph before an inserted table cannot be deleted by its own range (400 `Cannot delete the requested range`), but deleting the newline that ends the *preceding* paragraph merges the two, and the merged paragraph keeps the preceding one's style — a `HEADING_1` stays a heading with the table directly below it | **Observed 2026-10-08** |
 | `insertText` with empty `text` is a 400 (`Insert text requests must specify text to insert`) | **Observed 2026-10-08** |
 | A fresh Doc's `NORMAL_TEXT` named style is 0pt above / 10pt below / line spacing 115; named styles are per tab, and `updateNamedStyle` with `tabId` changes one tab's (the mask must include `namedStyleType`) | **Observed 2026-10-08** |
+| Another account's Doc template gave `NORMAL_TEXT` 0pt above / 0pt below (Arial 11, `COLLAPSE_LISTS`): a Doc `docs create` wrote into it had no paragraph spacing anywhere, including after a list | **Observed 2026-10-09** (the Field Guide report) |
 | `batchUpdate` is atomic: all requests apply or none | Documented |
 | `writeControl.requiredRevisionId` refuses a request against a stale revision with a 400 whose message says the id "does not match the latest" | **Observed 2026-10-02** |
 | A vertical tab in `insertText` is accepted and stored as a hard line break; Google's exporter renders it as two trailing spaces and a newline | Observed |
