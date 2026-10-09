@@ -1,17 +1,18 @@
 ---
-status: in-progress
+status: done
 depends: [docs-table-cells]
 specs:
   - specs/behaviors/markdown-to-doc.md
   - specs/commands/docs-read.md
 issues: [107]
+pr: 116
 ---
 
 # Plan: Column-width hints for tables
 
 ## Scope
 
-#107: `<!-- cols: 1 3 -->` / `<!-- cols: 25% 75% -->` before a table sets fixed column widths
+# 107: `<!-- cols: 1 3 -->` / `<!-- cols: 25% 75% -->` before a table sets fixed column widths
 in those proportions of the tab's content width; `docs read` emits the hint back as
 percentages when a table's columns are fixed and unequal.
 
@@ -44,12 +45,12 @@ single-cell caption row across columns (a separate feature, `mergeTableCells`); 
 
 ## Validation
 
-- [ ] `bun run build`, `lint`, `format:check`, `test` pass.
-- [ ] Unit: parser — weights, percentages, blank line between hint and table, wrong count,
+- [x] `bun run build`, `lint`, `format:check`, `test` pass.
+- [x] Unit: parser — weights, percentages, blank line between hint and table, wrong count,
       hint without a table, hint at end; phase 2 — width requests at the table start with
       the computed points; reader — fixed unequal widths → hint, evenly distributed → none,
       fixed equal → none.
-- [ ] Live (scratch Doc, chris@jarv.us): a `1 3` table lands at 117/351pt and reads back as
+- [x] Live (scratch Doc, <chris@jarv.us>): a `1 3` table lands at 117/351pt and reads back as
       `<!-- cols: 25% 75% -->`; a re-write of that read-back keeps the widths; a table with
       no hint reads back with no line.
 
@@ -61,8 +62,19 @@ single-cell caption row across columns (a separate feature, `mergeTableCells`); 
 
 ## Notes
 
-(At closeout.)
+- Stacked on `docs-table-cells` (PR #115): it needs the cell model and the rewritten
+  `renderTable`. First cut was branched from `develop` by mistake and rebased onto the cells
+  branch; PR #116's base is `feat/docs-table-cells` until #115 merges.
+- A wrong-count hint was refused with **no tab added** — the `--new-tab` pre-add dry run
+  from #104 catches converter-level refusals exactly as intended.
+- The content width comes from the tab's own `documentStyle`, so a Doc with custom margins
+  gets widths that fill its own page, not the default's.
+- Scratch Doc `12ScFDaMayFwXm_GNVK9fO2eXWYLVtGXfKDRY6UdAOaY` (<chris@jarv.us>), trashed.
 
 ## Follow-ups
 
-(At closeout.)
+- Tracked as: a single-cell first row merged across the columns (`mergeTableCells`) — the
+  "titled table" pattern from #107, not asked for on its own yet.
+- Tracked as: hints are read from the whole-table column properties; a table whose widths a
+  human adjusted by hand reads back with a hint too, which a re-write then preserves — the
+  intended behavior, worth knowing.
