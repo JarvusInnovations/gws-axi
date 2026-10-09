@@ -15,6 +15,17 @@ import {
   docsCreateCommand,
   docsWriteCommand,
 } from "./docs/write.js";
+import {
+  TABS_DELETE_FLAGS,
+  TABS_DELETE_HELP,
+  TABS_FLAGS,
+  TABS_HELP,
+  TABS_UPDATE_FLAGS,
+  TABS_UPDATE_HELP,
+  docsTabsCommand,
+  docsTabsDeleteCommand,
+  docsTabsUpdateCommand,
+} from "./docs/tab-ops.js";
 import { driveRevisionsCommand, REVISIONS_HELP } from "./drive/revisions.js";
 
 interface DocsSubcommand {
@@ -115,9 +126,26 @@ export const SUBCOMMANDS: DocsSubcommand[] = [
     help: DIFF_HELP,
     handler: docsDiffCommand,
   },
+  { name: "tabs", mutation: false, flags: TABS_FLAGS, help: TABS_HELP, handler: docsTabsCommand },
   { name: "create", mutation: true, flags: "self", help: CREATE_HELP, handler: docsCreateCommand },
   { name: "write", mutation: true, flags: "self", help: WRITE_HELP, handler: docsWriteCommand },
   { name: "append", mutation: true, flags: "self", help: APPEND_HELP, handler: docsAppendCommand },
+  // Two-word subcommands: the dispatcher tries `tabs update` before `tabs`, so
+  // write protection applies to exactly the tab commands that write.
+  {
+    name: "tabs update",
+    mutation: true,
+    flags: TABS_UPDATE_FLAGS,
+    help: TABS_UPDATE_HELP,
+    handler: docsTabsUpdateCommand,
+  },
+  {
+    name: "tabs delete",
+    mutation: true,
+    flags: TABS_DELETE_FLAGS,
+    help: TABS_DELETE_HELP,
+    handler: docsTabsDeleteCommand,
+  },
   { name: "insert-text", mutation: true, help: INSERT_TEXT_HELP, instead: ROUND_TRIP },
   { name: "delete-range", mutation: true, help: DELETE_RANGE_HELP, instead: ROUND_TRIP },
   { name: "style-text", mutation: true, help: STYLE_TEXT_HELP, instead: ROUND_TRIP },
@@ -174,6 +202,7 @@ ${renderAlternatives(SUBCOMMANDS)}subcommand help:
   gws-axi docs download --help    for native-file export / raw download
   gws-axi docs diff --help        for comparing two revisions
   gws-axi docs write --help       for writing Markdown to one tab (create, append too)
+  gws-axi docs tabs --help        for listing, moving, renaming, marking, deleting tabs
 examples:
   gws-axi docs read 1BxAbc...
   gws-axi docs read 1BxAbc... --tab t.0 --full
@@ -183,6 +212,8 @@ examples:
   gws-axi docs diff 1BxAbc... 841 865
   gws-axi docs write 1BxAbc... ./notes.md --tab t.0 --account you@example.com
   gws-axi docs create --title "Sprint notes" ./notes.md --account you@example.com
+  gws-axi docs write 1BxAbc... ./round-3.md --new-tab "Round 3" --first --account you@example.com
+  gws-axi docs tabs update 1BxAbc... t.k3j2 --first --title "Current" --account you@example.com
 `;
 
 export async function docsCommand(args: string[]): Promise<string> {
@@ -190,7 +221,8 @@ export async function docsCommand(args: string[]): Promise<string> {
     return DOCS_HELP;
   }
 
-  const sub = args[0];
+  const twoWord = args.length > 1 ? `${args[0]} ${args[1]}` : undefined;
+  const sub = twoWord && SUB_BY_NAME[twoWord] ? twoWord : args[0];
   const def = SUB_BY_NAME[sub];
   if (!def) {
     throw new AxiError(`Unknown docs subcommand: ${sub}`, "VALIDATION_ERROR", [
@@ -198,7 +230,7 @@ export async function docsCommand(args: string[]): Promise<string> {
     ]);
   }
 
-  const rest = args.slice(1);
+  const rest = args.slice(sub === twoWord ? 2 : 1);
   if (rest.includes("--help")) {
     return def.handler ? def.help : withInstead(def.help, def.instead);
   }

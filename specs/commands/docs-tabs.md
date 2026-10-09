@@ -66,9 +66,10 @@ whose field mask is exactly the properties the flags name, under
   `--top-level` (the anchor decides the parent).
 - `--under <tabId>` alone — last child of that tab. `--top-level` alone — last at the top
   level.
-- Index sent: `--first` → 0; `--last` → sibling count (the tab itself excluded when it is
-  already in that parent); `--before X` → `X.index`; `--after X` → `X.index + 1`. No
-  further adjustment — see the upstream table.
+- Index sent: `--first` → 0; `--last` → the destination parent's sibling count, counting the
+  tab itself when it is already there (on `[A,B,C,D]`, A→4 is what puts A last);
+  `--before X` → `X.index`; `--after X` → `X.index + 1`. No further adjustment — see the
+  upstream table.
 
 **Title** — `--title <title>`; empty is a `VALIDATION_ERROR` before any call.
 

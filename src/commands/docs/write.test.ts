@@ -68,3 +68,63 @@ describe("docs write flag parsing", () => {
     expect(code(() => parseWriteFlags(["--content", "x"], "append"))).toBe("VALIDATION_ERROR");
   });
 });
+
+describe("docs write --new-tab placement", () => {
+  it("parses placement and emoji with --new-tab", () => {
+    const f = parseWriteFlags(
+      ["1Doc", "./a.md", "--new-tab", "Round 3", "--first", "--emoji", "📝"],
+      "write",
+    );
+    expect(f.newTab).toBe("Round 3");
+    expect(f.placement).toEqual({ first: true });
+    expect(f.emoji).toBe("📝");
+    expect(
+      parseWriteFlags(["1Doc", "./a.md", "--new-tab", "X", "--after", "t.0"], "write").placement,
+    ).toEqual({
+      after: "t.0",
+    });
+    expect(
+      parseWriteFlags(["1Doc", "./a.md", "--new-tab", "X"], "write").placement,
+    ).toBeUndefined();
+  });
+
+  it("refuses placement or emoji without --new-tab, naming docs tabs update", () => {
+    let err: AxiError | undefined;
+    try {
+      parseWriteFlags(["1Doc", "./a.md", "--tab", "t.0", "--first"], "write");
+    } catch (e) {
+      err = e as AxiError;
+    }
+    expect(err?.code).toBe("VALIDATION_ERROR");
+    expect(err?.message).toContain("--first");
+    expect(err?.suggestions?.join("\n")).toContain("docs tabs update");
+    expect(code(() => parseWriteFlags(["1Doc", "./a.md", "--emoji", "📝"], "write"))).toBe(
+      "VALIDATION_ERROR",
+    );
+  });
+
+  it("refuses conflicting placement flags", () => {
+    expect(
+      code(() =>
+        parseWriteFlags(["1Doc", "./a.md", "--new-tab", "X", "--first", "--last"], "write"),
+      ),
+    ).toBe("VALIDATION_ERROR");
+    expect(
+      code(() =>
+        parseWriteFlags(
+          ["1Doc", "./a.md", "--new-tab", "X", "--under", "t.0", "--after", "t.1"],
+          "write",
+        ),
+      ),
+    ).toBe("VALIDATION_ERROR");
+  });
+
+  it("keeps placement flags off append and create", () => {
+    expect(code(() => parseWriteFlags(["1Doc", "./a.md", "--first"], "append"))).toBe(
+      "VALIDATION_ERROR",
+    );
+    expect(code(() => parseWriteFlags(["--title", "T", "--emoji", "📝"], "create"))).toBe(
+      "VALIDATION_ERROR",
+    );
+  });
+});
