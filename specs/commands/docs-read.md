@@ -58,10 +58,12 @@ The rendering is the inverse of the [markdown-to-doc](../behaviors/markdown-to-d
 - A table's header row is rendered without its bold markers. A cell's paragraphs are joined
   with `<br>`, a hard line break inside a cell is `<br>`, and a bulleted paragraph in a cell
   is a `-`, `1.` or `- [ ]` line — the inverse of the writer's multi-line cells. A table
-  whose columns have fixed, unequal widths is preceded by `<!-- cols: 25% 75% -->` (whole
-  percentages of the table's width), the writer's width hint; evenly distributed columns get
-  no line. A column written as `fit` reads back as its resulting percentage — the layout
-  round-trips, the intent does not.
+  whose columns have fixed, unequal widths (or any `fit` column, below) is preceded by
+  `<!-- cols: 25% 75% -->` (whole percentages of the table's width), the writer's width hint;
+  evenly distributed columns get no line. A column still exactly as wide as `fit` makes it for its current content reads
+  back as `fit`, so a read → edit → write keeps it fitted
+  ([markdown-to-doc § Fitted columns](../behaviors/markdown-to-doc.md#fitted-columns)). Any other
+  fixed column reads back as a percentage.
 - Merged cells render in the writer's span syntax
   ([markdown-to-doc § Merged cells](../behaviors/markdown-to-doc.md#merged-cells)). The head
   cell's content is followed by one pipe per column it spans. Each row it covers has a bare

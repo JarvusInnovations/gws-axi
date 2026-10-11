@@ -42,7 +42,9 @@ the same Markdown, after normalization:
   content in its first row and a bare `^` in each row below it. Inside a cell, a literal `|`
   reads back as `\|` and a literal `^` at the end of a cell as `\^`.
 - A column-width hint reads back as whole percentages (`<!-- cols: 25% 75% -->`), whatever
-  form it was written in; a table with evenly distributed columns reads back with no hint.
+  form it was written in, except that a column still exactly as wide as `fit` makes it for its
+  current content reads back as `fit` (§ Fitted columns). A table with evenly distributed
+  columns reads back with no hint.
 - Every list item is on its own line, indented two spaces per level.
 - Trailing whitespace on a line and runs of more than one blank line are collapsed.
 
@@ -72,7 +74,7 @@ at once.
 | `\| ^\|` — a cell ending in a caret | The cell merged into the one above it, which then spans one more row | ✅ as a bare `^` | Row span (§ Merged cells). Text before the caret is appended to the cell above, after a space |
 | Two or more rows above the delimiter row | That many header rows: bold, and pinned as the table's header rows | ✅ | A header row may carry column and row spans like any other |
 | `<!-- cols: 1 3 -->` or `<!-- cols: 25% 75% -->` on the line(s) before a table | Fixed column widths: the tab's content width (page width minus the side margins) split in those proportions | ✅ as percentages | Markdown has no width syntax, so this is a gws-axi extension in the one form every other renderer ignores. The hint must name exactly one width per column and must be followed by a table — anything else is refused before the write (`VALIDATION_ERROR`), never written as text. Without a hint, columns are evenly distributed (Docs' default) |
-| `fit` in a `cols` hint (`<!-- cols: fit 1 -->`) | That column sized to its widest line (§ Fitted columns); the other columns share what is left in their proportions | ✅ as a percentage | The fit is computed at write time from measured text, not by Docs; a column a human later lengthens does not grow. All-`fit` makes a table narrower than the page |
+| `fit` in a `cols` hint (`<!-- cols: fit 1 -->`) | That column sized to its widest line (§ Fitted columns); the other columns share what is left in their proportions | ✅ while the column is still the width `fit` gives its content; otherwise as a percentage | The fit is computed at write time from measured text, not by Docs; a column a human later lengthens does not grow until the table is written again. All-`fit` makes a table narrower than the page |
 | `- item<br>- item` (or `1.`, `- [ ]`) inside a cell | One bulleted paragraph per item in the cell, with the list preset of the marker; a non-item line before or after the items is its own paragraph | ✅ | Flat lists only: the API's nesting-by-leading-tab does not take inside a cell, so an indented item is written at level 0 and disclosed. Images and footnotes in a cell are still written as text |
 | `---` | An empty paragraph with a bottom border | ✅ | Google's exporter drops it. There is no API request that inserts Docs' own horizontal rule |
 | `![alt](https://…)` | Inline image fetched by Google from the URL | ✅ as `[image]` (alt can't be written; an image that has alt reads back as `[image: alt]`) | Only `http(s)` URLs; a local path or `data:` URL is refused (`IMAGE_NOT_FETCHABLE`). A URL Google cannot fetch fails the write with the same code. The API's insert takes no alt text; a non-empty `alt` is disclosed as dropped |
@@ -105,6 +107,19 @@ auto-fit. The measurement:
 - A `fit` column is measured only from the cells that occupy that column alone. A cell that
   spans several columns (§ Merged cells) wraps within their combined width and does not
   widen any of them.
+
+**Reading `fit` back.** The Doc keeps only the width, not the intent. So `docs read` measures
+each fixed-width column again, the same way, from its current content at the tab's
+`NORMAL_TEXT` size. A column whose width is within 1pt of that measurement reads back as
+`fit`. The other columns read back relative to each other: `1` each when they are equal, or
+otherwise whole percentages of the width the fits leave (`<!-- cols: fit 30% 70% -->`). A
+column someone has resized by hand, or whose content has changed since the write, no longer
+matches and reads back as a percentage of the table, as before.
+
+This matters because agents edit a tab by reading it, changing it and writing it back. If
+`fit` read back as a percentage, the first such edit would freeze the column at its old width,
+and a later, longer label (or a second table copying the hint) would wrap. A false match costs
+nothing: the column re-fits to the width it already has.
 
 This is a gws-axi-side estimate of Docs' layout, and it is not a house style: no font other
 than the platform default is assumed, by design.
