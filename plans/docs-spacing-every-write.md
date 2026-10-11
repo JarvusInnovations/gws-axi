@@ -11,8 +11,7 @@ pr: 131
 ## Scope
 
 The 0/0 guarantee from `docs-paragraph-spacing` covered `docs create` and `--new-tab` only. A
-`--tab` write into a 0/0 tab printed a hint and changed nothing. On 2026-10-11 the Field
-Guide's "v2" tab, created by an older gws-axi, was regenerated with `--tab` several times
+`--tab` write into a 0/0 tab printed a hint and changed nothing. On 2026-10-11 an owner's Doc's tab, created by an older gws-axi, was regenerated with `--tab` several times
 and stayed unspaced: the generating agent never acted on the hint. The owner decided the
 guarantee should cover every write.
 
@@ -62,7 +61,7 @@ guarantee should cover every write.
 - **Found on the way:** the API omits a zero magnitude, so "no spacing" and "style not read"
   looked the same. `TabTarget.normalStyleRead` now tells them apart, and an unread style is
   never restyled.
-- The Field Guide's v2 tab, the case that prompted this, was fixed by hand the same day with
+- The reporting Doc's tab, the case that prompted this, was fixed by hand the same day with
   `docs tabs update --paragraph-spacing 10`.
 
 ## Follow-ups

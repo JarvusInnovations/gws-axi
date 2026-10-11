@@ -81,7 +81,11 @@ describe("markdown-to-doc: text and paragraph styles", () => {
     });
     expect(styles[0].fields).toBe("namedStyleType,spaceAbove");
     expect(covered(requests, styles[0].range!)).toBe("One");
-    expect(styles[1].paragraphStyle).toEqual({ namedStyleType: "HEADING_3" });
+    // Directly under a heading: no stacked gap either.
+    expect(styles[1].paragraphStyle).toEqual({
+      namedStyleType: "HEADING_3",
+      spaceAbove: { magnitude: 0, unit: "PT" },
+    });
     expect(covered(requests, styles[1].range!)).toBe("Three");
   });
 
@@ -751,5 +755,37 @@ describe("markdown-to-doc: page breaks (specs/behaviors/markdown-to-doc.md § Pa
     expect(at(requests.find((r) => r.insertPageBreak))).toBe(
       at(requests.find((r) => r.insertTable)),
     );
+  });
+});
+
+describe("markdown-to-doc: no gap above a page's first paragraph or a heading under a heading", () => {
+  /** spaceAbove set on the paragraph whose text starts with `text`, or undefined. */
+  const above = (md: string, text: string) => {
+    const { requests } = run(md);
+    const body = inserted(requests);
+    const start = 1 + body.indexOf(text);
+    const hit = requests.find(
+      (r) =>
+        r.updateParagraphStyle?.range?.startIndex === start &&
+        r.updateParagraphStyle.fields?.includes("spaceAbove"),
+    );
+    return hit?.updateParagraphStyle?.paragraphStyle?.spaceAbove?.magnitude;
+  };
+
+  it("gives a heading directly under a heading no space above", () => {
+    expect(above("intro\n\n# A\n\n## B\n\ntext", "B")).toBe(0);
+    expect(above("intro\n\n# A\n\npara\n\n## B", "B")).toBeUndefined();
+  });
+
+  it("gives the first paragraph after a page break no space above", () => {
+    expect(above("intro\n\n---\n\n---\n\n# Title\n\n## Section", "Title")).toBe(0);
+    expect(above("intro\n\n---\n\n---\n\nplain", "plain")).toBe(0);
+  });
+
+  it("leaves the under-a-table rule in charge", () => {
+    // A heading under a table keeps its own space-above, even after a heading.
+    expect(above("intro\n\n# A\n\n| x |\n| - |\n| 1 |\n\n## B", "B")).toBeUndefined();
+    // A page break under a table: the break paragraph takes the table gap, the title is flush.
+    expect(above("| x |\n| - |\n| 1 |\n\n---\n\n---\n\n# Title", "Title")).toBe(0);
   });
 });

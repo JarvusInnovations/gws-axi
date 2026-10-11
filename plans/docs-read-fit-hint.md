@@ -13,7 +13,7 @@ pr: 128
 
 `docs read` writes `fit` back for a fixed-width column whose width is still what `fit` makes
 it for its current content. The other columns of that table read back relative to each
-other. Seen on 2026-10-11 in the Field Guide's cover tab: two tables both had a 61pt label
+other. Seen on 2026-10-11 in an owner's Doc's cover tab: two tables both had a 61pt label
 column, which is exactly `13% 87%` of 468pt and no column's `fit` width. A table written with
 `fit` (60pt, from "Timeline") had been read back as `13% 87%`, rewritten that way, and the
 hint copied to a second table whose "Generated" label needs 70pt, so the label wrapped.
@@ -75,9 +75,9 @@ Re-fitting on read is a measurement, and a false match is harmless.
   (<chris@jarv.us>), trashed:
   - `fit 1` written (57pt, from "Timeline") read back as `fit 1`;
   - with a `**Generated**` row added to the read output and written back, the column became
-    70pt, exactly the width the Field Guide's wrapping label needed;
+    70pt, exactly the width the reported wrapping label needed;
   - resized to 90pt by hand, it read back as `18% 82%`.
-- The Field Guide itself was left to its generator, as the owner asked. Its next pass, with
+- The reporting Doc itself was left to its generator, as the owner asked. Its next pass, with
   `fit` in the hint, gets 70pt.
 - The test simulator has to give a cell's list paragraphs their bullets. Without them the
   reader renders no `- ` marker and the re-parse measures no indent. A failing test caught

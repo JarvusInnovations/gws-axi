@@ -16,7 +16,7 @@ function codeOf(fn: () => unknown): string {
 
 const SAMPLE = `---
 type: field-guide
-title: "Save the Academy: Field Guide"
+title: "Project Handbook: Draft"
 version: 1.0
 from:
   version: v1
@@ -40,7 +40,7 @@ describe("splitFrontmatter (specs/behaviors/markdown-to-doc.md § Frontmatter)",
     expect(fm.keys).toBe(8);
     expect(fm.rows).toEqual([
       { label: "type", value: "field-guide" },
-      { label: "title", value: "Save the Academy: Field Guide" },
+      { label: "title", value: "Project Handbook: Draft" },
       { label: "version", value: "1.0" },
       { label: "from.version", value: "v1" },
       { label: "from.note", value: "two<br>lines" },
