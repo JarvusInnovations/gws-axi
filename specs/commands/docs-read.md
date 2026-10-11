@@ -53,6 +53,9 @@ The rendering is the inverse of the [markdown-to-doc](../behaviors/markdown-to-d
 - A list whose preset is the checkbox renders `- [ ] item` (the API exposes no checked state — #84). Because that is silently wrong about checked items, a read with any checklist items carries a `help[]` line naming the count and saying their state is only visible in the Doc.
 - A vertical tab (`\u000b`) inside a paragraph is a hard line break (two trailing spaces, newline).
 - An empty paragraph with a bottom border is `---`; Docs' own horizontal rule is too.
+- A page break is `---`, a blank line, `---`: the writer's page break
+  ([markdown-to-doc § Page breaks](../behaviors/markdown-to-doc.md#page-breaks)). Any text in
+  the same paragraph comes first.
 - The section break every body starts with is not rendered; only later section breaks are.
 - Ordered items render as `1.` at every level; bullets as `-`. A blank line follows the last item of a list.
 - A table's header row is rendered without its bold markers. A cell's paragraphs are joined

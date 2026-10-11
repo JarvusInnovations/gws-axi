@@ -67,6 +67,7 @@ export function renderBodyAsMarkdown(
       element.paragraph &&
       !element.paragraph.bullet &&
       !(element.paragraph.paragraphStyle?.borderBottom?.width?.magnitude ?? 0) &&
+      !(element.paragraph.elements ?? []).some((pe) => pe.pageBreak) &&
       body.content[i + 1]?.table &&
       !(element.paragraph.elements ?? []).some((pe) => (pe.textRun?.content ?? "").trim())
     ) {
@@ -149,6 +150,13 @@ function renderStructuralElement(el: StructuralElement, ctx: RenderCtx): string 
 }
 
 function renderParagraph(para: Paragraph, ctx: RenderCtx): string {
+  // A page break is the writer's double rule, after whatever text shares its
+  // paragraph (specs/behaviors/markdown-to-doc.md § Page breaks).
+  if ((para.elements ?? []).some((pe) => pe.pageBreak)) {
+    const rest = { ...para, elements: (para.elements ?? []).filter((pe) => !pe.pageBreak) };
+    const hasText = (rest.elements ?? []).some((pe) => (pe.textRun?.content ?? "").trim());
+    return `${hasText ? renderParagraph(rest, ctx) : ""}\n---\n\n---\n\n`;
+  }
   const inline = (para.elements ?? []).map((pe) => renderParagraphElement(pe, ctx)).join("");
   const text = inline.replace(/\n+$/, "");
 

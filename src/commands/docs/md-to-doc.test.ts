@@ -699,3 +699,57 @@ describe("markdown-to-doc: merged cells (specs/behaviors/markdown-to-doc.md § M
     expect(columnWidths(t, 468, 11)[0]).toBe(columnWidths(narrow, 468, 11)[0]);
   });
 });
+
+describe("markdown-to-doc: page breaks (specs/behaviors/markdown-to-doc.md § Page breaks)", () => {
+  const kinds = (md: string) =>
+    run(md).parsed.blocks.map((b) =>
+      b.kind === "table" ? "table" : b.pageBreak ? "break" : b.rule ? "rule" : "text",
+    );
+  const code = (md: string) => {
+    try {
+      run(md);
+    } catch (err) {
+      return (err as AxiError).code;
+    }
+    return "none";
+  };
+
+  it("makes two or more rules with only blank lines between them one page break", () => {
+    expect(kinds("a\n\n---\n\n---\n\nb")).toEqual(["text", "break", "text"]);
+    expect(kinds("a\n\n***\n\n___\n\n---\n\nb")).toEqual(["text", "break", "text"]);
+    expect(kinds("a\n\n---\n\nb")).toEqual(["text", "rule", "text"]);
+    expect(kinds("---\n\na\n\n---")).toEqual(["rule", "text", "rule"]);
+  });
+
+  it("refuses a page break inside a list item or a quote", () => {
+    expect(code("- item\n\n  ---\n\n  ---\n\n  more")).toBe("VALIDATION_ERROR");
+    expect(code("> a\n>\n> ---\n>\n> ---\n>\n> b")).toBe("VALIDATION_ERROR");
+  });
+
+  it("writes an empty paragraph, inserts the break at its start and deletes the extra newline", () => {
+    const { requests } = run("a\n\n---\n\n---\n\nb");
+    expect(inserted(requests)).toBe("a\n\nb");
+    const i = requests.findIndex((r) => r.insertPageBreak);
+    expect(requests[i].insertPageBreak!.location).toEqual({ index: 3, tabId: TAB });
+    expect(requests[i + 1].deleteContentRange!.range).toEqual({
+      startIndex: 4,
+      endIndex: 5,
+      tabId: TAB,
+    });
+    // No border: it is a page break, not a rule.
+    expect(requests.some((r) => r.updateParagraphStyle?.paragraphStyle?.borderBottom)).toBe(false);
+  });
+
+  it("puts the break first when a table before it shares its index, so the table stays above", () => {
+    const { requests } = run("| a |\n| - |\n| 1 |\n\n---\n\n---\n\n# Title");
+    const shiftOrder = requests
+      .map((r) => (r.insertPageBreak ? "break" : r.insertTable ? "table" : undefined))
+      .filter(Boolean);
+    expect(shiftOrder).toEqual(["break", "table"]);
+    const at = (r: (typeof requests)[number] | undefined) =>
+      r?.insertPageBreak?.location?.index ?? r?.insertTable?.location?.index;
+    expect(at(requests.find((r) => r.insertPageBreak))).toBe(
+      at(requests.find((r) => r.insertTable)),
+    );
+  });
+});

@@ -63,6 +63,8 @@ export interface ParagraphBlock {
   code?: boolean;
   /** An empty paragraph with a bottom border, standing in for `---`. */
   rule?: boolean;
+  /** Two or more rules in a row: an empty paragraph that becomes a page break (§ Page breaks). */
+  pageBreak?: boolean;
   list?: { key: number; kind: ListKind; level: number };
 }
 
@@ -390,7 +392,10 @@ function parseBlocks(
 ): void {
   /** A `<!-- cols: … -->` waiting for its table; anything else in between is refused. */
   let pendingCols: { cols: ColSpec[]; raw: string } | undefined;
+  /** The rule just written, while only blank lines follow it: a second rule makes it a page break. */
+  let lastRule: ParagraphBlock | undefined;
   for (const token of tokens) {
+    if (token.type !== "space" && token.type !== "hr") lastRule = undefined;
     if (
       pendingCols &&
       token.type !== "space" &&
@@ -481,9 +486,27 @@ function parseBlocks(
         }
         break;
       }
-      case "hr":
-        out.push(plainParagraph(textInline(""), { rule: true, list: bctx.list }));
+      case "hr": {
+        if (lastRule) {
+          // Two (or more) rules with only blank lines between: one page break.
+          if (bctx.list || bctx.quote) {
+            throw new AxiError(
+              `A page break (two rules in a row) can't go inside ${bctx.list ? "a list item" : "a quote"}`,
+              "VALIDATION_ERROR",
+              [
+                "Put the two rules between blocks, outside the list or quote",
+                "Nothing was written",
+              ],
+            );
+          }
+          lastRule.rule = undefined;
+          lastRule.pageBreak = true;
+          break;
+        }
+        lastRule = plainParagraph(textInline(""), { rule: true, list: bctx.list });
+        out.push(lastRule);
         break;
+      }
       case "spanTable":
       case "table": {
         const t =
@@ -912,6 +935,24 @@ export function phase1Requests(input: Block[], placement: Placement): Phase1 {
     }
   }
   flush();
+  // A page break: inserted at the start of its own empty paragraph, then the
+  // newline the insert adds is deleted, leaving one [pageBreak, "\n"]
+  // paragraph and no empty one (observed). Pushed after the tables so that,
+  // at the index a table before it shares, the break (later in the document)
+  // runs first.
+  for (const p of paragraphs) {
+    if (!p.block.pageBreak) continue;
+    shifts.push({
+      at: p.start,
+      order: order++,
+      request: { insertPageBreak: { location: { index: p.start, tabId } } },
+      after: [
+        {
+          deleteContentRange: { range: { startIndex: p.start + 1, endIndex: p.start + 2, tabId } },
+        },
+      ],
+    });
+  }
   // Descending by position; among equal positions, later in the document first,
   // so two tables aimed at the same spot keep their order.
   shifts.sort((a, b) => b.at - a.at || b.order - a.order);

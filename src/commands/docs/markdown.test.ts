@@ -397,3 +397,37 @@ describe("docs read markdown renderer: fit columns read back as fit", () => {
     expect(fitWidth(block, 2, 11)).toBe(widths[2]);
   });
 });
+
+describe("docs read markdown renderer: page breaks", () => {
+  const pageBreak = (text?: string): Element => ({
+    paragraph: {
+      elements: [
+        ...(text ? [{ textRun: { content: text, textStyle: {} } }] : []),
+        { pageBreak: {} },
+        { textRun: { content: "\n", textStyle: {} } },
+      ],
+      paragraphStyle: { namedStyleType: "NORMAL_TEXT" },
+    },
+  });
+
+  it("renders a page break as two rules, after any text in its paragraph", () => {
+    expect(render([para(["before\n"]), pageBreak(), para(["after\n"])])).toBe(
+      "before\n\n---\n\n---\n\nafter",
+    );
+    expect(render([pageBreak("tail"), para(["after\n"])])).toBe("tail\n\n---\n\n---\n\nafter");
+  });
+
+  it("keeps a page break that sits directly above a table", () => {
+    const table: Element = {
+      table: { tableRows: [{ tableCells: [{ content: [para(["x\n"])] }] }] },
+    };
+    expect(render([para(["a\n"]), pageBreak(), table])).toBe("a\n\n---\n\n---\n\n| x |\n| --- |");
+  });
+
+  it("round-trips through the parser as one page break", () => {
+    const md = render([para(["a\n"]), pageBreak(), para(["b\n"])]);
+    expect(
+      parseMarkdown(md).blocks.map((b) => (b.kind === "paragraph" && b.pageBreak ? "break" : "x")),
+    ).toEqual(["x", "break", "x"]);
+  });
+});
