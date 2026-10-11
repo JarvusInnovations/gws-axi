@@ -812,7 +812,14 @@ export function phase1Requests(input: Block[], placement: Placement): Phase1 {
         style.spaceAbove = { magnitude: placement.tableGapPt ?? DEFAULT_TABLE_GAP_PT, unit: "PT" };
         fields.push("spaceAbove");
       }
-    } else if (i === 0 && placement.atTop) {
+    } else if (
+      (i === 0 && placement.atTop) ||
+      // The first paragraph of a page, and a heading directly under a heading,
+      // start flush: the editor shows space-above at a page's top, and a
+      // second heading's own space-above splits two lines that belong together.
+      paragraphs[i - 1]?.block.pageBreak ||
+      (p.block.heading && paragraphs[i - 1]?.block.heading)
+    ) {
       style.spaceAbove = { magnitude: 0, unit: "PT" };
       fields.push("spaceAbove");
     }
