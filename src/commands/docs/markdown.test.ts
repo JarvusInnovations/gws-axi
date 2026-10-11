@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { docs_v1 } from "googleapis";
-import { renderBodyAsMarkdown } from "./markdown.js";
+import { renderBodyAsMarkdown, tableGrid } from "./markdown.js";
+import { parseMarkdown } from "./md-to-doc.js";
 
 type Element = docs_v1.Schema$StructuralElement;
 
@@ -208,5 +209,93 @@ describe("docs read markdown renderer: column-width hints (#107)", () => {
     expect(render([twoByOne([fixed(100), fixed(200)])])).toBe(
       "<!-- cols: 33% 67% -->\n| a | b |\n| --- | --- |",
     );
+  });
+});
+
+describe("docs read markdown renderer: merged cells", () => {
+  /** A Docs table as the API returns it: covered cells present and empty, spans only on heads. */
+  type Spec = string | { text: string; rows?: number; cols?: number } | null;
+  const docTable = (rows: Spec[][], headerRows = 1): Element => ({
+    table: {
+      tableRows: rows.map((row, r) => ({
+        tableRowStyle: r < headerRows ? { tableHeader: true } : {},
+        tableCells: row.map((s) => {
+          const text = s === null ? "" : typeof s === "string" ? s : s.text;
+          const spans =
+            s && typeof s === "object" ? { rowSpan: s.rows ?? 1, columnSpan: s.cols ?? 1 } : {};
+          return { content: [para([`${text}\n`])], tableCellStyle: spans };
+        }),
+      })),
+    },
+  });
+
+  it("writes heads with their pipes and covered rows as a bare caret", () => {
+    const table = docTable([
+      ["a", "b", "c"],
+      [{ text: "wide", cols: 3 }, null, null],
+      [{ text: "tall", rows: 2 }, "1", "2"],
+      [null, "3", "4"],
+    ]);
+    expect(render([table])).toBe(
+      "| a | b | c |\n| --- | --- | --- |\n| wide |||\n| tall | 1 | 2 |\n| ^| 3 | 4 |",
+    );
+  });
+
+  it("puts every pinned header row above the delimiter, grown over a header row span", () => {
+    const pinned = docTable(
+      [
+        [{ text: "Group", cols: 2 }, null, "c"],
+        ["a", "b", "d"],
+        ["1", "2", "3"],
+      ],
+      2,
+    );
+    expect(render([pinned])).toBe(
+      "| Group || c |\n| a | b | d |\n| --- | --- | --- |\n| 1 | 2 | 3 |",
+    );
+    const grown = docTable(
+      [
+        [{ text: "h", rows: 2 }, "x"],
+        [null, "y"],
+        ["1", "2"],
+      ],
+      1,
+    );
+    expect(render([grown])).toBe("| h | x |\n| ^| y |\n| --- | --- |\n| 1 | 2 |");
+  });
+
+  it("escapes a literal pipe and a literal trailing caret", () => {
+    expect(render([docTable([["a|b", "2^"]])])).toBe("| a\\|b | 2\\^ |\n| --- | --- |");
+  });
+
+  it("maps every grid position to the head that covers it", () => {
+    const t = docTable([
+      [{ text: "x", rows: 2, cols: 2 }, null, "c"],
+      [null, null, "d"],
+    ]).table!;
+    expect(tableGrid(t)[1][1]).toEqual({ headRow: 0, headCol: 0, rowSpan: 2, colSpan: 2 });
+    expect(tableGrid(t)[1][2]).toEqual({ headRow: 1, headCol: 2, rowSpan: 1, colSpan: 1 });
+  });
+
+  it("round-trips a table with both span kinds through the converter", () => {
+    const md =
+      "| Field | Value || Notes |\n| a | b | c | ^|\n| --- | --- | --- | --- |\n| Caption across ||||\n| State | x \\| y | z | n |\n| ^| q | r^ ... | s |\n| ^| t | u | v\\^ |";
+    const block = parseMarkdown(md).blocks[0];
+    if (block.kind !== "table") throw new Error("no table");
+    // What Docs holds after the write: heads carry spans, covered cells are empty.
+    const table: Element = {
+      table: {
+        tableRows: block.rows.map((row, r) => ({
+          tableRowStyle: r < block.headerRows ? { tableHeader: true } : {},
+          tableCells: row.map((cell) => ({
+            content: [
+              para([`${cell ? cell.paragraphs[0].inline.runs.map((x) => x.text).join("") : ""}\n`]),
+            ],
+            tableCellStyle: { rowSpan: cell?.rowSpan ?? 1, columnSpan: cell?.colSpan ?? 1 },
+          })),
+        })),
+      },
+    };
+    expect(render([table])).toBe(md);
   });
 });

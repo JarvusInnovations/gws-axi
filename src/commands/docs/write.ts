@@ -59,12 +59,16 @@ markdown:
   GitHub-flavored: headings, emphasis, code, links, lists, tasks, quotes,
   tables, rules, images by URL, footnotes — through gws-axi's converter (not
   Google's importer), the one \`docs read\` round-trips.
-  Tables take two extensions no other renderer minds:
+  Tables take these extensions (spans are marked-extended-tables' syntax):
     <!-- cols: 1 3 -->          on the line above a table: column widths as
     <!-- cols: 25% 75% -->      weights or percentages (default: equal), or
     <!-- cols: fit 1 -->        fit — a column sized to its content, the rest shared
     a<br>b, - item<br>- item    inside a cell: line breaks, and bulleted /
                                 numbered / checkbox items (flat lists only)
+    | wide |||                  a cell spanning three columns
+    | ^|                        a cell continuing the one above (same column
+                                and width); \\^ and \\| are literal
+    two rows above | --- |      two header rows
 notes:
   Replaces the content of ONE tab; every other tab is untouched. What cannot be
   represented is written as text and reported under lossy[]. Checked tasks are

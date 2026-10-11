@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AxiError } from "axi-sdk-js";
 import type { docs_v1 } from "googleapis";
-import { cellPlainText, parseEditCellFlags, resolveRow } from "./edit-cell.js";
+import { cellPlainText, mergeAt, parseEditCellFlags, resolveRow } from "./edit-cell.js";
 import { cellFillRequests, parseCellMarkdown } from "./md-to-doc.js";
 
 function codeOf(fn: () => unknown): string {
@@ -131,5 +131,34 @@ describe("cellPlainText and the fill", () => {
       endIndex: 29,
       tabId: "t.0",
     });
+  });
+});
+
+describe("mergeAt", () => {
+  const span = (rowSpan: number, columnSpan: number, text: string): docs_v1.Schema$TableCell => ({
+    ...cell(text),
+    tableCellStyle: { rowSpan, columnSpan },
+  });
+  // Row 2 is a caption across both columns; rows 3–4 share a label cell.
+  const t = table(
+    [cell("Label\n"), cell("Value\n")],
+    [span(1, 2, "Caption\n"), cell("\n")],
+    [span(2, 1, "State\n"), cell("a\n")],
+    [cell("\n"), cell("b\n")],
+  );
+
+  it("names the head of a covered cell, in grid columns", () => {
+    expect(mergeAt(t, 2, 2)).toEqual({ coveredBy: { row: 2, col: 1 } });
+    expect(mergeAt(t, 4, 1)).toEqual({ coveredBy: { row: 3, col: 1 } });
+  });
+
+  it("reports a head's span, and nothing for a plain cell", () => {
+    expect(mergeAt(t, 2, 1)).toEqual({ span: "1x2" });
+    expect(mergeAt(t, 3, 1)).toEqual({ span: "2x1" });
+    expect(mergeAt(t, 4, 2)).toEqual({});
+  });
+
+  it("leaves a row whose first cell is covered without a label of its own", () => {
+    expect(resolveRow(t, "#4")).toEqual({ match: { row: 4, label: "" } });
   });
 });

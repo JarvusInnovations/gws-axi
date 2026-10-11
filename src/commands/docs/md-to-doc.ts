@@ -1,7 +1,8 @@
 import { AxiError } from "axi-sdk-js";
 import { measureText } from "./text-width.js";
 import type { docs_v1 } from "googleapis";
-import { marked, type Token, type Tokens } from "marked";
+import { Marked, marked, type Token, type Tokens } from "marked";
+import { spanTableExtension, type SpanTableToken } from "./span-table.js";
 
 /**
  * Markdown → Docs API requests, for one tab.
@@ -74,12 +75,20 @@ export interface CellParagraph {
 /** A cell holds one or more paragraphs; plain lines separated by `<br>` share one. */
 export interface TableCell {
   paragraphs: CellParagraph[];
+  /** Rows and columns this cell spans when it heads a merge; 1 when omitted. */
+  rowSpan?: number;
+  colSpan?: number;
 }
 
 export interface TableBlock {
   kind: "table";
-  /** rows[0] is the header row. */
-  rows: TableCell[][];
+  /**
+   * Grid-shaped: one entry per column in every row. A position covered by a
+   * merged cell (specs/behaviors/markdown-to-doc.md § Merged cells) is `null`.
+   */
+  rows: Array<Array<TableCell | null>>;
+  /** The first `headerRows` rows are the header: bold, and pinned. */
+  headerRows: number;
   /**
    * Column widths from a `<!-- cols: … -->` hint: `"fit"` sizes a column to
    * its content; a number is that column's fraction of what the fits leave.
@@ -382,7 +391,12 @@ function parseBlocks(
   /** A `<!-- cols: … -->` waiting for its table; anything else in between is refused. */
   let pendingCols: { cols: ColSpec[]; raw: string } | undefined;
   for (const token of tokens) {
-    if (pendingCols && token.type !== "space" && token.type !== "table") {
+    if (
+      pendingCols &&
+      token.type !== "space" &&
+      token.type !== "table" &&
+      token.type !== "spanTable"
+    ) {
       throw new AxiError(
         `\`${pendingCols.raw}\` must be followed by a table, not ${token.type === "paragraph" ? "a paragraph" : `a ${token.type}`}`,
         "VALIDATION_ERROR",
@@ -470,13 +484,29 @@ function parseBlocks(
       case "hr":
         out.push(plainParagraph(textInline(""), { rule: true, list: bctx.list }));
         break;
+      case "spanTable":
       case "table": {
-        const t = token as Tokens.Table;
-        const cell = (c: Tokens.TableCell): TableCell => parseCell(c.text, ctx);
-        const rows = [t.header.map(cell), ...t.rows.map((r) => r.map(cell))];
-        const block: TableBlock = { kind: "table", rows };
+        const t =
+          token.type === "spanTable" ? (token as unknown as SpanTableToken) : gfmGrid(token);
+        if (t.problems.length) {
+          throw new AxiError(`This table can't be written: ${t.problems[0]}`, "VALIDATION_ERROR", [
+            ...t.problems.slice(1),
+            "`| wide |||` spans columns; `| ^|` continues the cell above (same column, same width)",
+            "Nothing was written",
+          ]);
+        }
+        const rows = t.rows.map((r) =>
+          r.map((c) => {
+            if (!c) return null;
+            const cell = parseCell(c.text, ctx);
+            if (c.rowSpan > 1) cell.rowSpan = c.rowSpan;
+            if (c.colSpan > 1) cell.colSpan = c.colSpan;
+            return cell;
+          }),
+        );
+        const block: TableBlock = { kind: "table", rows, headerRows: t.headerRows };
         if (pendingCols) {
-          const columns = Math.max(1, ...rows.map((r) => r.length));
+          const columns = t.columns;
           if (pendingCols.cols.length !== columns) {
             throw new AxiError(
               `\`${pendingCols.raw}\` names ${pendingCols.cols.length} widths for a ${columns}-column table`,
@@ -521,6 +551,27 @@ function parseBlocks(
   }
 }
 
+/**
+ * marked's own GFM table token in the span tokenizer's shape. The span
+ * tokenizer reads every table marked would, so this is a fallback only.
+ */
+function gfmGrid(token: Token): SpanTableToken {
+  const t = token as Tokens.Table;
+  const cell = (c: Tokens.TableCell) => ({ text: c.text, rowSpan: 1, colSpan: 1 });
+  return {
+    type: "spanTable",
+    raw: t.raw,
+    headerRows: 1,
+    columns: t.header.length,
+    rows: [t.header.map(cell), ...t.rows.map((r) => r.map(cell))],
+    problems: [],
+  };
+}
+
+/** marked with the merged-cell table tokenizer — private, so `gmail draft`'s `marked` is unchanged. */
+const lexer = new Marked({ gfm: true });
+lexer.use({ extensions: [spanTableExtension()] });
+
 export interface Parsed {
   blocks: Block[];
   lossy: Lossy[];
@@ -530,7 +581,7 @@ export interface Parsed {
 export function parseMarkdown(markdown: string): Parsed {
   const { source, definitions } = liftFootnotes(markdown.replace(/\r\n?/g, "\n"));
   const ctx: ParseCtx = { lossy: new LossyLedger(), definitions };
-  const tokens = marked.lexer(source, { gfm: true });
+  const tokens = lexer.lexer(source);
   const blocks: Block[] = [];
   parseBlocks(tokens, ctx, { quote: false }, blocks, { next: 0 });
   return { blocks, lossy: ctx.lossy.list() };
@@ -951,7 +1002,8 @@ export function columnWidths(
     let widest = 0;
     block.rows.forEach((row, r) => {
       const cell = row[c];
-      if (!cell) return;
+      // A cell spanning several columns wraps within them and widens none.
+      if (!cell || (cell.colSpan ?? 1) > 1) return;
       for (const p of cell.paragraphs) {
         // One measured line per hard-break segment of the paragraph.
         const segments: Array<Array<{ text: string; bold: boolean }>> = [[]];
@@ -959,7 +1011,10 @@ export function columnWidths(
           const pieces = run.text.split("\u000b");
           pieces.forEach((piece, i) => {
             if (i > 0) segments.push([]);
-            segments[segments.length - 1].push({ text: piece, bold: r === 0 || !!run.style.bold });
+            segments[segments.length - 1].push({
+              text: piece,
+              bold: r < block.headerRows || !!run.style.bold,
+            });
           });
         }
         for (const seg of segments) {
@@ -1056,21 +1111,45 @@ export function phase2Requests(phase1: Phase1, input: Phase2Input): Request[] {
     const block = phase1.tables[t];
     const cells = input.tableCells[t];
     if (!cells) continue;
+    const start = input.tableStarts[t];
+    // Merges first: merging empty cells moves no index (observed), so the
+    // fills below still land where the re-read put them.
+    if (start !== undefined) {
+      block.rows.forEach((row, r) =>
+        row.forEach((cell, c) => {
+          if (!cell || ((cell.rowSpan ?? 1) === 1 && (cell.colSpan ?? 1) === 1)) return;
+          requests.push({
+            mergeTableCells: {
+              tableRange: {
+                tableCellLocation: {
+                  tableStartLocation: { index: start, tabId },
+                  rowIndex: r,
+                  columnIndex: c,
+                },
+                rowSpan: cell.rowSpan ?? 1,
+                columnSpan: cell.colSpan ?? 1,
+              },
+            },
+          });
+        }),
+      );
+    }
     for (let r = block.rows.length - 1; r >= 0; r--) {
       for (let c = block.rows[r].length - 1; c >= 0; c--) {
+        const cell = block.rows[r][c];
         const at = cells[r]?.[c];
-        if (at === undefined) continue;
+        // A covered position is filled by its head, not on its own.
+        if (!cell || at === undefined) continue;
         requests.push(
-          ...cellFillRequests(block.rows[r][c], at, tabId, r === 0 ? { bold: true } : {}),
+          ...cellFillRequests(cell, at, tabId, r < block.headerRows ? { bold: true } : {}),
         );
       }
     }
-    const start = input.tableStarts[t];
-    if (block.rows.length > 1 && start !== undefined) {
+    if (block.rows.length > block.headerRows && start !== undefined) {
       requests.push({
         pinTableHeaderRows: {
           tableStartLocation: { index: start, tabId },
-          pinnedHeaderRowsCount: 1,
+          pinnedHeaderRowsCount: block.headerRows,
         },
       });
     }
