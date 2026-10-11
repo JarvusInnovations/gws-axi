@@ -53,7 +53,8 @@ in the spec: the break would split the list.
   - a rule, a paragraph and a rule give two rules;
   - inside a list item or a quote is refused.
 - [x] Unit, phase 1: the empty paragraph and the shift (insert at its start, delete the
-      newline after), in descending order with a table and an image elsewhere.
+      newline after), with no border; and, with a table directly before it sharing its
+      index, the break emitted before the table.
 - [x] Unit, reader: an empty page-break paragraph, and text followed by a break, each with a
       round trip.
 - [x] Live (scratch Doc, <chris@jarv.us>):
