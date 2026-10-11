@@ -47,7 +47,9 @@ const ALIGN_CELL = String.raw`:?-+(?: *(?:100|[1-9][0-9]?%) *-+)?:?`;
 
 /** The original's table rule: header line(s), the delimiter row, then rows up to a blank line or another block. */
 const TABLE = new RegExp(
-  String.raw`^ *([^\n ].*\|.*\n(?: *[^\s].*\n)*?)` +
+  // Every header line has a pipe. (The original lets later header lines go
+  // without one, so a paragraph that mentions `|` above a `---` became a table.)
+  String.raw`^ *([^\n ].*\|.*\n(?: *[^\s].*\|.*\n)*?)` +
     String.raw` {0,3}(?:\| *)?(${ALIGN_CELL} *(?:\| *${ALIGN_CELL} *)*)(?:\| *)?` +
     String.raw`(?:\n((?:(?! *\n| {0,3}((?:- *){3,}|(?:_ *){3,}|(?:\* *){3,})` +
     String.raw`(?:\n+|$)| {0,3}#{1,6}(?:\s|$)| {0,3}>| {4}[^\n]| {0,3}(?:\`{3,}` +

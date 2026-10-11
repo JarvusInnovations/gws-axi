@@ -161,3 +161,14 @@ describe("drive upload validateFlags", () => {
     }
   });
 });
+
+describe("drive upload --frontmatter", () => {
+  it("parses strip/keep and refuses table, which only gws-axi's converter writes", () => {
+    const flags = parseFlags(["./a.md", "--convert", "--frontmatter", "keep"]);
+    expect(flags.frontmatter).toBe("keep");
+    expect(() => validateFlags(flags)).not.toThrow();
+    expect(() =>
+      validateFlags(parseFlags(["./a.md", "--convert", "--frontmatter", "table"])),
+    ).toThrow(/strip or keep here/);
+  });
+});

@@ -10,6 +10,7 @@ import { joinBlocks, renderHelp, renderObject } from "../../output/index.js";
 import { detectMimeType, googleConversionTarget } from "../../util/mime-types.js";
 import { listDocumentTabs, type TabSummary } from "../docs/tabs.js";
 import { listSpreadsheetSheets } from "../sheets/tabs.js";
+import { splitFrontmatter } from "../docs/frontmatter.js";
 
 const GOOGLE_DOC_MIME = "application/vnd.google-apps.document";
 const GOOGLE_SHEET_MIME = "application/vnd.google-apps.spreadsheet";
@@ -51,7 +52,7 @@ export const UPLOAD_HELP = `usage: gws-axi drive upload <source> [flags]
 args[1]:
   <source>             Content source — exactly one of: a local file path
                        (default), \`-\` to read from stdin, or --content below
-flags[7]:
+flags[8]:
   --content <string>   Inline upload body (alternative to a path or stdin)
   --parent <folder-id> Destination folder ID (default: My Drive root).
                        Cannot be combined with --update.
@@ -69,6 +70,8 @@ flags[7]:
   --replace-all-tabs   Required to --update a Doc with 2+ tabs or a Sheet with
                        2+ sheets: the import collapses it to a single tab /
                        sheet, destroying the others.
+  --frontmatter <mode> Markdown → Doc only: strip (default) or keep a leading
+                       YAML frontmatter block
   --account <email>    REQUIRED when 2+ accounts are authenticated (or set GWS_AXI_ACCOUNT)
 examples:
   gws-axi drive upload ./report.pdf
@@ -101,6 +104,8 @@ export interface ParsedFlags {
   convert: boolean;
   update: string | undefined;
   replaceAllTabs: boolean;
+  /** Markdown → Doc only: a leading YAML frontmatter block is stripped unless `keep`. */
+  frontmatter?: "strip" | "keep";
 }
 
 export function parseFlags(args: string[]): ParsedFlags {
@@ -114,6 +119,7 @@ export function parseFlags(args: string[]): ParsedFlags {
     convert: false,
     update: undefined,
     replaceAllTabs: false,
+    frontmatter: undefined,
   };
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -145,6 +151,10 @@ export function parseFlags(args: string[]): ParsedFlags {
       case "--replace-all-tabs":
         flags.replaceAllTabs = true;
         break;
+      case "--frontmatter":
+        flags.frontmatter = next as ParsedFlags["frontmatter"];
+        i++;
+        break;
       case "-":
         // `-` as the positional means read the body from stdin.
         flags.stdin = true;
@@ -167,6 +177,19 @@ const UPLOAD_FIELDS = "id,name,mimeType,size,parents,webViewLink,headRevisionId"
  * spec enumerates, so it's unit-testable without touching disk or Google.
  */
 export function validateFlags(flags: ParsedFlags): void {
+  if (
+    flags.frontmatter !== undefined &&
+    flags.frontmatter !== "strip" &&
+    flags.frontmatter !== "keep"
+  ) {
+    throw new AxiError(
+      `--frontmatter takes strip or keep here, not ${JSON.stringify(flags.frontmatter)}`,
+      "VALIDATION_ERROR",
+      [
+        "A frontmatter table is written by gws-axi's converter: `gws-axi docs create --title <title> <file> --frontmatter table`",
+      ],
+    );
+  }
   const sourceCount =
     (flags.localPath !== undefined ? 1 : 0) +
     (flags.content !== undefined ? 1 : 0) +
@@ -277,8 +300,8 @@ export async function driveUploadCommand(account: string, args: string[]): Promi
   // media implicitly when the target is already native.
   let collapsedTabs = 0;
   let collapsedNoun = "tabs";
+  let existingMime = "";
   if (flags.update) {
-    let existingMime: string;
     try {
       const res = await api.files.get({
         fileId: flags.update,
@@ -354,6 +377,26 @@ export async function driveUploadCommand(account: string, args: string[]): Promi
         collapsedNoun = containerKind.plural;
       }
     }
+  }
+
+  // Markdown becoming a Doc: a leading YAML frontmatter block is metadata, not
+  // content (specs/behaviors/markdown-to-doc.md § Frontmatter).
+  const markdownToDoc =
+    sourceMime === "text/markdown" &&
+    (targetMime === GOOGLE_DOC_MIME || existingMime === GOOGLE_DOC_MIME);
+  if (flags.frontmatter !== undefined && !markdownToDoc) {
+    throw new AxiError(
+      "--frontmatter applies only when Markdown becomes a Google Doc",
+      "VALIDATION_ERROR",
+      ["Pass --convert with a .md source (or --update a Doc), or drop --frontmatter"],
+    );
+  }
+  let frontmatterNote: string | undefined;
+  if (markdownToDoc && flags.frontmatter !== "keep") {
+    const text = typeof body === "string" ? body : await streamText(body);
+    const fm = splitFrontmatter(text);
+    body = fm ? fm.body : text;
+    if (fm) frontmatterNote = `stripped (${fm.keys} key${fm.keys === 1 ? "" : "s"})`;
   }
 
   const media = {
@@ -432,6 +475,7 @@ export async function driveUploadCommand(account: string, args: string[]): Promi
   const blocks: string[] = [];
   blocks.push(renderObject({ action: updating ? "updated" : "created", account }));
   blocks.push(renderObject({ file: details }));
+  if (frontmatterNote) blocks.push(renderObject({ frontmatter: frontmatterNote }));
 
   const suggestions: string[] = [];
   const id = file.id ?? "";
@@ -471,4 +515,10 @@ export async function driveUploadCommand(account: string, args: string[]): Promi
 
   blocks.push(renderHelp(suggestions));
   return joinBlocks(...blocks);
+}
+
+async function streamText(stream: Readable): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(Buffer.from(chunk as Buffer));
+  return Buffer.concat(chunks).toString("utf8");
 }

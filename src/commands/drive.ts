@@ -127,7 +127,7 @@ export const SUBCOMMANDS: DriveSubcommand[] = [
     name: "upload",
     mutation: true,
     flags: {
-      value: ["--content", "--parent", "--name", "--mime", "--update"],
+      value: ["--content", "--parent", "--name", "--mime", "--update", "--frontmatter"],
       boolean: ["--convert", "--replace-all-tabs"],
     },
     help: UPLOAD_HELP,
