@@ -26,8 +26,7 @@ pr: 96
 
 ## Notes
 
-The 11 failing checks are the known re-auths: admin@save-the-academy.org and
-savetheacademy1812@gmail.com lack the Chat scopes and `directory.readonly`;
+The 11 failing checks are the known re-auths: two secondary accounts lack the Chat scopes and `directory.readonly`;
 themightychris@gmail.com lacks `directory.readonly`.
 
 ## Follow-ups

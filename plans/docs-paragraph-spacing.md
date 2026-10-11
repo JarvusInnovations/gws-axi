@@ -12,7 +12,7 @@ pr: 121
 ## Scope
 
 A Doc written by `docs create` into an account whose template gives `NORMAL_TEXT` no
-spacing had no paragraph spacing anywhere (the Field Guide). Tabs gws-axi creates (`docs
+spacing had no paragraph spacing anywhere (an owner's Doc in a secondary account). Tabs gws-axi creates (`docs
 create`, `--new-tab`) now get Docs' own 10pt-after when their Normal text has none;
 `docs tabs update --paragraph-spacing <pt>` fixes existing tabs; a `--tab` write into a
 0/0 tab says so.
@@ -46,7 +46,7 @@ tabs without being asked.
       tab reads 10pt after and the response says so; `docs write --tab` into the 0/0 tab →
       pointer line, style untouched; `docs tabs update --paragraph-spacing 10` → 10, undo
       line restores 0, re-run `unchanged`.
-- [ ] The Field Guide fixed with that command (owner's Doc, owner's call — it is in another
+- [ ] The reporting Doc fixed with that command (owner's Doc, owner's call — it is in another
       account; the command is in the PR).
 
 ## Risks / unknowns
@@ -57,7 +57,7 @@ tabs without being asked.
 
 ## Notes
 
-- The Field Guide's tab was Arial 11 with 0/0 — a different account's template than the
+- The reporting Doc's tab was Arial 11 with 0/0 — a different account's template than the
   owner's workspace (Droid Sans, 10pt below), so `docs create` there wrote a Doc with no
   paragraph spacing at all, including after the numbered list. The converter inherited an
   empty style faithfully; the principle (space is a paragraph property) was kept and the

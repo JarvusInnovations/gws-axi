@@ -52,5 +52,5 @@ instructions.
 
 ## Follow-ups
 
-- Tracked as: admin@save-the-academy.org and savetheacademy1812@gmail.com still need re-auth
+- Tracked as: two secondary accounts still need re-auth
   for the Chat scopes and `directory.readonly` (the remaining doctor failures).
