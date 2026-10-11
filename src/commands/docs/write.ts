@@ -82,6 +82,7 @@ markdown:
     | ^|                        a cell continuing the one above (same column
                                 and width); \\^ and \\| are literal
     two rows above | --- |      two header rows
+  Two rules in a row (---, a blank line, ---) are a page break; one is a rule.
 notes:
   Replaces the content of ONE tab; every other tab is untouched. What cannot be
   represented is written as text and reported under lossy[]. Checked tasks are
