@@ -304,6 +304,12 @@ export interface TabTarget extends TabInfo {
   /** The tab's NORMAL_TEXT space-above / space-below, in points; the latter is the gap under a table. */
   spaceAbovePt?: number;
   spaceBelowPt?: number;
+  /**
+   * Whether the NORMAL_TEXT style was in the read. The API omits a zero
+   * magnitude, so a missing spacing means 0 only when the style was read;
+   * `false` means unknown, and the tab is never restyled on a guess.
+   */
+  normalStyleRead?: boolean;
   /** Page width minus side margins, in points — what a table's `cols` hint divides. */
   contentWidthPt?: number;
   /** The tab's NORMAL_TEXT font size and family — what a `fit` column is measured at. */
@@ -331,6 +337,7 @@ function tabTargets(tabs: docs_v1.Schema$Tab[] | undefined): TabTarget[] {
   const ends = new Map<string, number>();
   const gaps = new Map<string, number>();
   const aboves = new Map<string, number>();
+  const styled = new Set<string>();
   const widths = new Map<string, number>();
   const fonts = new Map<string, { size?: number; family?: string }>();
   const walk = (list: docs_v1.Schema$Tab[] | undefined) => {
@@ -341,6 +348,7 @@ function tabTargets(tabs: docs_v1.Schema$Tab[] | undefined): TabTarget[] {
       const normal = tab.documentTab?.namedStyles?.styles?.find(
         (s) => s.namedStyleType === "NORMAL_TEXT",
       );
+      if (normal) styled.add(id);
       const below = normal?.paragraphStyle?.spaceBelow?.magnitude;
       if (typeof below === "number") gaps.set(id, below);
       const above = normal?.paragraphStyle?.spaceAbove?.magnitude;
@@ -364,6 +372,7 @@ function tabTargets(tabs: docs_v1.Schema$Tab[] | undefined): TabTarget[] {
     end: ends.get(info.id) ?? 2,
     spaceAbovePt: aboves.get(info.id),
     spaceBelowPt: gaps.get(info.id),
+    normalStyleRead: styled.has(info.id),
     contentWidthPt: widths.get(info.id),
     bodyFontPt: fonts.get(info.id)?.size,
     bodyFontFamily: fonts.get(info.id)?.family,
@@ -555,17 +564,35 @@ interface WriteResult {
   phase1: Phase1;
   lossy: Lossy[];
   frontmatter?: string;
+  /** Normal text had no paragraph spacing and was given Docs' default in this write. */
+  spacingSet: boolean;
 }
 
-async function writeTab(
-  api: docs_v1.Docs,
-  account: string,
-  state: DocState,
+/**
+ * The first batch of a write into one tab: the Normal-text spacing fix when the
+ * tab has none (specs/behaviors/markdown-to-doc.md § Spacing — every write, in
+ * the same batch so a failure leaves the style alone), clearing the tab for a
+ * replace, then the converter's phase 1. Pure.
+ */
+export function tabWriteRequests(
+  parsed: Parsed,
   tab: TabTarget,
-  prepared: Prepared,
   mode: "replace" | "append",
-): Promise<WriteResult> {
-  const { parsed } = prepared;
+): {
+  requests: docs_v1.Schema$Request[];
+  phase1: Phase1;
+  placement: {
+    tabId: string;
+    base: number;
+    emptyTab: boolean;
+    atTop: boolean;
+    tableGapPt?: number;
+  };
+  spacingSet: boolean;
+} {
+  const spacingSet = needsParagraphSpacing(tab);
+  // The gap under a table follows Normal text's space-below, so set it first.
+  if (spacingSet) tab.spaceBelowPt = DEFAULT_PARAGRAPH_SPACING_PT;
   const emptyTab = tab.end <= 2;
   const replacing = mode === "replace" && !emptyTab;
   const placement = {
@@ -577,23 +604,37 @@ async function writeTab(
   };
   const phase1 = phase1Requests(parsed.blocks, placement);
   const requests: docs_v1.Schema$Request[] = [];
+  if (spacingSet) requests.push(paragraphSpacingRequest(tab.id, DEFAULT_PARAGRAPH_SPACING_PT));
   if (replacing) {
     requests.push({
       deleteContentRange: { range: { startIndex: 1, endIndex: tab.end - 1, tabId: tab.id } },
     });
   }
   requests.push(...phase1.requests);
+  return { requests, phase1, placement, spacingSet };
+}
+
+async function writeTab(
+  api: docs_v1.Docs,
+  account: string,
+  state: DocState,
+  tab: TabTarget,
+  prepared: Prepared,
+  mode: "replace" | "append",
+): Promise<WriteResult> {
+  const { parsed } = prepared;
+  const { requests, phase1, placement, spacingSet } = tabWriteRequests(parsed, tab, mode);
+  const done = {
+    state,
+    tab,
+    phase1,
+    lossy: parsed.lossy,
+    frontmatter: prepared.frontmatter,
+    spacingSet,
+  };
 
   let revisionId = state.revisionId;
-  if (requests.length === 0)
-    return {
-      state,
-      tab,
-      revisionId,
-      phase1,
-      lossy: parsed.lossy,
-      frontmatter: prepared.frontmatter,
-    };
+  if (requests.length === 0) return { ...done, revisionId };
 
   const reply = await batch(api, account, state.id, requests, revisionId);
   revisionId = reply.writeControl?.requiredRevisionId ?? revisionId;
@@ -632,7 +673,7 @@ async function writeTab(
       );
     }
   }
-  return { state, tab, revisionId, phase1, lossy: parsed.lossy, frontmatter: prepared.frontmatter };
+  return { ...done, revisionId };
 }
 
 function findTab(
@@ -655,8 +696,6 @@ function render(
     previousRevision?: string;
     newTab?: boolean;
     tabs?: TabInfo[];
-    /** Normal text got Docs' default spacing because the template had none. */
-    spacingSet?: boolean;
   },
 ): string {
   const { state, tab, phase1, lossy } = result;
@@ -720,13 +759,9 @@ function render(
   if (tables) help.push(tables);
   const fitNote = fitFontHelp(phase1.tables, (tab as TabTarget).bodyFontFamily);
   if (fitNote) help.push(fitNote);
-  if (extra.spacingSet) {
+  if (result.spacingSet) {
     help.push(
-      `This tab's Normal text had no paragraph spacing (the Doc template's default); it was set to ${DEFAULT_PARAGRAPH_SPACING_PT}pt after, Docs' own default`,
-    );
-  } else if (needsParagraphSpacing(tab as TabTarget)) {
-    help.push(
-      `This tab's Normal text has no paragraph spacing, so paragraphs run together: \`gws-axi docs tabs update ${state.id} ${tab.id} --paragraph-spacing ${DEFAULT_PARAGRAPH_SPACING_PT} --account ${account}\` sets Docs' default`,
+      `This tab's Normal text had no paragraph spacing (the Doc template's), so it was set to ${DEFAULT_PARAGRAPH_SPACING_PT}pt after, Docs' own default. Undo: \`gws-axi docs tabs update ${state.id} ${tab.id} --paragraph-spacing 0 --account ${account}\``,
     );
   }
   help.push(`Open in browser: https://docs.google.com/document/d/${state.id}/edit`);
@@ -753,7 +788,9 @@ export const DEFAULT_PARAGRAPH_SPACING_PT = 10;
 export function needsParagraphSpacing(tab: {
   spaceAbovePt?: number;
   spaceBelowPt?: number;
+  normalStyleRead?: boolean;
 }): boolean {
+  if (tab.normalStyleRead === false) return false;
   return (tab.spaceAbovePt ?? 0) === 0 && (tab.spaceBelowPt ?? 0) === 0;
 }
 
@@ -769,31 +806,6 @@ export function paragraphSpacingRequest(tabId: string, pt: number): docs_v1.Sche
       fields: "namedStyleType,paragraphStyle.spaceBelow",
     },
   };
-}
-
-/**
- * Guarantee paragraph spacing on a tab gws-axi created
- * (specs/behaviors/markdown-to-doc.md § Spacing): when the account's template
- * gave Normal text no spacing, set Docs' default before writing. Returns
- * whether it did, for the response.
- */
-async function ensureParagraphSpacing(
-  api: docs_v1.Docs,
-  account: string,
-  state: DocState,
-  tab: TabTarget,
-): Promise<boolean> {
-  if (!needsParagraphSpacing(tab)) return false;
-  const reply = await batch(
-    api,
-    account,
-    state.id,
-    [paragraphSpacingRequest(tab.id, DEFAULT_PARAGRAPH_SPACING_PT)],
-    state.revisionId,
-  );
-  state.revisionId = reply.writeControl?.requiredRevisionId ?? state.revisionId;
-  tab.spaceBelowPt = DEFAULT_PARAGRAPH_SPACING_PT;
-  return true;
 }
 
 /** Fonts whose metrics the fit measurement actually has (Arial is metric-compatible with Helvetica). */
@@ -822,7 +834,6 @@ export async function docsWriteCommand(account: string, args: string[]): Promise
 
   let tab: TabTarget;
   let tabs: TabInfo[] | undefined;
-  let spacingSet = false;
   if (flags.newTab) {
     // Convert first: anything the converter refuses fails with no tab added.
     phase1Requests(prepared.parsed.blocks, {
@@ -855,6 +866,7 @@ export async function docsWriteCommand(account: string, args: string[]): Promise
       parent: props.parentTabId ?? "",
       emoji: props.iconEmoji ?? "",
       end: 2,
+      normalStyleRead: false, // until the re-read below
     };
     state.revisionId = reply.writeControl?.requiredRevisionId ?? state.revisionId;
     // The new tab's styles come from the Doc template, not the reply.
@@ -866,8 +878,8 @@ export async function docsWriteCommand(account: string, args: string[]): Promise
       tab.spaceBelowPt = fresh.spaceBelowPt;
       tab.bodyFontPt = fresh.bodyFontPt;
       tab.bodyFontFamily = fresh.bodyFontFamily;
+      tab.normalStyleRead = fresh.normalStyleRead;
     }
-    spacingSet = await ensureParagraphSpacing(api, account, state, tab);
   } else {
     tab = chooseTab(state, flags.tab, "write", account);
   }
@@ -900,7 +912,6 @@ export async function docsWriteCommand(account: string, args: string[]): Promise
     previousRevision,
     newTab: !!flags.newTab,
     tabs,
-    spacingSet,
   });
 }
 
@@ -958,7 +969,6 @@ export async function docsCreateCommand(account: string, args: string[]): Promis
   const api = await docsClient(account);
   const state = await readState(api, account, documentId);
   const tab = state.tabs[0] ?? { id: "", title: "", index: 0, parent: "", emoji: "", end: 2 };
-  const spacingSet = await ensureParagraphSpacing(api, account, state, tab);
   const result = await writeTab(api, account, state, tab, prepared, "replace");
-  return render("created", account, result, { spacingSet });
+  return render("created", account, result, {});
 }
