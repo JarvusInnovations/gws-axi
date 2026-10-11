@@ -1,8 +1,9 @@
 ---
-status: in-progress
+status: done
 depends: [docs-page-break, docs-spacing-every-write]
 specs:
   - specs/behaviors/markdown-to-doc.md
+pr: 133
 ---
 
 # Plan: No gap above a page's first paragraph or a heading under a heading
@@ -41,15 +42,15 @@ The existing under-a-table rule keeps priority.
 
 ## Validation
 
-- [ ] `bun run build`, `lint`, `format:check`, `test` pass.
-- [ ] Unit:
+- [x] `bun run build`, `lint`, `format:check`, `test` pass.
+- [x] Unit:
   - `# A\n## B` → B has `spaceAbove` 0;
   - `# A\npara\n## B` → B has none set;
   - a double rule then `# T` → T has 0;
   - a table, then a page break, then `# T` → T has 0 and the page-break paragraph keeps the
     table gap;
   - `# A`, then a table, then `## B` → B keeps its own space-above (the table rule).
-- [ ] Live (scratch Doc, <chris@jarv.us>): a table, a page break, `# Title`, `## Section`,
+- [x] Live (scratch Doc, <chris@jarv.us>): a table, a page break, `# Title`, `## Section`,
       then text. The title and the section read `spaceAbove` 0.
 
 ## Risks / unknowns
@@ -58,8 +59,16 @@ The existing under-a-table rule keeps priority.
 
 ## Notes
 
-(populated at closeout)
+- Live, 2026-10-11 (scratch Doc, <chris@jarv.us>, trashed): a table, a page break,
+  `# Title`, `## Section`, text, `## Next`, text. The page-break paragraph took the table gap
+  (10pt). The title and the section read `spaceAbove {unit: PT}`, which is 0, because the
+  API omits a zero magnitude. `## Next`, after text, inherits its style's space-above.
+- **The earlier page-break spec was wrong about the editor.** A PDF export drops
+  space-above at a page's top, and the editor does not. The AI Use Policy Doc showed the
+  title's 24pt gap at the top of page 2. The spec's upstream row now records both.
+- An existing test expected `### Three` directly under `# One` to keep its gap. It was
+  updated, because the new rule removes that gap.
 
 ## Follow-ups
 
-(populated at closeout)
+- None.
