@@ -185,8 +185,8 @@ hard division, which is what was meant.
 - **In the Doc** the page break is a paragraph of its own, holding only the break, in
   `NORMAL_TEXT` with no bullet. The converter writes an empty paragraph there, inserts the
   break at its start, and deletes the newline the insert adds, so no empty paragraph is left
-  over (§ Spacing is a paragraph property). Docs already drops a paragraph's space above it
-  at the top of a page, so a heading that opens the next page starts flush.
+  over (§ Spacing is a paragraph property). The paragraph that opens the next page gets no
+  space above it (§ Spacing, *no gap at the top*).
 - **Not inside a list item or a quote.** The two rules would have to be indented under the
   item, and the break would split the list or quote. `VALIDATION_ERROR` before any write,
   naming where it is. A table cell cannot hold a rule.
@@ -234,11 +234,17 @@ one that the API created. Space between blocks comes from the tab's named styles
 default is `NORMAL_TEXT` with 10pt below), and from an explicit `spaceAbove`/`spaceBelow` on
 the one paragraph where a structure interrupts that rhythm:
 
-- **No gap at the top.** The first paragraph written at the start of a tab has no space above
-  it, whatever its style. Docs' heading styles carry space-above, so a Doc that opens with a
-  heading — as most written from Markdown do — otherwise starts with a blank gap that has to
-  be removed by hand every time. Google's importer leaves that gap; this converter does not. A
-  paragraph appended below existing content keeps its style's normal spacing.
+- **No gap at the top.** The first paragraph written at the start of a tab, and the first
+  after a page break, has no space above it, whatever its style. Docs' heading styles carry
+  space-above, so a Doc or page that opens with a heading (as most written from Markdown do)
+  otherwise starts with a blank gap that has to be removed by hand every time. The editor
+  shows that gap at the top of a page, even though a PDF export drops it. Google's importer
+  leaves the gap; this converter does not. A paragraph appended below existing content keeps
+  its style's normal spacing.
+- **No stacked gap between headings.** A heading directly after another heading (a title
+  then its first section) has no space above it. The space between them is the first
+  heading's own space below. Otherwise the second heading's space-above (24pt in common
+  templates) opens a gap between two lines that belong together.
 - **Nothing before a table.** `insertTable` splits off an empty paragraph above the table; the
   converter removes it by deleting the newline that ends the preceding paragraph, which keeps
   that paragraph's style. Where it cannot — a table that opens a tab, where the paragraph
@@ -324,7 +330,7 @@ nothing is left behind unmentioned.
 | `mergeTableCells` over empty cells leaves the head with one empty paragraph and moves no index; text inserted into the head afterwards lands in the merged cell | **Observed 2026-10-11**, in separate batches and then in the one fill batch the converter sends |
 | `pinTableHeaderRows` marks each pinned row `tableRowStyle.tableHeader: true`; `tableStyle` carries no pinned count | **Observed 2026-10-11** |
 | `insertPageBreak` at a paragraph's start inserts a new paragraph `[pageBreak, "\n"]` that inherits the split paragraph's named style and bullet. Inserted at the start of an empty paragraph and followed by deleting the newline after the break, it leaves one `[pageBreak, "\n"]` paragraph with that paragraph's style. Inserted before a paragraph's own newline, it leaves an extra empty paragraph behind | **Observed 2026-10-11** |
-| In a PDF export, a `HEADING_1` that opens a page after a page break sits at the same height as the first line of page 1: space above is dropped at the top of a page | **Observed 2026-10-11** |
+| In a PDF export, a `HEADING_1` that opens a page after a page break sits at the same height as the first line of page 1: space above is dropped at the top of a page. **The editor does show it**: a title after a page break opened page 2 with its 24pt gap | **Observed 2026-10-11** (PDF; the editor from the owner's screenshot) |
 | `batchUpdate` is atomic: all requests apply or none | Documented |
 | `writeControl.requiredRevisionId` refuses a request against a stale revision with a 400 whose message says the id "does not match the latest" | **Observed 2026-10-02** |
 | A vertical tab in `insertText` is accepted and stored as a hard line break; Google's exporter renders it as two trailing spaces and a newline | Observed |
