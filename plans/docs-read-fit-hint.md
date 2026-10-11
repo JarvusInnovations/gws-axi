@@ -1,9 +1,10 @@
 ---
-status: in-progress
+status: done
 depends: [docs-table-fit, docs-table-spans]
 specs:
   - specs/behaviors/markdown-to-doc.md
   - specs/commands/docs-read.md
+pr: 128
 ---
 
 # Plan: `fit` survives a read → edit → write
@@ -44,17 +45,17 @@ Re-fitting on read is a measurement, and a false match is harmless.
 
 ## Validation
 
-- [ ] `bun run build`, `lint`, `format:check`, `test` pass.
-- [ ] Unit:
+- [x] `bun run build`, `lint`, `format:check`, `test` pass.
+- [x] Unit:
   - a 2-column table at `fit` width + rest → `fit 1`;
   - two fit columns of equal width → `fit fit`;
   - fit + two unequal → `fit 30% 70%`;
   - a column 2pt off → percentages;
   - a bold header row, a list item and a 12pt body font are measured as the writer does;
   - `fitWidth` matches `columnWidths` for every `fit` column.
-- [ ] Round trip: Markdown with `<!-- cols: fit 1 -->` → requests → simulated Doc (widths
+- [x] Round trip: Markdown with `<!-- cols: fit 1 -->` → requests → simulated Doc (widths
       from `columnWidths`) → `docs read` → the same hint.
-- [ ] Live (scratch Doc, <chris@jarv.us>):
+- [x] Live (scratch Doc, <chris@jarv.us>):
   - write a `fit 1` table, then read it back: the hint is `fit 1`;
   - append a longer label and re-write the read output: the column widens to fit it;
   - resize a column by hand (`updateTableColumnProperties` from the probe), then read: a
@@ -70,8 +71,18 @@ Re-fitting on read is a measurement, and a false match is harmless.
 
 ## Notes
 
-(populated at closeout)
+- Live, 2026-10-11, scratch Doc `1KlHltpeRGOwx8CMrhzoA5fDxb0IT7o-VauN64BoNTWw`
+  (<chris@jarv.us>), trashed:
+  - `fit 1` written (57pt, from "Timeline") read back as `fit 1`;
+  - with a `**Generated**` row added to the read output and written back, the column became
+    70pt, exactly the width the Field Guide's wrapping label needed;
+  - resized to 90pt by hand, it read back as `18% 82%`.
+- The Field Guide itself was left to its generator, as the owner asked. Its next pass, with
+  `fit` in the hint, gets 70pt.
+- The test simulator has to give a cell's list paragraphs their bullets. Without them the
+  reader renders no `- ` marker and the re-parse measures no indent. A failing test caught
+  this, and the reader was right.
 
 ## Follow-ups
 
-(populated at closeout)
+- None. Storing the intent would need a place in the Doc, which does not exist.
