@@ -72,7 +72,9 @@ on both commands.
   - an unknown key refused with the list.
 - [x] Unit, writer: `headerRows: 0` is not pinned and not bold; flag validation
       (`--frontmatter-keys` without `table`; a bad mode).
-- [x] Unit, upload: `--frontmatter` refused on a non-Markdown or non-converting upload.
+- [x] Upload: `--frontmatter table` refused (unit). A non-Markdown upload (`a.txt`) and a
+      non-converting one (`a.md` without `--convert`) are refused before uploading; that
+      check is in the command path, so it was verified live (exit 2, nothing uploaded).
 - [x] Live (scratch Doc, <chris@jarv.us>):
   - `docs create` from a file with frontmatter: no YAML in the Doc, and the response says
     `stripped (N keys)`;
