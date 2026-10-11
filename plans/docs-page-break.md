@@ -1,10 +1,11 @@
 ---
-status: in-progress
+status: done
 depends: [docs-frontmatter]
 specs:
   - specs/behaviors/markdown-to-doc.md
   - specs/commands/docs-read.md
 issues: [126]
+pr: 130
 ---
 
 # Plan: Page breaks from a double rule
@@ -44,18 +45,18 @@ in the spec: the break would split the list.
 
 ## Validation
 
-- [ ] `bun run build`, `lint`, `format:check`, `test` pass.
-- [ ] Unit, parser:
+- [x] `bun run build`, `lint`, `format:check`, `test` pass.
+- [x] Unit, parser:
   - `---\n\n---` gives one page break;
   - `***` / `___` mixes, and three rules, give one page break;
   - one rule stays a rule;
   - a rule, a paragraph and a rule give two rules;
   - inside a list item or a quote is refused.
-- [ ] Unit, phase 1: the empty paragraph and the shift (insert at its start, delete the
+- [x] Unit, phase 1: the empty paragraph and the shift (insert at its start, delete the
       newline after), in descending order with a table and an image elsewhere.
-- [ ] Unit, reader: an empty page-break paragraph, and text followed by a break, each with a
+- [x] Unit, reader: an empty page-break paragraph, and text followed by a break, each with a
       round trip.
-- [ ] Live (scratch Doc, <chris@jarv.us>):
+- [x] Live (scratch Doc, <chris@jarv.us>):
   - a metadata table, a double rule and `# Title`: the tab reads back with the double rule,
     one `[pageBreak]` paragraph and no empty paragraph;
   - a PDF export puts the title at the top of page 2.
@@ -67,8 +68,19 @@ in the spec: the break would split the list.
 
 ## Notes
 
-(populated at closeout)
+- Live, 2026-10-11 (<chris@jarv.us>, trashed):
+  - a `fit` metadata table, a double rule, `# Document title`, a body paragraph, a single
+    rule and a line read back identical to the source;
+  - the Doc held one `[pageBreak]` paragraph after the table and the bordered empty
+    paragraph for the single rule, and no other empty paragraph;
+  - in the PDF the title is the first line of page 2 (y = 71, the same as page 1's first
+    line).
+- **The reader dropped page breaks above tables.** Its skip for "an empty paragraph directly
+  above a table" (the insertion stray) matched a page-break paragraph, which has no text.
+  Fixed in the same commit, with a test.
+- The issue said the API refuses a page break in a list item; it doesn't. The refusal is
+  kept, for the reason the spec gives.
 
 ## Follow-ups
 
-(populated at closeout)
+- None.
