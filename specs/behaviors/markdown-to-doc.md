@@ -45,6 +45,8 @@ the same Markdown, after normalization:
   form it was written in, except that a column still exactly as wide as `fit` makes it for its
   current content reads back as `fit` (§ Fitted columns). A table with evenly distributed
   columns reads back with no hint.
+- A page break reads back as two rules with a blank line between them. Two rules in a row
+  written for any other reason are therefore a page break after a round trip.
 - Every list item is on its own line, indented two spaces per level.
 - Trailing whitespace on a line and runs of more than one blank line are collapsed.
 
@@ -77,6 +79,7 @@ at once.
 | `fit` in a `cols` hint (`<!-- cols: fit 1 -->`) | That column sized to its widest line (§ Fitted columns); the other columns share what is left in their proportions | ✅ while the column is still the width `fit` gives its content; otherwise as a percentage | The fit is computed at write time from measured text, not by Docs; a column a human later lengthens does not grow until the table is written again. All-`fit` makes a table narrower than the page |
 | `- item<br>- item` (or `1.`, `- [ ]`) inside a cell | One bulleted paragraph per item in the cell, with the list preset of the marker; a non-item line before or after the items is its own paragraph | ✅ | Flat lists only: the API's nesting-by-leading-tab does not take inside a cell, so an indented item is written at level 0 and disclosed. Images and footnotes in a cell are still written as text |
 | `---` | An empty paragraph with a bottom border | ✅ | Google's exporter drops it. There is no API request that inserts Docs' own horizontal rule |
+| Two or more rules (`---`, `***`, `___`) with only blank lines between them | A page break (`insertPageBreak`), in a paragraph of its own (§ Page breaks) | ✅ as `---`, a blank line, `---` | Markdown has no page break; two rules render everywhere else as a hard division, never as stray text. A single rule stays a rule |
 | `![alt](https://…)` | Inline image fetched by Google from the URL | ✅ as `[image]` (alt can't be written; an image that has alt reads back as `[image: alt]`) | Only `http(s)` URLs; a local path or `data:` URL is refused (`IMAGE_NOT_FETCHABLE`). A URL Google cannot fetch fails the write with the same code. The API's insert takes no alt text; a non-empty `alt` is disclosed as dropped |
 | `[^1]` and its definition | A Docs footnote | ✅ | `docs read` renders the definitions at the end, numbered in citation order |
 | Inline HTML | Written as literal text | ✅ as text | Disclosed |
@@ -170,6 +173,25 @@ as GFM requires), extended down to the bottom of any row span that starts in it.
 
 **Widths.** Columns are counted on the grid, and a spanning cell still occupies its
 columns, so a `cols` hint names one width per grid column.
+
+### Page breaks
+
+Markdown has no page-break construct, and the attribute-list syntaxes (`--- {.pagebreak}`)
+come through most renderers as literal text. So **two or more consecutive thematic breaks,
+separated only by blank lines, are one page break.** Elsewhere they render as two rules, a
+hard division, which is what was meant.
+
+- **One rule is a rule.** Three or more consecutive rules are still one page break.
+- **In the Doc** the page break is a paragraph of its own, holding only the break, in
+  `NORMAL_TEXT` with no bullet. The converter writes an empty paragraph there, inserts the
+  break at its start, and deletes the newline the insert adds, so no empty paragraph is left
+  over (§ Spacing is a paragraph property). Docs already drops a paragraph's space above it
+  at the top of a page, so a heading that opens the next page starts flush.
+- **Not inside a list item or a quote.** The two rules would have to be indented under the
+  item, and the break would split the list or quote. `VALIDATION_ERROR` before any write,
+  naming where it is. A table cell cannot hold a rule.
+- **Read back.** A paragraph that holds a page break is rendered as its text, if any,
+  followed by `---`, a blank line and `---`.
 
 ### Frontmatter
 
@@ -294,6 +316,8 @@ nothing is left behind unmentioned.
 | `mergeTableCells` over filled cells concatenates them into the head cell, one paragraph per merged cell. The covered cells stay in `tableRows`, each an empty one-paragraph cell whose `tableCellStyle` reads `rowSpan: 1, columnSpan: 1`; only the head carries the spans | **Observed 2026-10-11** |
 | `mergeTableCells` over empty cells leaves the head with one empty paragraph and moves no index; text inserted into the head afterwards lands in the merged cell | **Observed 2026-10-11**, in separate batches and then in the one fill batch the converter sends |
 | `pinTableHeaderRows` marks each pinned row `tableRowStyle.tableHeader: true`; `tableStyle` carries no pinned count | **Observed 2026-10-11** |
+| `insertPageBreak` at a paragraph's start inserts a new paragraph `[pageBreak, "\n"]` that inherits the split paragraph's named style and bullet. Inserted at the start of an empty paragraph and followed by deleting the newline after the break, it leaves one `[pageBreak, "\n"]` paragraph with that paragraph's style. Inserted before a paragraph's own newline, it leaves an extra empty paragraph behind | **Observed 2026-10-11** |
+| In a PDF export, a `HEADING_1` that opens a page after a page break sits at the same height as the first line of page 1: space above is dropped at the top of a page | **Observed 2026-10-11** |
 | `batchUpdate` is atomic: all requests apply or none | Documented |
 | `writeControl.requiredRevisionId` refuses a request against a stale revision with a 400 whose message says the id "does not match the latest" | **Observed 2026-10-02** |
 | A vertical tab in `insertText` is accepted and stored as a hard line break; Google's exporter renders it as two trailing spaces and a newline | Observed |
