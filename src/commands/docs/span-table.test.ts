@@ -102,3 +102,10 @@ describe("span tables: the tokenizer (specs/behaviors/markdown-to-doc.md § Merg
     ]);
   });
 });
+
+describe("span tables: what is not a table", () => {
+  it("needs a pipe on every header line, so prose above a `---` stays prose", () => {
+    const tokens = lexer.lexer("a line with a | pipe\nmore prose\n---\n");
+    expect(tokens.some((t) => t.type === "spanTable")).toBe(false);
+  });
+});
