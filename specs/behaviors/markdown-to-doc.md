@@ -81,6 +81,7 @@ at once.
 | `[^1]` and its definition | A Docs footnote | ✅ | `docs read` renders the definitions at the end, numbered in citation order |
 | Inline HTML | Written as literal text | ✅ as text | Disclosed |
 | `<u>text</u>` | Text style `underline` | ✅ | The one HTML tag with a Doc equivalent, because `docs read` emits it |
+| YAML frontmatter (a leading `---` … `---` block) | Nothing, by default; or a key/value table (§ Frontmatter) | — | Metadata for tooling, not content. `docs read` never emits frontmatter |
 
 Anything not in the table is written as its plain text, never dropped, and counted in the
 disclosure.
@@ -169,6 +170,40 @@ as GFM requires), extended down to the bottom of any row span that starts in it.
 
 **Widths.** Columns are counted on the grid, and a spanning cell still occupies its
 columns, so a `cols` hint names one width per grid column.
+
+### Frontmatter
+
+A Markdown file may open with YAML frontmatter: metadata it carries for tooling (type, title,
+version, provenance), not content anyone reading the Doc wants.
+
+- **Recognized** only at the very start of the source, after an optional byte-order mark. It
+  is a line that is exactly `---`, then YAML, then a line that is exactly `---` or `...`. The
+  YAML must parse to a mapping with at least one key, which is the convention GitHub, Jekyll
+  and Hugo follow. A block that parses to anything else (a sentence, a list, only comments,
+  nothing) is not frontmatter, and is converted as Markdown, as before. A block that does not
+  parse at all is refused (`VALIDATION_ERROR` with the YAML error), suggesting
+  `--frontmatter keep`. Writing broken metadata into a Doc as text is the failure this rule
+  exists to prevent.
+- **Stripped by default.** The block is removed before conversion, and the response says so:
+  `frontmatter: stripped (N keys)`, where N counts top-level keys. `--frontmatter keep`
+  converts it as ordinary Markdown text instead.
+- **As a table.** `--frontmatter table` writes the keys as a two-column table at the start of
+  what is written:
+  - the label is bold in the first column, sized `fit`, and the value is in the second;
+  - the table has no header row;
+  - a nested mapping gives dotted labels (`from.version`);
+  - a list of scalars is one value, its items joined with `<br>`;
+  - a list of mappings is one value with one `key: value, key: value` line per item;
+  - null is empty, and booleans, numbers and dates are written as the YAML spells them;
+  - values are Markdown (a URL becomes a link) with a literal `|` escaped.
+
+  `--frontmatter-keys <k1,k2,…>` chooses the rows and their order. A key names a leaf
+  (`from.version`) or a mapping (`from`, meaning every leaf under it). An unknown key is a
+  `VALIDATION_ERROR` that lists the keys there are, and so is `--frontmatter-keys` without
+  `table`. The response reads `frontmatter: table (N rows)`.
+- **Google's importer too.** When `drive upload` turns Markdown into a Doc (`--convert`, or
+  `--update` of a native Doc), the same block is stripped unless `--frontmatter keep`. There
+  is no `table` there: that path hands Drive the Markdown and converts nothing itself.
 
 ### Spacing is a paragraph property
 
