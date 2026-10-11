@@ -28,7 +28,8 @@ gws-axi docs edit-cell <documentId> --row <label | #n> --text <markdown> [--tab 
   omitted on a multi-tab Doc → `TAB_REQUIRED`.
 - `--table <n>` — which table in the tab, 1-based in document order. Default `1`.
 - `--col <n>` — which cell in the row, 1-based. Default `2` (the value column of a
-  label/value table).
+  label/value table). Columns are counted on the table's grid: a merged cell occupies
+  every column it spans ([markdown-to-doc § Merged cells](../behaviors/markdown-to-doc.md#merged-cells)).
 
 ## Behavior
 
@@ -36,6 +37,9 @@ gws-axi docs edit-cell <documentId> --row <label | #n> --text <markdown> [--tab 
 2. **Locate**: the tab; its n-th table (`TABLE_NOT_FOUND` names how many the tab has); the row
    by label (`ROW_NOT_FOUND` lists the labels; `ROW_AMBIGUOUS` lists the matching row numbers
    and says to use `#n`); the cell by column (`VALIDATION_ERROR` names the row's width).
+   A row whose first cell is covered by a row span has no label of its own and is reached
+   by `#n`. A cell covered by a merge is refused with `CELL_MERGED`, naming the cell that
+   heads it, with the `--row`/`--col` that address the head.
 3. **Compare**: the cell's current text (paragraphs joined by newlines, hard breaks as
    newlines) against the new text's. Equal → `action: unchanged`, nothing written, exit 0.
    Styles are not compared — restyling identical text is not an edit this command makes.
@@ -78,6 +82,8 @@ help[3]:
 ```
 
 - `action` — `edited` or `unchanged`.
+- `cell.span` — `<rows>x<columns>`, present only when the cell heads a merge. An edit
+  keeps the cell's spans.
 - `cell.before` — the cell's content **as Markdown**, the way `docs read` renders that cell;
   `after` is the `--text` as given. The undo line writes `before` back.
 - `lossy[]` / `lossy: none` — as `docs write`, for the new content.
@@ -93,6 +99,7 @@ help[3]:
 | `TABLE_NOT_FOUND` | The tab has no table, or fewer than `--table` |
 | `ROW_NOT_FOUND` | No row's first cell equals the label; lists the labels |
 | `ROW_AMBIGUOUS` | Two or more rows match the label; lists their numbers for `#n` |
+| `CELL_MERGED` | The addressed cell is covered by a merged cell; names the head and the flags that address it |
 | `DOCUMENT_CHANGED` | The Doc's revision moved between the read and the write; nothing written |
 
 ## Dispatcher
@@ -104,7 +111,7 @@ declaration; `insert-text`/`delete-range` `instead[]` lines gain it beside `repl
 
 - Editing a header cell's **bold**: the header row is written bold by the converter; an edit
   to row 1 gets the Markdown's styles like any cell. Write `**label**`.
-- Adding or removing rows and columns; merging cells.
+- Adding or removing rows and columns; merging or splitting cells.
 - Addressing by column label (a column header) — `--col <n>` for now.
 
 ## Principles

@@ -69,6 +69,10 @@ regenerate-per-round pattern from #101 is one call:
 - `--tab <id>`, `--new-tab <title>` — see Choosing the tab.
 - `--first`, `--last`, `--before <tabId>`, `--after <tabId>`, `--under <tabId>`, `--emoji <emoji>`
   — `write` with `--new-tab` only; see Placing a new tab.
+- `--frontmatter <strip|keep|table>` — what to do with a leading YAML frontmatter block
+  ([markdown-to-doc § Frontmatter](../behaviors/markdown-to-doc.md#frontmatter)). Default
+  `strip`; `keep` writes it as text; `table` writes its keys as a label/value table.
+- `--frontmatter-keys <k1,k2,…>` — with `--frontmatter table` only: which keys, in order.
 - `--title <title>` — `create` only, REQUIRED.
 - `--parent <folder-id>` — `create` only; the folder to create in. Default: My Drive root.
 - `--account <email>` — REQUIRED when 2+ accounts are authenticated
@@ -105,6 +109,9 @@ Body: `document{id,title,tab,tab_title,revision_id,web_view_link}`
 Then `content{chars,blocks}` — what was written: characters inserted and top-level blocks
 (paragraphs, headings, list items, tables, …) — followed by `lossy[N]{construct,count,handling}`
 or `lossy: none` per the behavior spec.
+
+When the source opened with frontmatter, a `frontmatter:` line follows: `stripped (N keys)`,
+`kept as text` or `table (N rows)`. With no frontmatter, there is no line.
 
 With `--new-tab`, the `tabs[N]{id,title,index,parent,emoji}` listing from `docs tabs` follows,
 so the placement is confirmed without a read ([docs-tabs.md](docs-tabs.md) § Principles, *a

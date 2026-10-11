@@ -1,4 +1,5 @@
 import type { docs_v1 } from "googleapis";
+import { DEFAULT_BODY_FONT_PT, type TableBlock, fitWidth, parseMarkdown } from "./md-to-doc.js";
 
 // Modeled on the converter in google-docs-mcp (src/server.ts:119-272).
 // We walk the StructuralElement tree and emit Markdown; images become
@@ -29,8 +30,10 @@ export function renderBodyAsMarkdown(
   lists: ListsMap | undefined,
   footnotes?: Record<string, docs_v1.Schema$Footnote> | null,
   inlineObjects?: Record<string, docs_v1.Schema$InlineObject> | null,
+  options: { bodyFontPt?: number } = {},
 ): RenderedMarkdown {
   const ctx: RenderCtx = {
+    bodyFontPt: options.bodyFontPt ?? DEFAULT_BODY_FONT_PT,
     lists: lists ?? {},
     imageCount: 0,
     taskCount: 0,
@@ -64,6 +67,7 @@ export function renderBodyAsMarkdown(
       element.paragraph &&
       !element.paragraph.bullet &&
       !(element.paragraph.paragraphStyle?.borderBottom?.width?.magnitude ?? 0) &&
+      !(element.paragraph.elements ?? []).some((pe) => pe.pageBreak) &&
       body.content[i + 1]?.table &&
       !(element.paragraph.elements ?? []).some((pe) => (pe.textRun?.content ?? "").trim())
     ) {
@@ -105,6 +109,8 @@ interface RenderCtx {
   cited: string[];
   inlineObjects: Record<string, docs_v1.Schema$InlineObject>;
   taskCount: number;
+  /** The tab's NORMAL_TEXT size: what a `fit` column is measured at. */
+  bodyFontPt: number;
 }
 
 const MONO = /mono|consolas|courier|code/i;
@@ -144,6 +150,13 @@ function renderStructuralElement(el: StructuralElement, ctx: RenderCtx): string 
 }
 
 function renderParagraph(para: Paragraph, ctx: RenderCtx): string {
+  // A page break is the writer's double rule, after whatever text shares its
+  // paragraph (specs/behaviors/markdown-to-doc.md § Page breaks).
+  if ((para.elements ?? []).some((pe) => pe.pageBreak)) {
+    const rest = { ...para, elements: (para.elements ?? []).filter((pe) => !pe.pageBreak) };
+    const hasText = (rest.elements ?? []).some((pe) => (pe.textRun?.content ?? "").trim());
+    return `${hasText ? renderParagraph(rest, ctx) : ""}\n---\n\n---\n\n`;
+  }
   const inline = (para.elements ?? []).map((pe) => renderParagraphElement(pe, ctx)).join("");
   const text = inline.replace(/\n+$/, "");
 
@@ -247,6 +260,37 @@ function renderTextRun(run: TextRun): string {
   return text + trailing;
 }
 
+/** Where a grid position sits in a merge: the head cell covering it (itself, when it isn't covered). */
+export interface GridSlot {
+  headRow: number;
+  headCol: number;
+  rowSpan: number;
+  colSpan: number;
+}
+
+/**
+ * The table's merges as a grid. Docs keeps a merge's covered cells in the
+ * table as ordinary-looking empty cells; only the head carries `rowSpan` /
+ * `columnSpan` (specs/behaviors/markdown-to-doc.md § Merged cells), so
+ * coverage is worked out from the heads.
+ */
+export function tableGrid(table: Table): GridSlot[][] {
+  const rows = table.tableRows ?? [];
+  const grid: GridSlot[][] = rows.map(() => []);
+  rows.forEach((row, r) =>
+    (row.tableCells ?? []).forEach((cell, c) => {
+      if (grid[r][c]) return; // covered by an earlier head
+      const rowSpan = Math.max(1, cell.tableCellStyle?.rowSpan ?? 1);
+      const colSpan = Math.max(1, cell.tableCellStyle?.columnSpan ?? 1);
+      const slot = { headRow: r, headCol: c, rowSpan, colSpan };
+      for (let rr = r; rr < Math.min(rows.length, r + rowSpan); rr++) {
+        for (let cc = c; cc < c + colSpan; cc++) grid[rr][cc] = slot;
+      }
+    }),
+  );
+  return grid;
+}
+
 function renderTable(table: Table, ctx: RenderCtx): string {
   const rows = table.tableRows ?? [];
   if (rows.length === 0) return "";
@@ -255,36 +299,95 @@ function renderTable(table: Table, ctx: RenderCtx): string {
   // markers would double it on the way back in.
   const headerText = (cell: docs_v1.Schema$TableCell): string =>
     cellText(cell).replace(/^\*\*(.+)\*\*$/, "$1");
+  const grid = tableGrid(table);
 
-  const lines: string[] = [];
-  const hint = colsHint(table.tableStyle?.tableColumnProperties ?? []);
-  if (hint) lines.push(hint);
-  for (let i = 0; i < rows.length; i++) {
-    const cells = (rows[i].tableCells ?? []).map(i === 0 ? headerText : cellText);
-    lines.push(`| ${cells.join(" | ")} |`);
-    if (i === 0) {
-      lines.push(`| ${cells.map(() => "---").join(" | ")} |`);
+  // The header: the rows Docs marks as such (at least one, as GFM needs),
+  // grown to the bottom of any row span that starts in it — a body `^` can't
+  // continue a header cell.
+  let headerRows = 0;
+  while (headerRows < rows.length && rows[headerRows].tableRowStyle?.tableHeader) headerRows++;
+  headerRows = Math.max(1, headerRows);
+  for (let r = 0; r < headerRows; r++) {
+    for (const slot of grid[r]) {
+      if (slot) headerRows = Math.max(headerRows, slot.headRow + slot.rowSpan);
     }
   }
+  headerRows = Math.min(headerRows, rows.length);
+  const columns = Math.max(1, ...grid.map((g) => g.length));
+
+  const lines: string[] = [];
+  for (let r = 0; r < rows.length; r++) {
+    const cells = rows[r].tableCells ?? [];
+    let line = "|";
+    for (let c = 0; c < cells.length; ) {
+      const slot = grid[r][c] ?? { headRow: r, headCol: c, rowSpan: 1, colSpan: 1 };
+      const pipes = "|".repeat(slot.colSpan);
+      if (slot.headRow === r && slot.headCol === c) {
+        line += ` ${(r < headerRows ? headerText : cellText)(cells[c])} ${pipes}`;
+      } else if (slot.headCol === c) {
+        line += ` ^${pipes}`; // continues the cell above
+      }
+      c = slot.headCol === c ? c + slot.colSpan : c + 1;
+    }
+    lines.push(line);
+    if (r === headerRows - 1) {
+      lines.push(`| ${Array.from({ length: columns }, () => "---").join(" | ")} |`);
+    }
+  }
+  const hint = colsHint(table.tableStyle?.tableColumnProperties ?? [], lines, ctx.bodyFontPt);
+  if (hint) lines.unshift(hint);
   return `\n${lines.join("\n")}\n\n`;
 }
 
 /**
- * The writer's width hint, read back: fixed, unequal column widths become
- * whole percentages of their sum (the last takes the rounding remainder).
- * Evenly distributed or equal columns need no line.
+ * The writer's width hint, read back. A fixed column still as wide as `fit`
+ * makes it for its current content is `fit` (specs/behaviors/markdown-to-doc.md
+ * § Fitted columns): the table's own Markdown is parsed again so the cells
+ * measured are exactly the ones a re-write would measure. The other columns
+ * become `1` each when equal, else whole percentages of their sum (the last
+ * takes the rounding remainder). Evenly distributed or equal columns with no
+ * fit need no line.
  */
-function colsHint(columns: docs_v1.Schema$TableColumnProperties[]): string | undefined {
-  if (columns.length < 2) return undefined;
+function colsHint(
+  columns: docs_v1.Schema$TableColumnProperties[],
+  tableLines: string[],
+  bodyFontPt: number,
+): string | undefined {
+  if (columns.length === 0) return undefined;
   const widths = columns.map((c) =>
     c.widthType === "FIXED_WIDTH" ? (c.width?.magnitude ?? 0) : 0,
   );
   if (widths.some((w) => w <= 0)) return undefined;
-  if (widths.every((w) => w === widths[0])) return undefined;
-  const total = widths.reduce((a, b) => a + b, 0);
-  const pct = widths.map((w) => Math.round((w / total) * 100));
-  pct[pct.length - 1] += 100 - pct.reduce((a, b) => a + b, 0);
-  return `<!-- cols: ${pct.map((p) => `${p}%`).join(" ")} -->`;
+  const block = reparseTable(tableLines);
+  const fit = widths.map(
+    (w, c) => !!block && Math.abs(w - fitWidth(block, c, bodyFontPt)) <= FIT_TOLERANCE_PT,
+  );
+  const rest = widths.filter((_, c) => !fit[c]);
+  const restEqual = rest.every((w) => w === rest[0]);
+  if (!fit.some(Boolean) && (columns.length < 2 || restEqual)) return undefined;
+  const total = rest.reduce((a, b) => a + b, 0);
+  const pct = rest.map((w) => Math.round((w / total) * 100));
+  if (pct.length) pct[pct.length - 1] += 100 - pct.reduce((a, b) => a + b, 0);
+  let i = 0;
+  const specs = widths.map((_, c) => {
+    if (fit[c]) return "fit";
+    const p = pct[i++];
+    return fit.some(Boolean) && restEqual ? "1" : `${p}%`;
+  });
+  return `<!-- cols: ${specs.join(" ")} -->`;
+}
+
+/** The writer rounds a fit up to a whole point; anything within a point is the same fit. */
+const FIT_TOLERANCE_PT = 1;
+
+/** The rendered table, parsed the way `docs write` would parse it; undefined if it can't be. */
+function reparseTable(tableLines: string[]): TableBlock | undefined {
+  try {
+    const block = parseMarkdown(tableLines.join("\n")).blocks[0];
+    return block?.kind === "table" ? block : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -301,7 +404,9 @@ function renderCell(cell: docs_v1.Schema$TableCell, ctx: RenderCtx): string {
       .join("")
       .replace(/\n+$/, "")
       .replace(/ {2}\n/g, "<br>")
-      .replace(/[\n|]/g, " ")
+      .replace(/\n/g, " ")
+      // `|` ends a cell and `||` spans columns, so a literal pipe is escaped.
+      .replace(/\|/g, "\\|")
       .trim();
     const bullet = el.paragraph.bullet;
     if (bullet) {
@@ -312,7 +417,11 @@ function renderCell(cell: docs_v1.Schema$TableCell, ctx: RenderCtx): string {
       lines.push(text);
     }
   }
-  return lines.join("<br>").trim();
+  // A caret ending a cell continues the cell above; a literal one is escaped.
+  return lines
+    .join("<br>")
+    .trim()
+    .replace(/(?<!\\)\^$/, "\\^");
 }
 
 /** A cell's Markdown on its own, the way `docs read` renders it inside a table (`docs edit-cell`). */
@@ -327,6 +436,7 @@ export function renderCellMarkdown(
     footnotes: {},
     cited: [],
     inlineObjects: {},
+    bodyFontPt: DEFAULT_BODY_FONT_PT,
   });
 }
 

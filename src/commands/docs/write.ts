@@ -21,8 +21,15 @@ import {
   phase1Requests,
   phase2Requests,
   type Lossy,
+  type Parsed,
   type Phase1,
 } from "./md-to-doc.js";
+import {
+  type FrontmatterMode,
+  frontmatterTableMarkdown,
+  selectRows,
+  splitFrontmatter,
+} from "./frontmatter.js";
 
 /**
  * The Markdown writers: `docs create`, `docs write`, `docs append`
@@ -35,11 +42,17 @@ const SOURCE_HELP = `  <file> | - | --content <markdown>
                        Markdown to write: a local file, \`-\` for stdin, or an
                        inline string. Exactly one.`;
 
+const FRONTMATTER_HELP = `  --frontmatter <mode> A leading YAML frontmatter block: strip (default), keep
+                       (write it as text) or table (a label/value table)
+  --frontmatter-keys <k1,k2>
+                       With --frontmatter table: which keys, in order`;
+
 export const WRITE_HELP = `usage: gws-axi docs write <documentId> (<file> | - | --content <markdown>) [--tab <id> | --new-tab <title> [placement] [--emoji <emoji>]] [flags]
 args[1]:
   <documentId>         The Doc to write into
-flags[11]:
+flags[13]:
 ${SOURCE_HELP}
+${FRONTMATTER_HELP}
   --tab <id>           The tab to replace (id as \`docs read\` lists it). Omit on a
                        single-tab Doc; required on a multi-tab Doc.
   --new-tab <title>    Add a tab with this title and write into it instead
@@ -59,12 +72,17 @@ markdown:
   GitHub-flavored: headings, emphasis, code, links, lists, tasks, quotes,
   tables, rules, images by URL, footnotes — through gws-axi's converter (not
   Google's importer), the one \`docs read\` round-trips.
-  Tables take two extensions no other renderer minds:
+  Tables take these extensions (spans are marked-extended-tables' syntax):
     <!-- cols: 1 3 -->          on the line above a table: column widths as
     <!-- cols: 25% 75% -->      weights or percentages (default: equal), or
     <!-- cols: fit 1 -->        fit — a column sized to its content, the rest shared
     a<br>b, - item<br>- item    inside a cell: line breaks, and bulleted /
                                 numbered / checkbox items (flat lists only)
+    | wide |||                  a cell spanning three columns
+    | ^|                        a cell continuing the one above (same column
+                                and width); \\^ and \\| are literal
+    two rows above | --- |      two header rows
+  Two rules in a row (---, a blank line, ---) are a page break; one is a rule.
 notes:
   Replaces the content of ONE tab; every other tab is untouched. What cannot be
   represented is written as text and reported under lossy[]. Checked tasks are
@@ -77,8 +95,9 @@ notes:
 export const APPEND_HELP = `usage: gws-axi docs append <documentId> (<file> | - | --content <markdown>) [--tab <id>] [flags]
 args[1]:
   <documentId>         The Doc to append to
-flags[4]:
+flags[6]:
 ${SOURCE_HELP}
+${FRONTMATTER_HELP}
   --tab <id>           The tab to append to. Omit on a single-tab Doc.
   --account <email>    REQUIRED when 2+ accounts are authenticated
 examples:
@@ -91,9 +110,10 @@ notes:
 `;
 
 export const CREATE_HELP = `usage: gws-axi docs create --title <title> [<file> | - | --content <markdown>] [--parent <folder-id>] [flags]
-flags[4]:
+flags[6]:
   --title <title>      REQUIRED. The new Doc's name
 ${SOURCE_HELP}
+${FRONTMATTER_HELP}
                        Optional here: no source makes an empty Doc.
   --parent <folder-id> Folder to create in (default: My Drive root)
   --account <email>    REQUIRED when 2+ accounts are authenticated
@@ -123,21 +143,35 @@ export interface WriteFlags {
   emoji?: string;
   title?: string;
   parent?: string;
+  /** A leading YAML frontmatter block (specs/behaviors/markdown-to-doc.md § Frontmatter). */
+  frontmatter: FrontmatterMode;
+  frontmatterKeys?: string[];
 }
 
 const NEW_TAB_FLAGS = ["--first", "--last", "--before", "--after", "--under", "--emoji"];
 
+const FRONTMATTER_FLAGS = ["--frontmatter", "--frontmatter-keys"];
+
 const FLAGS: Record<WriteMode, { value: string[]; boolean: string[] }> = {
   write: {
-    value: ["--content", "--tab", "--new-tab", "--before", "--after", "--under", "--emoji"],
+    value: [
+      "--content",
+      "--tab",
+      "--new-tab",
+      "--before",
+      "--after",
+      "--under",
+      "--emoji",
+      ...FRONTMATTER_FLAGS,
+    ],
     boolean: ["--first", "--last"],
   },
-  append: { value: ["--content", "--tab"], boolean: [] },
-  create: { value: ["--content", "--title", "--parent"], boolean: [] },
+  append: { value: ["--content", "--tab", ...FRONTMATTER_FLAGS], boolean: [] },
+  create: { value: ["--content", "--title", "--parent", ...FRONTMATTER_FLAGS], boolean: [] },
 };
 
 export function parseWriteFlags(args: string[], mode: WriteMode): WriteFlags {
-  const flags: WriteFlags = { stdin: false };
+  const flags: WriteFlags = { stdin: false, frontmatter: "strip" };
   // `-` is stdin; parseArgs already treats it as a positional.
   const parsed = parseArgs(args, FLAGS[mode], `docs ${mode}`);
   const positionals: string[] = [];
@@ -152,6 +186,33 @@ export function parseWriteFlags(args: string[], mode: WriteMode): WriteFlags {
   flags.parent = parsed.values["--parent"];
   flags.emoji = parsed.values["--emoji"];
   flags.placement = parsePlacement(parsed);
+  const fmMode = parsed.values["--frontmatter"];
+  if (fmMode !== undefined) {
+    if (fmMode !== "strip" && fmMode !== "keep" && fmMode !== "table") {
+      throw new AxiError(
+        `--frontmatter takes strip, keep or table, not ${JSON.stringify(fmMode)}`,
+        "VALIDATION_ERROR",
+        [
+          "strip (default) drops the block; keep writes it as text; table writes its keys as a table",
+        ],
+      );
+    }
+    flags.frontmatter = fmMode;
+  }
+  const keys = parsed.values["--frontmatter-keys"];
+  if (keys !== undefined) {
+    if (flags.frontmatter !== "table") {
+      throw new AxiError(
+        "--frontmatter-keys picks the rows of a frontmatter table",
+        "VALIDATION_ERROR",
+        ["Pass it with --frontmatter table"],
+      );
+    }
+    flags.frontmatterKeys = keys
+      .split(",")
+      .map((k) => k.trim())
+      .filter(Boolean);
+  }
   if ((flags.placement || flags.emoji !== undefined) && !flags.newTab) {
     const given = NEW_TAB_FLAGS.filter((f) => args.includes(f));
     throw new AxiError(
@@ -431,12 +492,69 @@ export async function batch(
 // ---------------------------------------------------------------------------
 // The shared write path
 
+/** What the writers convert: the parsed Markdown, and what became of any frontmatter. */
+export interface Prepared {
+  parsed: Parsed;
+  /** `stripped (N keys)`, `kept as text`, `table (N rows)`; undefined with no frontmatter. */
+  frontmatter?: string;
+  /** Nothing to write once the frontmatter is gone. */
+  empty: boolean;
+}
+
+/**
+ * Split off a leading YAML frontmatter block per `--frontmatter`
+ * (specs/behaviors/markdown-to-doc.md § Frontmatter) and parse the rest. Runs
+ * before anything is written, so a refusal leaves the Doc untouched.
+ */
+export function prepareSource(markdown: string, mode: FrontmatterMode, keys?: string[]): Prepared {
+  const fm = mode === "keep" ? undefined : splitFrontmatter(markdown);
+  if (mode === "keep") {
+    return {
+      parsed: parseMarkdown(markdown),
+      frontmatter: splitFrontmatterSafe(markdown) ? "kept as text" : undefined,
+      empty: !markdown.trim(),
+    };
+  }
+  if (!fm) return { parsed: parseMarkdown(markdown), empty: !markdown.trim() };
+  const body = parseMarkdown(fm.body);
+  if (mode === "strip") {
+    return {
+      parsed: body,
+      frontmatter: `stripped (${fm.keys} key${fm.keys === 1 ? "" : "s"})`,
+      empty: !fm.body.trim(),
+    };
+  }
+  const rows = keys ? selectRows(fm.rows, keys) : fm.rows;
+  const table = parseMarkdown(frontmatterTableMarkdown(rows));
+  for (const block of table.blocks) if (block.kind === "table") block.headerRows = 0;
+  const lossy = new Map<string, Lossy>();
+  for (const l of [...table.lossy, ...body.lossy]) {
+    const seen = lossy.get(l.construct);
+    lossy.set(l.construct, seen ? { ...seen, count: seen.count + l.count } : { ...l });
+  }
+  return {
+    parsed: { blocks: [...table.blocks, ...body.blocks], lossy: [...lossy.values()] },
+    frontmatter: `table (${rows.length} row${rows.length === 1 ? "" : "s"})`,
+    empty: false,
+  };
+}
+
+/** Whether `markdown` opens with frontmatter, without refusing YAML that `keep` will write as text anyway. */
+function splitFrontmatterSafe(markdown: string): boolean {
+  try {
+    return !!splitFrontmatter(markdown);
+  } catch {
+    return true;
+  }
+}
+
 interface WriteResult {
   state: DocState;
   tab: TabInfo;
   revisionId: string;
   phase1: Phase1;
   lossy: Lossy[];
+  frontmatter?: string;
 }
 
 async function writeTab(
@@ -444,10 +562,10 @@ async function writeTab(
   account: string,
   state: DocState,
   tab: TabTarget,
-  markdown: string,
+  prepared: Prepared,
   mode: "replace" | "append",
 ): Promise<WriteResult> {
-  const parsed = parseMarkdown(markdown);
+  const { parsed } = prepared;
   const emptyTab = tab.end <= 2;
   const replacing = mode === "replace" && !emptyTab;
   const placement = {
@@ -467,7 +585,15 @@ async function writeTab(
   requests.push(...phase1.requests);
 
   let revisionId = state.revisionId;
-  if (requests.length === 0) return { state, tab, revisionId, phase1, lossy: parsed.lossy };
+  if (requests.length === 0)
+    return {
+      state,
+      tab,
+      revisionId,
+      phase1,
+      lossy: parsed.lossy,
+      frontmatter: prepared.frontmatter,
+    };
 
   const reply = await batch(api, account, state.id, requests, revisionId);
   revisionId = reply.writeControl?.requiredRevisionId ?? revisionId;
@@ -506,7 +632,7 @@ async function writeTab(
       );
     }
   }
-  return { state, tab, revisionId, phase1, lossy: parsed.lossy };
+  return { state, tab, revisionId, phase1, lossy: parsed.lossy, frontmatter: prepared.frontmatter };
 }
 
 function findTab(
@@ -560,6 +686,9 @@ function render(
     );
   } else {
     blocks.push(renderObject({ lossy: "none" }));
+  }
+  if (result.frontmatter) {
+    blocks.push(renderObject({ frontmatter: result.frontmatter }));
   }
   if (extra.tabs) blocks.push(renderTabListing(extra.tabs));
 
@@ -686,6 +815,7 @@ export function fitFontHelp(
 export async function docsWriteCommand(account: string, args: string[]): Promise<string> {
   const flags = parseWriteFlags(args, "write");
   const markdown = (await readSource(flags)) ?? "";
+  const prepared = prepareSource(markdown, flags.frontmatter, flags.frontmatterKeys);
   const api = await docsClient(account);
   const state = await readState(api, account, flags.documentId!);
   const previousRevision = state.revisionId;
@@ -695,7 +825,7 @@ export async function docsWriteCommand(account: string, args: string[]): Promise
   let spacingSet = false;
   if (flags.newTab) {
     // Convert first: anything the converter refuses fails with no tab added.
-    phase1Requests(parseMarkdown(markdown).blocks, {
+    phase1Requests(prepared.parsed.blocks, {
       tabId: "",
       base: 1,
       emptyTab: true,
@@ -743,7 +873,7 @@ export async function docsWriteCommand(account: string, args: string[]): Promise
   }
   let result: WriteResult;
   try {
-    result = await writeTab(api, account, state, tab, markdown, "replace");
+    result = await writeTab(api, account, state, tab, prepared, "replace");
   } catch (err) {
     // A failed write must not leave the new, empty tab behind. Best-effort:
     // the error is reported either way, saying what happened to the tab.
@@ -777,7 +907,8 @@ export async function docsWriteCommand(account: string, args: string[]): Promise
 export async function docsAppendCommand(account: string, args: string[]): Promise<string> {
   const flags = parseWriteFlags(args, "append");
   const markdown = (await readSource(flags)) ?? "";
-  if (!markdown.trim()) {
+  const prepared = prepareSource(markdown, flags.frontmatter, flags.frontmatterKeys);
+  if (prepared.empty) {
     throw new AxiError("Nothing to append: the content is empty", "VALIDATION_ERROR", [
       "Pass Markdown with some content; `docs write` can empty a tab if that is the intent",
     ]);
@@ -786,15 +917,15 @@ export async function docsAppendCommand(account: string, args: string[]): Promis
   const state = await readState(api, account, flags.documentId!);
   const previousRevision = state.revisionId;
   const tab = chooseTab(state, flags.tab, "append", account);
-  const result = await writeTab(api, account, state, tab, markdown, "append");
+  const result = await writeTab(api, account, state, tab, prepared, "append");
   return render("appended", account, result, { previousRevision });
 }
 
 export async function docsCreateCommand(account: string, args: string[]): Promise<string> {
   const flags = parseWriteFlags(args, "create");
   const markdown = (await readSource(flags)) ?? "";
-  // Parse first: an unfetchable image should fail before a Doc exists.
-  parseMarkdown(markdown);
+  // Parse first: anything the converter refuses fails before a Doc exists.
+  const prepared = prepareSource(markdown, flags.frontmatter, flags.frontmatterKeys);
 
   const drive = await driveClient(account);
   let documentId: string;
@@ -828,6 +959,6 @@ export async function docsCreateCommand(account: string, args: string[]): Promis
   const state = await readState(api, account, documentId);
   const tab = state.tabs[0] ?? { id: "", title: "", index: 0, parent: "", emoji: "", end: 2 };
   const spacingSet = await ensureParagraphSpacing(api, account, state, tab);
-  const result = await writeTab(api, account, state, tab, markdown, "replace");
+  const result = await writeTab(api, account, state, tab, prepared, "replace");
   return render("created", account, result, { spacingSet });
 }
