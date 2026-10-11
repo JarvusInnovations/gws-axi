@@ -1,8 +1,9 @@
 ---
-status: in-progress
+status: done
 depends: [docs-paragraph-spacing]
 specs:
   - specs/behaviors/markdown-to-doc.md
+pr: 131
 ---
 
 # Plan: Paragraph spacing on every write, not only new tabs
@@ -35,10 +36,12 @@ guarantee should cover every write.
 
 ## Validation
 
-- [ ] `bun run build`, `lint`, `format:check`, `test` pass.
-- [ ] Unit: `writeTab`'s request list is driven through a pure helper. For a 0/0 tab the
-      spacing request comes first and the table gap is 10pt; for a 0/10 tab there is none.
-- [ ] Live (scratch Doc, <chris@jarv.us>):
+- [x] `bun run build`, `lint`, `format:check`, `test` pass.
+- [x] Unit: `writeTab`'s first batch comes from the pure `tabWriteRequests`. For a 0/0 tab
+      (replace and append) the spacing request comes first and the table gap is 10pt; for a
+      tab with 8pt below there is no request and the gap stays 8pt. A tab whose Normal style
+      wasn't read is never restyled.
+- [x] Live (scratch Doc, <chris@jarv.us>):
   - force a tab to 0/0 with `docs tabs update --paragraph-spacing 0`, then `docs write --tab`
     into it: the tab reads 10pt, and the response says so with the undo;
   - re-run: no restyle line;
@@ -51,8 +54,17 @@ guarantee should cover every write.
 
 ## Notes
 
-(populated at closeout)
+- Live, 2026-10-11 (scratch Doc, <chris@jarv.us>, trashed):
+  - `t.0` was forced to 0 with `docs tabs update --paragraph-spacing 0`, then written with
+    `--tab`: it read back at 10pt, and the response gave the undo;
+  - re-running gave no restyle line;
+  - a second `--new-tab` tab, forced to 0, then `docs append`: 10pt.
+- **Found on the way:** the API omits a zero magnitude, so "no spacing" and "style not read"
+  looked the same. `TabTarget.normalStyleRead` now tells them apart, and an unread style is
+  never restyled.
+- The Field Guide's v2 tab, the case that prompted this, was fixed by hand the same day with
+  `docs tabs update --paragraph-spacing 10`.
 
 ## Follow-ups
 
-(populated at closeout)
+- None.
