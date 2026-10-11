@@ -54,7 +54,8 @@
     "google-auth-library": "^10.7.0",
     "googleapis": "^182.0.0",
     "marked": "^18.0.9",
-    "turndown": "^7.2.4"
+    "turndown": "^7.2.4",
+    "yaml": "^2.9.1"
   },
   "overrides": {
     "google-auth-library": "$google-auth-library"
