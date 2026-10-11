@@ -1152,7 +1152,7 @@ export function phase2Requests(phase1: Phase1, input: Phase2Input): Request[] {
         );
       }
     }
-    if (block.rows.length > block.headerRows && start !== undefined) {
+    if (block.headerRows > 0 && block.rows.length > block.headerRows && start !== undefined) {
       requests.push({
         pinTableHeaderRows: {
           tableStartLocation: { index: start, tabId },
