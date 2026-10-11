@@ -69,7 +69,7 @@ at once.
 | `\| table \|` | Table, first row bold and pinned as the header row; cells carry only the style their own Markdown asks for | ✅ | `docs read` does not re-emit the header row's bold, since a GFM header is bold by construction. A table may be the only block, the first, or the last |
 | `<br>` inside a cell | A hard line break (`\u000b`) in the cell's paragraph — the same encoding as a hard break outside a table | ✅ as `<br>` | GFM's de facto multi-line cell. A line break, not a paragraph: no paragraph spacing opens up between the lines |
 | `\| wide \|\|\|` — extra pipes closing a cell | The cell merged across that many columns (`mergeTableCells`) | ✅ | Column span, in MultiMarkdown's notation (§ Merged cells). The cells it covers are not written in the Markdown |
-| `\| ^\|` — a caret before a cell's closing pipe | The cell merged into the one above it, which then spans one more row | ✅ as a bare `^` | Row span (§ Merged cells). Text before the caret is appended to the cell above, after a space |
+| `\| ^\|` — a cell ending in a caret | The cell merged into the one above it, which then spans one more row | ✅ as a bare `^` | Row span (§ Merged cells). Text before the caret is appended to the cell above, after a space |
 | Two or more rows above the delimiter row | That many header rows: bold, and pinned as the table's header rows | ✅ | A header row may carry column and row spans like any other |
 | `<!-- cols: 1 3 -->` or `<!-- cols: 25% 75% -->` on the line(s) before a table | Fixed column widths: the tab's content width (page width minus the side margins) split in those proportions | ✅ as percentages | Markdown has no width syntax, so this is a gws-axi extension in the one form every other renderer ignores. The hint must name exactly one width per column and must be followed by a table — anything else is refused before the write (`VALIDATION_ERROR`), never written as text. Without a hint, columns are evenly distributed (Docs' default) |
 | `fit` in a `cols` hint (`<!-- cols: fit 1 -->`) | That column sized to its widest line (§ Fitted columns); the other columns share what is left in their proportions | ✅ as a percentage | The fit is computed at write time from measured text, not by Docs; a column a human later lengthens does not grow. All-`fit` makes a table narrower than the page |
@@ -116,8 +116,9 @@ column spans, plus a caret for row spans. A table written for it renders the sam
 
 - **Column span.** A cell closed by *n* pipes spans *n* columns, so `| Notes |||` spans
   three. The cells it covers are absent from the Markdown row.
-- **Row span.** A cell whose content ends in `^`, directly before its closing pipes, merges
-  into the cell above it. That is the cell starting in the same column and spanning the same
+- **Row span.** A cell whose content ends in an unescaped `^` merges into the cell above it
+  (`marked-extended-tables` also wants the caret against the pipe; here `\^` is the literal,
+  so a space between them changes nothing). The cell above is the one starting in the same column and spanning the same
   number of columns, so `| ^||` continues a cell two columns wide. Text before the caret is
   appended to the merged cell's content after a space. Line breaks inside a merged cell are
   written with `<br>`, as in any cell.
