@@ -10,7 +10,7 @@ pr: 133
 
 ## Scope
 
-Two spacing rules the owner asked for on 2026-10-11, after the AI Use Policy Doc opened page 2
+Two spacing rules the owner asked for on 2026-10-11, after a policy Doc opened page 2
 with a gap above its title and a 24pt gap between the title (`HEADING_1`) and its first section
 (`HEADING_2`):
 
@@ -64,7 +64,7 @@ The existing under-a-table rule keeps priority.
   (10pt). The title and the section read `spaceAbove {unit: PT}`, which is 0, because the
   API omits a zero magnitude. `## Next`, after text, inherits its style's space-above.
 - **The earlier page-break spec was wrong about the editor.** A PDF export drops
-  space-above at a page's top, and the editor does not. The AI Use Policy Doc showed the
+  space-above at a page's top, and the editor does not. The owner's Doc showed the
   title's 24pt gap at the top of page 2. The spec's upstream row now records both.
 - An existing test expected `### Three` directly under `# One` to keep its gap. It was
   updated, because the new rule removes that gap.
