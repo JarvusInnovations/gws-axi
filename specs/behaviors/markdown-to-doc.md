@@ -37,7 +37,10 @@ the same Markdown, after normalization:
 - List markers are `-` for bullets and `1.` for every ordered item; numbering is not preserved.
 - A table's alignment row is `| --- |` per column; the header row carries no emphasis markers.
 - Inside a table cell, lines are joined with `<br>` (a `<br/>` or `<br />` in the source reads
-  back as `<br>`); list items in a cell read back as `- `, `1. ` or `- [ ] ` lines.
+  back as `<br>`); list items in a cell read back as `-`, `1.` or `- [ ]` lines.
+- A merged cell reads back in one canonical form (§ Merged cells): a row-spanned cell's whole
+  content in its first row and a bare `^` in each row below it. Inside a cell, a literal `|`
+  reads back as `\|` and a literal `^` at the end of a cell as `\^`.
 - A column-width hint reads back as whole percentages (`<!-- cols: 25% 75% -->`), whatever
   form it was written in; a table with evenly distributed columns reads back with no hint.
 - Every list item is on its own line, indented two spaces per level.
@@ -53,7 +56,7 @@ at once.
 | --- | --- | --- | --- |
 | `#`…`######` | Paragraph with named style `HEADING_1`…`HEADING_6` | ✅ | Google's exporter wraps the text in `**`/`*` per the theme; normalized away |
 | Paragraph | `NORMAL_TEXT` paragraph | ✅ | Soft line breaks inside a paragraph are joined with a space |
-| Hard line break (`  ⏎` or `\⏎`) | Vertical tab (`\u000b`) inside the paragraph | ✅ | The same encoding Google's importer uses |
+| Hard line break (`⏎` or `\⏎`) | Vertical tab (`\u000b`) inside the paragraph | ✅ | The same encoding Google's importer uses |
 | `**bold**`, `*italic*`, `~~struck~~` | Text style `bold` / `italic` / `strikethrough` | ✅ | |
 | `` `code` `` | Text style font `Roboto Mono` | ✅ | Matches Google's importer; any monospace family reads back as code |
 | `[text](url)`, `<url>`, bare URLs | Text style `link.url` | ✅ | Reference-style links are resolved before conversion |
@@ -65,9 +68,12 @@ at once.
 | Fenced or indented code block | One `NORMAL_TEXT` paragraph per line, every run in `Roboto Mono` | ✅ (fence, no language) | **Not** a native Docs code block. Docs has one (with a language selector), and Google's importer creates it, but the Docs API can neither create one nor read one back, so the language is disclosed as dropped |
 | `\| table \|` | Table, first row bold and pinned as the header row; cells carry only the style their own Markdown asks for | ✅ | `docs read` does not re-emit the header row's bold, since a GFM header is bold by construction. A table may be the only block, the first, or the last |
 | `<br>` inside a cell | A hard line break (`\u000b`) in the cell's paragraph — the same encoding as a hard break outside a table | ✅ as `<br>` | GFM's de facto multi-line cell. A line break, not a paragraph: no paragraph spacing opens up between the lines |
+| `\| wide \|\|\|` — extra pipes closing a cell | The cell merged across that many columns (`mergeTableCells`) | ✅ | Column span, in MultiMarkdown's notation (§ Merged cells). The cells it covers are not written in the Markdown |
+| `\| ^\|` — a caret before a cell's closing pipe | The cell merged into the one above it, which then spans one more row | ✅ as a bare `^` | Row span (§ Merged cells). Text before the caret is appended to the cell above, after a space |
+| Two or more rows above the delimiter row | That many header rows: bold, and pinned as the table's header rows | ✅ | A header row may carry column and row spans like any other |
 | `<!-- cols: 1 3 -->` or `<!-- cols: 25% 75% -->` on the line(s) before a table | Fixed column widths: the tab's content width (page width minus the side margins) split in those proportions | ✅ as percentages | Markdown has no width syntax, so this is a gws-axi extension in the one form every other renderer ignores. The hint must name exactly one width per column and must be followed by a table — anything else is refused before the write (`VALIDATION_ERROR`), never written as text. Without a hint, columns are evenly distributed (Docs' default) |
 | `fit` in a `cols` hint (`<!-- cols: fit 1 -->`) | That column sized to its widest line (§ Fitted columns); the other columns share what is left in their proportions | ✅ as a percentage | The fit is computed at write time from measured text, not by Docs; a column a human later lengthens does not grow. All-`fit` makes a table narrower than the page |
-| `- item<br>- item` (or `1. `, `- [ ] `) inside a cell | One bulleted paragraph per item in the cell, with the list preset of the marker; a non-item line before or after the items is its own paragraph | ✅ | Flat lists only: the API's nesting-by-leading-tab does not take inside a cell, so an indented item is written at level 0 and disclosed. Images and footnotes in a cell are still written as text |
+| `- item<br>- item` (or `1.`, `- [ ]`) inside a cell | One bulleted paragraph per item in the cell, with the list preset of the marker; a non-item line before or after the items is its own paragraph | ✅ | Flat lists only: the API's nesting-by-leading-tab does not take inside a cell, so an indented item is written at level 0 and disclosed. Images and footnotes in a cell are still written as text |
 | `---` | An empty paragraph with a bottom border | ✅ | Google's exporter drops it. There is no API request that inserts Docs' own horizontal rule |
 | `![alt](https://…)` | Inline image fetched by Google from the URL | ✅ as `[image]` (alt can't be written; an image that has alt reads back as `[image: alt]`) | Only `http(s)` URLs; a local path or `data:` URL is refused (`IMAGE_NOT_FETCHABLE`). A URL Google cannot fetch fails the write with the same code. The API's insert takes no alt text; a non-empty `alt` is disclosed as dropped |
 | `[^1]` and its definition | A Docs footnote | ✅ | `docs read` renders the definitions at the end, numbered in citation order |
@@ -96,9 +102,57 @@ auto-fit. The measurement:
   the fit was measured as Arial, so a wrapped column is explained and the hint can be widened.
 - The non-`fit` columns share the remaining content width in their proportions; if the fits
   alone would leave them under 24pt each, the fits are scaled down to leave that.
+- A `fit` column is measured only from the cells that occupy that column alone. A cell that
+  spans several columns (§ Merged cells) wraps within their combined width and does not
+  widen any of them.
 
 This is a gws-axi-side estimate of Docs' layout, and it is not a house style: no font other
 than the platform default is assumed, by design.
+
+### Merged cells
+
+The span syntax is the one the `marked-extended-tables` extension reads: MultiMarkdown's
+column spans, plus a caret for row spans. A table written for it renders the same way there.
+
+- **Column span.** A cell closed by *n* pipes spans *n* columns, so `| Notes |||` spans
+  three. The cells it covers are absent from the Markdown row.
+- **Row span.** A cell whose content ends in `^`, directly before its closing pipes, merges
+  into the cell above it. That is the cell starting in the same column and spanning the same
+  number of columns, so `| ^||` continues a cell two columns wide. Text before the caret is
+  appended to the merged cell's content after a space. Line breaks inside a merged cell are
+  written with `<br>`, as in any cell.
+- **Header rows.** Every row above the delimiter row is a header row. The column count comes
+  from the first header row, counting its spans.
+- **Escapes.** `\|` is a literal pipe in a cell. `\^` at the end of a cell is a literal
+  caret.
+- **Every source row is a Doc row**, including a row made only of carets.
+- **Refused before any write** (`VALIDATION_ERROR`, naming the row and column):
+  - a row whose spans add up to more columns than the header's;
+  - a `^` with nothing to continue: in the first header row, in the first row under the
+    delimiter (a body cell cannot continue a header cell), or under a cell that starts in a
+    different column or spans a different number of columns;
+  - widths in the delimiter row (`|--50%--|`, which the extension also reads). The refusal
+    points at the `cols` hint, because there is one width syntax.
+
+  A short row is padded with empty cells, as in any GFM table.
+
+**In the Doc.** The table is inserted at its full grid size. In the fill pass, one
+`mergeTableCells` per merged cell runs before any cell is filled. Only a cell that heads a
+merge, or stands alone, gets content. Header rows are bold and pinned
+(`pinTableHeaderRows` with the header row count).
+
+**Read back.** A merged cell is known only from its head cell's `rowSpan`/`columnSpan`; the
+cells it covers stay in the table as empty cells. `docs read` emits:
+
+- the head's content, followed by one pipe per column it spans;
+- a `^` in each row the head covers, closed by the same number of pipes;
+- nothing else for a covered cell.
+
+The header is the run of rows from the top that Docs marks as table header (at least one,
+as GFM requires), extended down to the bottom of any row span that starts in it.
+
+**Widths.** Columns are counted on the grid, and a spanning cell still occupies its
+columns, so a `cols` hint names one width per grid column.
 
 ### Spacing is a paragraph property
 
@@ -186,6 +240,9 @@ nothing is left behind unmentioned.
 | `insertText` with empty `text` is a 400 (`Insert text requests must specify text to insert`) | **Observed 2026-10-08** |
 | A fresh Doc's `NORMAL_TEXT` named style is 0pt above / 10pt below / line spacing 115; named styles are per tab, and `updateNamedStyle` with `tabId` changes one tab's (the mask must include `namedStyleType`) | **Observed 2026-10-08** |
 | Another account's Doc template gave `NORMAL_TEXT` 0pt above / 0pt below (Arial 11, `COLLAPSE_LISTS`): a Doc `docs create` wrote into it had no paragraph spacing anywhere, including after a list | **Observed 2026-10-09** (the Field Guide report) |
+| `mergeTableCells` over filled cells concatenates them into the head cell, one paragraph per merged cell. The covered cells stay in `tableRows`, each an empty one-paragraph cell whose `tableCellStyle` reads `rowSpan: 1, columnSpan: 1`; only the head carries the spans | **Observed 2026-10-11** |
+| `mergeTableCells` over empty cells leaves the head with one empty paragraph and moves no index; text inserted into the head afterwards lands in the merged cell | **Observed 2026-10-11** (merge and fill in separate batches) |
+| `pinTableHeaderRows` marks each pinned row `tableRowStyle.tableHeader: true`; `tableStyle` carries no pinned count | **Observed 2026-10-11** |
 | `batchUpdate` is atomic: all requests apply or none | Documented |
 | `writeControl.requiredRevisionId` refuses a request against a stale revision with a 400 whose message says the id "does not match the latest" | **Observed 2026-10-02** |
 | A vertical tab in `insertText` is accepted and stored as a hard line break; Google's exporter renders it as two trailing spaces and a newline | Observed |
@@ -213,6 +270,14 @@ nothing is left behind unmentioned.
 - **Round-trip beats parity.** The converter is measured against `docs read`, not against what
   Google's importer would have produced. Matching Google's output is a treadmill with no owner;
   a round-trip is a test gws-axi can run.
+
+- **Borrow a published dialect before inventing one.** When Markdown needs an extension, use
+  the syntax an existing renderer already reads, even where a new one would be tidier. Invent
+  only when none survives the tools Markdown passes through: the `cols` hint exists because
+  the published width syntaxes live in the delimiter row, which formatters normalize away.
+
+  > **Why:** a borrowed dialect renders sensibly outside gws-axi and is already known to some
+  > agents and people. A private one teaches nothing and reads as noise everywhere else.
 
 - **Space is a paragraph property, never an empty paragraph.** The converter makes vertical
   space with `spaceAbove`/`spaceBelow` — the tab's named styles, or an explicit value where a
