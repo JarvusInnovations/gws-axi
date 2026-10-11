@@ -1,11 +1,12 @@
 ---
-status: in-progress
+status: done
 depends: [docs-read-fit-hint]
 specs:
   - specs/behaviors/markdown-to-doc.md
   - specs/commands/docs-write.md
   - specs/commands/drive-upload.md
 issues: [125]
+pr: 129
 ---
 
 # Plan: YAML frontmatter — stripped by default, or a table
@@ -56,23 +57,23 @@ on both commands.
 
 ## Validation
 
-- [ ] `bun run build`, `lint`, `format:check`, `test` pass.
-- [ ] Unit, `splitFrontmatter`:
+- [x] `bun run build`, `lint`, `format:check`, `test` pass.
+- [x] Unit, `splitFrontmatter`:
   - a mapping, with `...` as the closing line and with a BOM;
   - not frontmatter: no closing line, a scalar, a list, comments only, an empty block, or
     not at the start;
   - a parse error is a `VALIDATION_ERROR`.
-- [ ] Unit, `frontmatterTable`:
+- [x] Unit, `frontmatterTable`:
   - nested keys dotted;
   - a scalar list joined with `<br>`;
   - a mapping list as `k: v` lines;
   - null empty, `|` escaped;
   - key selection and order, with a mapping key expanding;
   - an unknown key refused with the list.
-- [ ] Unit, writer: `headerRows: 0` is not pinned and not bold; flag validation
+- [x] Unit, writer: `headerRows: 0` is not pinned and not bold; flag validation
       (`--frontmatter-keys` without `table`; a bad mode).
-- [ ] Unit, upload: `--frontmatter` refused on a non-Markdown or non-converting upload.
-- [ ] Live (scratch Doc, <chris@jarv.us>):
+- [x] Unit, upload: `--frontmatter` refused on a non-Markdown or non-converting upload.
+- [x] Live (scratch Doc, <chris@jarv.us>):
   - `docs create` from a file with frontmatter: no YAML in the Doc, and the response says
     `stripped (N keys)`;
   - `--frontmatter table --frontmatter-keys title,from`: the table, labels bold and fitted,
@@ -87,8 +88,23 @@ on both commands.
 
 ## Notes
 
-(populated at closeout)
+- **Found and fixed a #127 bug.** The ported span-table tokenizer, like
+  `marked-extended-tables`, let header lines after the first go without a pipe. So `note: |`
+  in YAML, then a few lines, then the closing `---` lexed as a one-column table. The same
+  would happen to any prose line mentioning `|` above a setext `---`. Every header line now
+  needs a pipe. Its own commit, with a test.
+- Live, 2026-10-11 (<chris@jarv.us>, all trashed):
+  - `docs create` stripped 5 keys and read back with no YAML;
+  - `--frontmatter table --frontmatter-keys title,from,tags` gave 4 rows with bold labels,
+    an 83pt fitted label column and no pinned header, and it read back as
+    `<!-- cols: fit 1 -->` (the fix from #128 covering it);
+  - `drive upload --convert` stripped 5 keys.
+- A frontmatter table reads back with its first row above the delimiter, because GFM needs
+  one. Re-writing it makes that row a pinned header, which is the same layout with one
+  pinned row. This is expected and was left as is.
+- Flags: one `--frontmatter strip|keep|table` mode flag plus `--frontmatter-keys`, not the
+  issue's `--keep-frontmatter` / `--frontmatter-table[=keys]` (no `--flag=value` parsing).
 
 ## Follow-ups
 
-(populated at closeout)
+- None.
