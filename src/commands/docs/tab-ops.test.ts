@@ -94,6 +94,37 @@ describe("paragraph spacing", () => {
     expect(needsParagraphSpacing({ spaceAbovePt: 6, spaceBelowPt: 0 })).toBe(false);
   });
 
+  it("is never guessed when the Normal text style wasn't read", async () => {
+    const { needsParagraphSpacing } = await import("./write.js");
+    expect(needsParagraphSpacing({ normalStyleRead: false })).toBe(false);
+    expect(needsParagraphSpacing({ normalStyleRead: true })).toBe(true);
+  });
+
+  it("is set in the same batch as every write, first, and widens the gap under a table", async () => {
+    const { tabWriteRequests } = await import("./write.js");
+    const { parseMarkdown } = await import("./md-to-doc.js");
+    const parsed = parseMarkdown("| a |\n| - |\n| 1 |\n\nafter");
+    const bare = { id: "t.1", title: "", index: 0, parent: "", emoji: "", end: 40 };
+    const zero = tabWriteRequests(parsed, { ...bare, normalStyleRead: true }, "replace");
+    expect(zero.spacingSet).toBe(true);
+    expect(zero.requests[0].updateNamedStyle?.namedStyle?.paragraphStyle?.spaceBelow).toEqual({
+      magnitude: 10,
+      unit: "PT",
+    });
+    expect(zero.requests[1].deleteContentRange).toBeDefined();
+    expect(zero.placement.tableGapPt).toBe(10);
+    const appended = tabWriteRequests(parsed, { ...bare, normalStyleRead: true }, "append");
+    expect(appended.requests[0].updateNamedStyle).toBeDefined();
+    const spaced = tabWriteRequests(
+      parsed,
+      { ...bare, normalStyleRead: true, spaceBelowPt: 8 },
+      "replace",
+    );
+    expect(spaced.spacingSet).toBe(false);
+    expect(spaced.requests.some((r) => r.updateNamedStyle)).toBe(false);
+    expect(spaced.placement.tableGapPt).toBe(8);
+  });
+
   it("parses --paragraph-spacing as non-negative points", () => {
     expect(parseUpdateFlags(["1Doc", "t.1", "--paragraph-spacing", "10"]).paragraphSpacing).toBe(
       10,

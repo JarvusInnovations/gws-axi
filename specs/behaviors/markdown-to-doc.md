@@ -248,15 +248,22 @@ the one paragraph where a structure interrupts that rhythm:
 - **Space after a table.** A Docs table has no bottom margin, so the paragraph that follows one
   gets `spaceAbove` equal to the tab's `NORMAL_TEXT` space-below — unless it is a heading,
   whose own style already carries space above.
-- **Paragraph spacing is guaranteed on tabs gws-axi creates.** An account's Doc template may
-  give `NORMAL_TEXT` no space above or below at all; a Doc written into such a tab has no
-  paragraph spacing anywhere — paragraphs, and the paragraph after a list, run together. So
-  when `docs create` or `--new-tab` finds a tab whose `NORMAL_TEXT` has 0pt above **and**
-  0pt below, it sets `spaceBelow` to 10pt — Docs' own default for a fresh Doc, not a house
-  value — on that tab's named style (`updateNamedStyle`) before writing, and the response
-  says so. A tab with any paragraph spacing of its own is left as it is. A `docs write --tab`
-  into an existing tab never restyles it; when that tab's Normal text has no paragraph
-  spacing, the response says so and names `docs tabs update <id> <tab> --paragraph-spacing 10`.
+- **Paragraph spacing is guaranteed on every tab gws-axi writes.** An account's Doc template
+  may give `NORMAL_TEXT` no space above or below at all. A Doc written into such a tab has no
+  paragraph spacing anywhere: paragraphs, and the paragraph after a list, run together. So
+  whenever `docs create`, `docs write` (with `--tab` or `--new-tab`) or `docs append` writes
+  into a tab whose `NORMAL_TEXT` has 0pt above **and** 0pt below, it first sets `spaceBelow`
+  to 10pt on that tab's named style (`updateNamedStyle`). 10pt is Docs' own default for a
+  fresh Doc, not a house value. It goes in the same batch as the content, so a failed write
+  leaves the style as it was. The response says so and gives the undo
+  (`docs tabs update <id> <tab> --paragraph-spacing 0`). A tab with any paragraph spacing of
+  its own is left as it is: only a tab with none at all is ever restyled.
+
+  > **Why every write, not only new tabs:** a tab a person added in the Docs editor gets the
+  > same empty template, and an agent writing into it with `--tab` was told how to fix it
+  > and didn't (seen 2026-10-11). Zero above and zero below is never a choice anyone makes
+  > for a written document. It is the template's absence of one, so fixing it is safe, and
+  > leaving it to a hint was not.
 
 A `docs read` of a Doc written this way has no blank-line artifacts to round-trip.
 
