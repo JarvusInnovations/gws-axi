@@ -242,7 +242,7 @@ nothing is left behind unmentioned.
 | A fresh Doc's `NORMAL_TEXT` named style is 0pt above / 10pt below / line spacing 115; named styles are per tab, and `updateNamedStyle` with `tabId` changes one tab's (the mask must include `namedStyleType`) | **Observed 2026-10-08** |
 | Another account's Doc template gave `NORMAL_TEXT` 0pt above / 0pt below (Arial 11, `COLLAPSE_LISTS`): a Doc `docs create` wrote into it had no paragraph spacing anywhere, including after a list | **Observed 2026-10-09** (the Field Guide report) |
 | `mergeTableCells` over filled cells concatenates them into the head cell, one paragraph per merged cell. The covered cells stay in `tableRows`, each an empty one-paragraph cell whose `tableCellStyle` reads `rowSpan: 1, columnSpan: 1`; only the head carries the spans | **Observed 2026-10-11** |
-| `mergeTableCells` over empty cells leaves the head with one empty paragraph and moves no index; text inserted into the head afterwards lands in the merged cell | **Observed 2026-10-11** (merge and fill in separate batches) |
+| `mergeTableCells` over empty cells leaves the head with one empty paragraph and moves no index; text inserted into the head afterwards lands in the merged cell | **Observed 2026-10-11**, in separate batches and then in the one fill batch the converter sends |
 | `pinTableHeaderRows` marks each pinned row `tableRowStyle.tableHeader: true`; `tableStyle` carries no pinned count | **Observed 2026-10-11** |
 | `batchUpdate` is atomic: all requests apply or none | Documented |
 | `writeControl.requiredRevisionId` refuses a request against a stale revision with a 400 whose message says the id "does not match the latest" | **Observed 2026-10-02** |

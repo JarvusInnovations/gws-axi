@@ -1,10 +1,11 @@
 ---
-status: planned
+status: done
 depends: [docs-table-fit, docs-edit-cell]
 specs:
   - specs/behaviors/markdown-to-doc.md
   - specs/commands/docs-read.md
   - specs/commands/docs-edit-cell.md
+pr: 127
 ---
 
 # Plan: Merged table cells — column and row spans
@@ -84,10 +85,10 @@ reads back as a different table.
 
 ## Validation
 
-- [ ] `bun run build`, `lint`, `format:check`, `test` pass. The existing table tests pass
+- [x] `bun run build`, `lint`, `format:check`, `test` pass. The existing table tests pass
       unchanged, because the vendored tokenizer must read every plain GFM table the way
       marked's did.
-- [ ] Unit, tokenizer:
+- [x] Unit, tokenizer:
   - colspan;
   - rowspan, including continuing text joined with a space;
   - rowspan of a colspanned cell (`^||`);
@@ -96,14 +97,14 @@ reads back as a different table.
   - each refusal: overflowing row, `^` in the first body row, `^` under a mismatched cell,
     delimiter widths;
   - a short row padded.
-- [ ] Unit, converter: phase 2 emits merges before fills, skips covered cells, bolds and
+- [x] Unit, converter: phase 2 emits merges before fills, skips covered cells, bolds and
       pins N header rows; `fit` ignores a spanning cell; a `cols` hint counts grid columns.
-- [ ] Unit, reader: heads, covered `^`, header-row count from `tableHeader`, a header row
+- [x] Unit, reader: heads, covered `^`, header-row count from `tableHeader`, a header row
       span extending the header, and escapes. Round trip: Markdown → requests →
       simulated document → Markdown is identity for a table with both span kinds.
-- [ ] Unit, edit-cell: `CELL_MERGED` names the head; `--col` counts grid columns; `span`
+- [x] Unit, edit-cell: `CELL_MERGED` names the head; `--col` counts grid columns; `span`
       shown on a head.
-- [ ] Live (scratch Doc, <chris@jarv.us>):
+- [x] Live (scratch Doc, <chris@jarv.us>):
   - a table with a full-width caption row, a two-row row span and two header rows is
     written in **one** fill batch (merges and fills together, which the probe did in two);
   - `docs read` returns the source Markdown;
@@ -125,9 +126,29 @@ reads back as a different table.
 
 ## Notes
 
-- Probe Doc `191SjBev7TyEI96msr4UN69D-LmB3O-Gl7W1rN21iYZw` (<chris@jarv.us>): merges
-  observed on filled and on empty cells. To be trashed at closeout.
+- **Merges and fills in one batch work.** The live write sent `mergeTableCells` and the
+  cell fills in a single phase-2 batch and every head landed in place. The risk above is
+  closed, and the spec's upstream row now says so.
+- **The caret rule was loosened from the extension.** It treats `^ |` (with a space) as a
+  literal caret. Here any unescaped trailing `^` continues the cell above, because `\^` is
+  the literal and a reader escapes one. A hand-written `| ^ |` almost always means a row
+  span.
+- Live, 2026-10-11:
+  - a 6×4 table with two header rows (each with a row span), a caption across four
+    columns, two row spans in the body and `<!-- cols: fit 1 1 2 -->` read back identical
+    to the source, apart from the hint as percentages;
+  - re-writing the read output and reading again gave a byte-identical file;
+  - `edit-cell` on a 2×1 head reported `span: 2x1` and kept the merge;
+  - on the covered cell below it, `CELL_MERGED` named the head;
+  - a 3-width hint on the 4-column table was refused before anything was written.
+- Probe and validation Doc `191SjBev7TyEI96msr4UN69D-LmB3O-Gl7W1rN21iYZw`
+  (<chris@jarv.us>) was left in place so the owner can look at how the merges render.
+- The README status line called `edit-cell` scaffolded. It was corrected while here.
 
 ## Follow-ups
 
-(populated at closeout)
+- Tracked as: `gmail draft` could register the same tokenizer and render spans as
+  `colspan`/`rowspan` HTML. Not asked for.
+- Absorbed: the "`|` escaping in reader cells" follow-up, done here.
+- Absorbed: the "caption row merged across the columns" follow-up from
+  `docs-table-cols`. It is now `| caption |||`.
