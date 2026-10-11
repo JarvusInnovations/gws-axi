@@ -193,6 +193,8 @@ export async function docsReadCommand(account: string, args: string[]): Promise<
   let contentLists: Record<string, docs_v1.Schema$List> | undefined;
   let contentFootnotes: Record<string, docs_v1.Schema$Footnote> | undefined;
   let contentInlineObjects: Record<string, docs_v1.Schema$InlineObject> | undefined;
+  /** The NORMAL_TEXT named style, whose size a `fit` column is measured at. */
+  let contentStyles: docs_v1.Schema$NamedStyles | undefined;
 
   if (flags.tab) {
     activeTab = flat.find((t) => t.id === flags.tab);
@@ -210,17 +212,20 @@ export async function docsReadCommand(account: string, args: string[]): Promise<
     contentLists = activeTab.tab.documentTab?.lists ?? undefined;
     contentFootnotes = activeTab.tab.documentTab?.footnotes ?? undefined;
     contentInlineObjects = activeTab.tab.documentTab?.inlineObjects ?? undefined;
+    contentStyles = activeTab.tab.documentTab?.namedStyles ?? undefined;
   } else if (flat.length === 1) {
     activeTab = flat[0];
     contentBody = activeTab.tab.documentTab?.body ?? undefined;
     contentLists = activeTab.tab.documentTab?.lists ?? undefined;
     contentFootnotes = activeTab.tab.documentTab?.footnotes ?? undefined;
     contentInlineObjects = activeTab.tab.documentTab?.inlineObjects ?? undefined;
+    contentStyles = activeTab.tab.documentTab?.namedStyles ?? undefined;
   } else if (flat.length === 0) {
     contentBody = doc.body ?? undefined;
     contentLists = doc.lists ?? undefined;
     contentFootnotes = doc.footnotes ?? undefined;
     contentInlineObjects = doc.inlineObjects ?? undefined;
+    contentStyles = doc.namedStyles ?? undefined;
   }
   // (multi-tab, no --tab) → activeTab stays undefined, contentBody undefined
 
@@ -286,6 +291,11 @@ export async function docsReadCommand(account: string, args: string[]): Promise<
       contentLists,
       contentFootnotes,
       contentInlineObjects,
+      {
+        bodyFontPt:
+          contentStyles?.styles?.find((st) => st.namedStyleType === "NORMAL_TEXT")?.textStyle
+            ?.fontSize?.magnitude ?? undefined,
+      },
     );
     const total = rendered.markdown.length;
     const tabSuffix = activeTab ? ` --tab ${activeTab.id}` : "";

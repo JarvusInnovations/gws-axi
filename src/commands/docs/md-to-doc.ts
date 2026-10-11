@@ -987,6 +987,42 @@ const CELL_LIST_INDENT_PT = 36;
 const MIN_COLUMN_PT = 24;
 
 /**
+ * The width `fit` gives one column of a table (specs/behaviors/markdown-to-doc.md
+ * § Fitted columns), before any scaling: its widest line, measured, plus the
+ * margin and padding. Shared by the writer and by `docs read`, which uses it to
+ * recognise a column that is still fitted.
+ */
+export function fitWidth(block: TableBlock, column: number, bodyFontPt: number): number {
+  let widest = 0;
+  block.rows.forEach((row, r) => {
+    const cell = row[column];
+    // A cell spanning several columns wraps within them and widens none.
+    if (!cell || (cell.colSpan ?? 1) > 1) return;
+    for (const p of cell.paragraphs) {
+      // One measured line per hard-break segment of the paragraph.
+      const segments: Array<Array<{ text: string; bold: boolean }>> = [[]];
+      for (const run of p.inline.runs) {
+        const pieces = run.text.split("\u000b");
+        pieces.forEach((piece, i) => {
+          if (i > 0) segments.push([]);
+          segments[segments.length - 1].push({
+            text: piece,
+            bold: r < block.headerRows || !!run.style.bold,
+          });
+        });
+      }
+      for (const seg of segments) {
+        const line =
+          seg.reduce((n, s) => n + measureText(s.text, { bold: s.bold, sizePt: bodyFontPt }), 0) +
+          (p.list ? CELL_LIST_INDENT_PT : 0);
+        widest = Math.max(widest, line);
+      }
+    }
+  });
+  return Math.max(MIN_COLUMN_PT, Math.ceil(widest * 1.06 + 2 + 2 * CELL_PADDING_PT));
+}
+
+/**
  * Column widths in points for a hinted table (specs/behaviors/markdown-to-doc.md
  * § Fitted columns). Pure: the fits are measured from the cells' text, the
  * rest is shared by proportion.
@@ -997,36 +1033,7 @@ export function columnWidths(
   bodyFontPt: number,
 ): number[] {
   const cols = block.cols ?? [];
-  const widths = cols.map((spec, c) => {
-    if (spec !== "fit") return 0;
-    let widest = 0;
-    block.rows.forEach((row, r) => {
-      const cell = row[c];
-      // A cell spanning several columns wraps within them and widens none.
-      if (!cell || (cell.colSpan ?? 1) > 1) return;
-      for (const p of cell.paragraphs) {
-        // One measured line per hard-break segment of the paragraph.
-        const segments: Array<Array<{ text: string; bold: boolean }>> = [[]];
-        for (const run of p.inline.runs) {
-          const pieces = run.text.split("\u000b");
-          pieces.forEach((piece, i) => {
-            if (i > 0) segments.push([]);
-            segments[segments.length - 1].push({
-              text: piece,
-              bold: r < block.headerRows || !!run.style.bold,
-            });
-          });
-        }
-        for (const seg of segments) {
-          const line =
-            seg.reduce((n, s) => n + measureText(s.text, { bold: s.bold, sizePt: bodyFontPt }), 0) +
-            (p.list ? CELL_LIST_INDENT_PT : 0);
-          widest = Math.max(widest, line);
-        }
-      }
-    });
-    return Math.max(MIN_COLUMN_PT, Math.ceil(widest * 1.06 + 2 + 2 * CELL_PADDING_PT));
-  });
+  const widths = cols.map((spec, c) => (spec === "fit" ? fitWidth(block, c, bodyFontPt) : 0));
   const flexCount = cols.filter((s) => s !== "fit").length;
   let fitTotal = widths.reduce((a, b) => a + b, 0);
   // Fits must leave every proportional column at least the minimum.

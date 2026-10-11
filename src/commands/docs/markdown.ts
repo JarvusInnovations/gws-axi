@@ -1,4 +1,5 @@
 import type { docs_v1 } from "googleapis";
+import { DEFAULT_BODY_FONT_PT, type TableBlock, fitWidth, parseMarkdown } from "./md-to-doc.js";
 
 // Modeled on the converter in google-docs-mcp (src/server.ts:119-272).
 // We walk the StructuralElement tree and emit Markdown; images become
@@ -29,8 +30,10 @@ export function renderBodyAsMarkdown(
   lists: ListsMap | undefined,
   footnotes?: Record<string, docs_v1.Schema$Footnote> | null,
   inlineObjects?: Record<string, docs_v1.Schema$InlineObject> | null,
+  options: { bodyFontPt?: number } = {},
 ): RenderedMarkdown {
   const ctx: RenderCtx = {
+    bodyFontPt: options.bodyFontPt ?? DEFAULT_BODY_FONT_PT,
     lists: lists ?? {},
     imageCount: 0,
     taskCount: 0,
@@ -105,6 +108,8 @@ interface RenderCtx {
   cited: string[];
   inlineObjects: Record<string, docs_v1.Schema$InlineObject>;
   taskCount: number;
+  /** The tab's NORMAL_TEXT size: what a `fit` column is measured at. */
+  bodyFontPt: number;
 }
 
 const MONO = /mono|consolas|courier|code/i;
@@ -303,8 +308,6 @@ function renderTable(table: Table, ctx: RenderCtx): string {
   const columns = Math.max(1, ...grid.map((g) => g.length));
 
   const lines: string[] = [];
-  const hint = colsHint(table.tableStyle?.tableColumnProperties ?? []);
-  if (hint) lines.push(hint);
   for (let r = 0; r < rows.length; r++) {
     const cells = rows[r].tableCells ?? [];
     let line = "|";
@@ -323,25 +326,60 @@ function renderTable(table: Table, ctx: RenderCtx): string {
       lines.push(`| ${Array.from({ length: columns }, () => "---").join(" | ")} |`);
     }
   }
+  const hint = colsHint(table.tableStyle?.tableColumnProperties ?? [], lines, ctx.bodyFontPt);
+  if (hint) lines.unshift(hint);
   return `\n${lines.join("\n")}\n\n`;
 }
 
 /**
- * The writer's width hint, read back: fixed, unequal column widths become
- * whole percentages of their sum (the last takes the rounding remainder).
- * Evenly distributed or equal columns need no line.
+ * The writer's width hint, read back. A fixed column still as wide as `fit`
+ * makes it for its current content is `fit` (specs/behaviors/markdown-to-doc.md
+ * § Fitted columns): the table's own Markdown is parsed again so the cells
+ * measured are exactly the ones a re-write would measure. The other columns
+ * become `1` each when equal, else whole percentages of their sum (the last
+ * takes the rounding remainder). Evenly distributed or equal columns with no
+ * fit need no line.
  */
-function colsHint(columns: docs_v1.Schema$TableColumnProperties[]): string | undefined {
-  if (columns.length < 2) return undefined;
+function colsHint(
+  columns: docs_v1.Schema$TableColumnProperties[],
+  tableLines: string[],
+  bodyFontPt: number,
+): string | undefined {
+  if (columns.length === 0) return undefined;
   const widths = columns.map((c) =>
     c.widthType === "FIXED_WIDTH" ? (c.width?.magnitude ?? 0) : 0,
   );
   if (widths.some((w) => w <= 0)) return undefined;
-  if (widths.every((w) => w === widths[0])) return undefined;
-  const total = widths.reduce((a, b) => a + b, 0);
-  const pct = widths.map((w) => Math.round((w / total) * 100));
-  pct[pct.length - 1] += 100 - pct.reduce((a, b) => a + b, 0);
-  return `<!-- cols: ${pct.map((p) => `${p}%`).join(" ")} -->`;
+  const block = reparseTable(tableLines);
+  const fit = widths.map(
+    (w, c) => !!block && Math.abs(w - fitWidth(block, c, bodyFontPt)) <= FIT_TOLERANCE_PT,
+  );
+  const rest = widths.filter((_, c) => !fit[c]);
+  const restEqual = rest.every((w) => w === rest[0]);
+  if (!fit.some(Boolean) && (columns.length < 2 || restEqual)) return undefined;
+  const total = rest.reduce((a, b) => a + b, 0);
+  const pct = rest.map((w) => Math.round((w / total) * 100));
+  if (pct.length) pct[pct.length - 1] += 100 - pct.reduce((a, b) => a + b, 0);
+  let i = 0;
+  const specs = widths.map((_, c) => {
+    if (fit[c]) return "fit";
+    const p = pct[i++];
+    return fit.some(Boolean) && restEqual ? "1" : `${p}%`;
+  });
+  return `<!-- cols: ${specs.join(" ")} -->`;
+}
+
+/** The writer rounds a fit up to a whole point; anything within a point is the same fit. */
+const FIT_TOLERANCE_PT = 1;
+
+/** The rendered table, parsed the way `docs write` would parse it; undefined if it can't be. */
+function reparseTable(tableLines: string[]): TableBlock | undefined {
+  try {
+    const block = parseMarkdown(tableLines.join("\n")).blocks[0];
+    return block?.kind === "table" ? block : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -390,6 +428,7 @@ export function renderCellMarkdown(
     footnotes: {},
     cited: [],
     inlineObjects: {},
+    bodyFontPt: DEFAULT_BODY_FONT_PT,
   });
 }
 
