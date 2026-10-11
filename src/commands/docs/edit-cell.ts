@@ -3,7 +3,7 @@ import type { docs_v1 } from "googleapis";
 import { docsClient, translateGoogleError } from "../../google/client.js";
 import { field, joinBlocks, renderHelp, renderList, renderObject } from "../../output/index.js";
 import { type FlagSpec, parseArgs } from "../../util/flags.js";
-import { renderCellMarkdown } from "./markdown.js";
+import { renderCellMarkdown, tableGrid } from "./markdown.js";
 import { cellFillRequests, parseCellMarkdown } from "./md-to-doc.js";
 import { type TabInfo, describeTabs, flattenTabInfos, renderTabListing } from "./tabs.js";
 import { batch } from "./write.js";
@@ -24,7 +24,8 @@ flags[6]:
                        "- " / "1. " / "- [ ] " items; "" empties the cell
   --tab <id>           The tab (id as \`docs tabs\` lists it). Omit on a single-tab Doc
   --table <n>          Which table in the tab, 1-based (default: 1)
-  --col <n>            Which cell in the row, 1-based (default: 2, the value column)
+  --col <n>            Which cell in the row, 1-based (default: 2, the value column);
+                       a merged cell counts every column it spans
   --account <email>    REQUIRED when 2+ accounts are authenticated
 examples:
   gws-axi docs edit-cell 1BxAbc... --row "State" --text "**Refining** (round 4)" --account you@example.com
@@ -149,6 +150,25 @@ export function resolveRow(
     error: hits.length ? "ambiguous" : "not_found",
     candidates: hits.length ? hits : labels,
   };
+}
+
+/**
+ * Where a cell sits in the table's merges (1-based row and column): the head
+ * covering it when it is covered, or its `<rows>x<columns>` span when it heads
+ * a merge. Docs keeps covered cells as empty cells, so an edit there would
+ * write into a position the merged cell hides.
+ */
+export function mergeAt(
+  table: docs_v1.Schema$Table,
+  row: number,
+  col: number,
+): { coveredBy?: { row: number; col: number }; span?: string } {
+  const slot = tableGrid(table)[row - 1]?.[col - 1];
+  if (!slot) return {};
+  if (slot.headRow !== row - 1 || slot.headCol !== col - 1) {
+    return { coveredBy: { row: slot.headRow + 1, col: slot.headCol + 1 } };
+  }
+  return slot.rowSpan > 1 || slot.colSpan > 1 ? { span: `${slot.rowSpan}x${slot.colSpan}` } : {};
 }
 
 // ---------------------------------------------------------------------------
@@ -289,6 +309,19 @@ export async function docsEditCellCommand(account: string, args: string[]): Prom
       [`Pass --col 1…${rowCells.length}`],
     );
   }
+  const merge = mergeAt(table, match.row, flags.col);
+  if (merge.coveredBy) {
+    const { row: headRow, col: headCol } = merge.coveredBy;
+    throw new AxiError(
+      `Row ${match.row}, column ${flags.col} is covered by the merged cell at row ${headRow}, column ${headCol}`,
+      "CELL_MERGED",
+      [
+        `Run \`gws-axi docs edit-cell ${documentId} --row "#${headRow}" --col ${headCol} --text <markdown>${flags.table !== 1 ? ` --table ${flags.table}` : ""} --tab ${tab.id} --account ${account}\` to edit the merged cell`,
+        "Nothing was written",
+      ],
+    );
+  }
+  const { span } = merge;
 
   const before = renderCellMarkdown(cell, documentTab.lists ?? undefined);
   const newText = parsed.cell.paragraphs
@@ -312,6 +345,7 @@ export async function docsEditCellCommand(account: string, args: string[]): Prom
     row: match.row,
     col: flags.col,
     label: match.label,
+    ...(span ? { span } : {}),
     before,
     after: flags.text,
   };

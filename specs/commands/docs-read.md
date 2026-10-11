@@ -49,7 +49,7 @@ When a tab is rendered: either an inline `content` block of GitHub-flavored mark
 The rendering is the inverse of the [markdown-to-doc](../behaviors/markdown-to-doc.md) mapping, so Markdown written by `docs write` reads back as the same Markdown. In particular:
 
 - A paragraph whose every run is in a monospace font is a code block; consecutive ones form one fenced block.
-- A non-list paragraph indented at both start and end is a blockquote (`> `).
+- A non-list paragraph indented at both start and end is a blockquote (`>`).
 - A list whose preset is the checkbox renders `- [ ] item` (the API exposes no checked state — #84). Because that is silently wrong about checked items, a read with any checklist items carries a `help[]` line naming the count and saying their state is only visible in the Doc.
 - A vertical tab (`\u000b`) inside a paragraph is a hard line break (two trailing spaces, newline).
 - An empty paragraph with a bottom border is `---`; Docs' own horizontal rule is too.
@@ -57,11 +57,17 @@ The rendering is the inverse of the [markdown-to-doc](../behaviors/markdown-to-d
 - Ordered items render as `1.` at every level; bullets as `-`. A blank line follows the last item of a list.
 - A table's header row is rendered without its bold markers. A cell's paragraphs are joined
   with `<br>`, a hard line break inside a cell is `<br>`, and a bulleted paragraph in a cell
-  is a `- `, `1. ` or `- [ ] ` line — the inverse of the writer's multi-line cells. A table
+  is a `-`, `1.` or `- [ ]` line — the inverse of the writer's multi-line cells. A table
   whose columns have fixed, unequal widths is preceded by `<!-- cols: 25% 75% -->` (whole
   percentages of the table's width), the writer's width hint; evenly distributed columns get
   no line. A column written as `fit` reads back as its resulting percentage — the layout
   round-trips, the intent does not.
+- Merged cells render in the writer's span syntax
+  ([markdown-to-doc § Merged cells](../behaviors/markdown-to-doc.md#merged-cells)). The head
+  cell's content is followed by one pipe per column it spans. Each row it covers has a bare
+  `^`, closed by the same number of pipes. The rows Docs marks as table header all go above
+  the delimiter row (at least one), extended to the bottom of any row span that starts in
+  them. A literal `|` in a cell is `\|`; a literal `^` ending a cell is `\^`.
 - Footnote definitions are rendered at the end as `[^N]: text`, numbered in citation order.
 
 ## help[] suggestions

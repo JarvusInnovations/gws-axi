@@ -247,6 +247,37 @@ function renderTextRun(run: TextRun): string {
   return text + trailing;
 }
 
+/** Where a grid position sits in a merge: the head cell covering it (itself, when it isn't covered). */
+export interface GridSlot {
+  headRow: number;
+  headCol: number;
+  rowSpan: number;
+  colSpan: number;
+}
+
+/**
+ * The table's merges as a grid. Docs keeps a merge's covered cells in the
+ * table as ordinary-looking empty cells; only the head carries `rowSpan` /
+ * `columnSpan` (specs/behaviors/markdown-to-doc.md § Merged cells), so
+ * coverage is worked out from the heads.
+ */
+export function tableGrid(table: Table): GridSlot[][] {
+  const rows = table.tableRows ?? [];
+  const grid: GridSlot[][] = rows.map(() => []);
+  rows.forEach((row, r) =>
+    (row.tableCells ?? []).forEach((cell, c) => {
+      if (grid[r][c]) return; // covered by an earlier head
+      const rowSpan = Math.max(1, cell.tableCellStyle?.rowSpan ?? 1);
+      const colSpan = Math.max(1, cell.tableCellStyle?.columnSpan ?? 1);
+      const slot = { headRow: r, headCol: c, rowSpan, colSpan };
+      for (let rr = r; rr < Math.min(rows.length, r + rowSpan); rr++) {
+        for (let cc = c; cc < c + colSpan; cc++) grid[rr][cc] = slot;
+      }
+    }),
+  );
+  return grid;
+}
+
 function renderTable(table: Table, ctx: RenderCtx): string {
   const rows = table.tableRows ?? [];
   if (rows.length === 0) return "";
@@ -255,15 +286,41 @@ function renderTable(table: Table, ctx: RenderCtx): string {
   // markers would double it on the way back in.
   const headerText = (cell: docs_v1.Schema$TableCell): string =>
     cellText(cell).replace(/^\*\*(.+)\*\*$/, "$1");
+  const grid = tableGrid(table);
+
+  // The header: the rows Docs marks as such (at least one, as GFM needs),
+  // grown to the bottom of any row span that starts in it — a body `^` can't
+  // continue a header cell.
+  let headerRows = 0;
+  while (headerRows < rows.length && rows[headerRows].tableRowStyle?.tableHeader) headerRows++;
+  headerRows = Math.max(1, headerRows);
+  for (let r = 0; r < headerRows; r++) {
+    for (const slot of grid[r]) {
+      if (slot) headerRows = Math.max(headerRows, slot.headRow + slot.rowSpan);
+    }
+  }
+  headerRows = Math.min(headerRows, rows.length);
+  const columns = Math.max(1, ...grid.map((g) => g.length));
 
   const lines: string[] = [];
   const hint = colsHint(table.tableStyle?.tableColumnProperties ?? []);
   if (hint) lines.push(hint);
-  for (let i = 0; i < rows.length; i++) {
-    const cells = (rows[i].tableCells ?? []).map(i === 0 ? headerText : cellText);
-    lines.push(`| ${cells.join(" | ")} |`);
-    if (i === 0) {
-      lines.push(`| ${cells.map(() => "---").join(" | ")} |`);
+  for (let r = 0; r < rows.length; r++) {
+    const cells = rows[r].tableCells ?? [];
+    let line = "|";
+    for (let c = 0; c < cells.length; ) {
+      const slot = grid[r][c] ?? { headRow: r, headCol: c, rowSpan: 1, colSpan: 1 };
+      const pipes = "|".repeat(slot.colSpan);
+      if (slot.headRow === r && slot.headCol === c) {
+        line += ` ${(r < headerRows ? headerText : cellText)(cells[c])} ${pipes}`;
+      } else if (slot.headCol === c) {
+        line += ` ^${pipes}`; // continues the cell above
+      }
+      c = slot.headCol === c ? c + slot.colSpan : c + 1;
+    }
+    lines.push(line);
+    if (r === headerRows - 1) {
+      lines.push(`| ${Array.from({ length: columns }, () => "---").join(" | ")} |`);
     }
   }
   return `\n${lines.join("\n")}\n\n`;
@@ -301,7 +358,9 @@ function renderCell(cell: docs_v1.Schema$TableCell, ctx: RenderCtx): string {
       .join("")
       .replace(/\n+$/, "")
       .replace(/ {2}\n/g, "<br>")
-      .replace(/[\n|]/g, " ")
+      .replace(/\n/g, " ")
+      // `|` ends a cell and `||` spans columns, so a literal pipe is escaped.
+      .replace(/\|/g, "\\|")
       .trim();
     const bullet = el.paragraph.bullet;
     if (bullet) {
@@ -312,7 +371,11 @@ function renderCell(cell: docs_v1.Schema$TableCell, ctx: RenderCtx): string {
       lines.push(text);
     }
   }
-  return lines.join("<br>").trim();
+  // A caret ending a cell continues the cell above; a literal one is escaped.
+  return lines
+    .join("<br>")
+    .trim()
+    .replace(/(?<!\\)\^$/, "\\^");
 }
 
 /** A cell's Markdown on its own, the way `docs read` renders it inside a table (`docs edit-cell`). */

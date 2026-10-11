@@ -4,6 +4,7 @@ import type { docs_v1 } from "googleapis";
 import {
   MONO_FONT,
   QUOTE_INDENT_PT,
+  columnWidths,
   locateTables,
   parseMarkdown,
   phase1Requests,
@@ -429,7 +430,7 @@ describe("markdown-to-doc: multi-line table cells (#106)", () => {
     const { parsed } = run(md);
     const table = parsed.blocks.find((b) => b.kind === "table");
     if (!table || table.kind !== "table") throw new Error("no table");
-    return { cell: table.rows[row][col], lossy: parsed.lossy };
+    return { cell: table.rows[row][col]!, lossy: parsed.lossy };
   };
   const texts = (cell: { paragraphs: Array<{ inline: { runs: Array<{ text: string }> } }> }) =>
     cell.paragraphs.map((p) => p.inline.runs.map((r) => r.text).join(""));
@@ -609,5 +610,92 @@ describe("markdown-to-doc: adjacent tables mid-document", () => {
     // …and the first table, inserted last, merges into "intro".
     const afterFirst = requests.slice(inserts[1] + 1, inserts[1] + 5);
     expect(afterFirst.some((r) => r.deleteContentRange?.range?.startIndex === 6)).toBe(true);
+  });
+});
+
+describe("markdown-to-doc: merged cells (specs/behaviors/markdown-to-doc.md § Merged cells)", () => {
+  /** A located table: cell paragraph starts 10, 20, 30… in row-major order, starting at index 2. */
+  const located = (rows: number, columns: number) => ({
+    tableStarts: [2],
+    tableCells: [
+      Array.from({ length: rows }, (_, r) =>
+        Array.from({ length: columns }, (_, c) => 10 * (r * columns + c + 1)),
+      ),
+    ],
+  });
+  const tableOf = (md: string) => {
+    const t = run(md).parsed.blocks.find((b) => b.kind === "table");
+    if (!t || t.kind !== "table") throw new Error("no table");
+    return t;
+  };
+
+  it("inserts the full grid, merges before filling, fills only head cells, and pins every header row", () => {
+    const md = "| Group || c |\n| a | b | ^|\n|---|---|---|\n| wide |||\n| x | y | z |";
+    const { phase1 } = run(md);
+    const insert = phase1.requests.find((r) => r.insertTable)?.insertTable;
+    expect([insert?.rows, insert?.columns]).toEqual([4, 3]);
+
+    const requests = phase2Requests(phase1, { tabId: TAB, ...located(4, 3), footnoteIds: [] });
+    const merges = requests
+      .map((r, i) => ({ m: r.mergeTableCells?.tableRange, i }))
+      .filter(({ m }) => m)
+      .map(({ m, i }) => ({
+        at: [m!.tableCellLocation!.rowIndex, m!.tableCellLocation!.columnIndex],
+        span: [m!.rowSpan, m!.columnSpan],
+        i,
+      }));
+    expect(merges.map(({ at, span }) => ({ at, span }))).toEqual([
+      { at: [0, 0], span: [1, 2] },
+      { at: [0, 2], span: [2, 1] },
+      { at: [2, 0], span: [1, 3] },
+    ]);
+    const firstInsert = requests.findIndex((r) => r.insertText);
+    expect(Math.max(...merges.map((m) => m.i))).toBeLessThan(firstInsert);
+
+    const inserts = requests.filter((r) => r.insertText).map((r) => r.insertText!.text);
+    expect(inserts).toEqual(["z", "y", "x", "wide", "b", "a", "c", "Group"]);
+    // Both header rows are bold: Group (10), c (30), a (40), b (50).
+    const bold = requests
+      .filter((r) => r.updateTextStyle?.fields === "bold")
+      .map((r) => r.updateTextStyle!.range!.startIndex)
+      .sort((a, b) => a! - b!);
+    expect(bold).toEqual([10, 30, 40, 50]);
+    expect(requests.find((r) => r.pinTableHeaderRows)?.pinTableHeaderRows).toEqual({
+      tableStartLocation: { index: 2, tabId: TAB },
+      pinnedHeaderRowsCount: 2,
+    });
+  });
+
+  it("writes a row span's continued text into the head cell", () => {
+    const t = tableOf("| a | b |\n|---|---|\n| tall | 1 |\n| more ^| 2 |");
+    expect(t.rows[1][0]?.rowSpan).toBe(2);
+    expect(t.rows[1][0]?.paragraphs[0].inline.runs.map((r) => r.text).join("")).toBe("tall more");
+    expect(t.rows[2][0]).toBeNull();
+  });
+
+  it("refuses a table the spans can't describe, before any request", () => {
+    const code = (md: string) => {
+      try {
+        run(md);
+      } catch (err) {
+        return [(err as AxiError).code, (err as AxiError).message];
+      }
+      return ["none"];
+    };
+    expect(code("| a | b |\n|---|---|\n| ^| y |")).toEqual([
+      "VALIDATION_ERROR",
+      expect.stringMatching(/^This table can't be written: row 2, column 1: `\^` has nothing/),
+    ]);
+    expect(code("| a | b |\n|---|---|\n| x | y | z |")[0]).toBe("VALIDATION_ERROR");
+    expect(code("| a | b |\n|--25%--|--75%--|\n| x | y |")[0]).toBe("VALIDATION_ERROR");
+  });
+
+  it("counts grid columns for a cols hint, and leaves spanning cells out of a fit", () => {
+    const md =
+      "<!-- cols: fit 1 1 -->\n| k | v | w |\n|---|---|---|\n| a much longer caption than any key |||\n| key | x | y |";
+    const t = tableOf(md);
+    expect(t.cols).toHaveLength(3);
+    const narrow = tableOf("<!-- cols: fit 1 1 -->\n| k | v | w |\n|---|---|---|\n| key | x | y |");
+    expect(columnWidths(t, 468, 11)[0]).toBe(columnWidths(narrow, 468, 11)[0]);
   });
 });
