@@ -14,6 +14,9 @@ Designed for use by AI agents. Every response is structured, every error names a
   - [3. Check it works](#3-check-it-works)
   - [4. Make gws-axi your agent's default](#4-make-gws-axi-your-agents-default-for-google-workspace)
   - [Prefer to drive it manually?](#prefer-to-drive-it-manually)
+- [How it works](#how-it-works)
+  - [Output and errors](#output-and-errors)
+  - [Accounts](#accounts) · [Write protection](#write-protection) · [Pinning an agent to one account](#pinning-an-agent-to-one-account)
 - [Usage](#usage)
   - [Home, auth, and health](#home-auth-and-health) · [Signing in from a phone or remote machine](#signing-in-from-a-phone-or-remote-machine)
   - [Calendar](#calendar)
@@ -23,12 +26,8 @@ Designed for use by AI agents. Every response is structured, every error names a
   - [Slides](#slides)
   - [Sheets](#sheets)
   - [Chat](#chat)
-- [Accounts](#accounts)
-  - [Write protection](#write-protection)
-  - [Pinning an agent to one account](#pinning-an-agent-to-one-account)
-- [Output and errors](#output-and-errors)
-- [Design docs](#design-docs)
 - [Known issues & roadmap](#known-issues--roadmap)
+- [Design docs](#design-docs)
 - [Contributing](#contributing) · [License](#license)
 
 ## Status
@@ -135,6 +134,65 @@ To make sure agents reach for `gws-axi` instead of stale alternatives, also cons
 ### Prefer to drive it manually?
 
 The CLI works fine without an agent — each `gws-axi auth setup` invocation prints its own instructions and updates `setup.html`. Run it repeatedly as you complete each step; no state is lost between invocations.
+
+## How it works
+
+Every command shares the same output shape and the same account rules, so these apply to all of [Usage](#usage) below.
+
+### Output and errors
+
+Output is TOON: a few header fields, then compact tables, then `help[]` lines suggesting what to run next.
+
+```
+account: you@example.com
+account_source: default
+count: 3
+range: "2026-04-20T10:00:00-04:00 → 2026-04-27T10:00:00-04:00"
+events[3]{id,summary,start,end,my_response}:
+  abc123,Team standup,"2026-04-21T10:00:00-04:00","2026-04-21T10:15:00-04:00",accepted
+  def456,1:1 with Ari,"2026-04-22T11:30:00-04:00","2026-04-22T12:00:00-04:00",accepted
+  ghi789,Board meeting,2026-04-25,2026-04-26,needsAction
+help[2]:
+  Run `gws-axi calendar get <id>` for full event details (id is the first column)
+  Add `--fields attendees,location,status` to show more columns
+```
+
+Errors are structured too: a stable `code` (`ACCOUNT_REQUIRED`, `SCOPE_MISSING`, `MULTIPLE_MATCHES`, …) and suggestions naming the fix. An unknown flag is an error, never silently ignored — a misspelled `--free` can't be reported as a success that didn't do what was asked.
+
+### Accounts
+
+#### Write protection
+
+gws-axi supports multiple Google accounts under one OAuth client. When two or more are authenticated, write operations require `--account <email>` explicitly — silent wrong-account mutations are impossible:
+
+```bash
+gws-axi calendar events                         # read: uses default account
+gws-axi calendar create --summary "..."         # write: ACCOUNT_REQUIRED error
+gws-axi calendar create --account you@example.com --summary "..."  # OK
+```
+
+#### Pinning an agent to one account
+
+`GWS_AXI_ACCOUNT` pins every command in an environment to one authenticated account. Unlike the default account, nothing inside that environment can change it, and unlike `--account`, the agent doesn't get to choose per call:
+
+```bash
+export GWS_AXI_ACCOUNT=you@example.com
+
+gws-axi calendar events                          # acts as you@example.com
+gws-axi calendar create --summary "..."          # OK — no --account needed
+gws-axi calendar events --account other@x.com    # ACCOUNT_LOCKED — refused, not overridden
+```
+
+The pin beats `default_account`, and it **satisfies write protection**: it is already the explicit account choice, made once by whoever configured the environment. Every response says so with `account_source: env`. A pin naming an account that isn't authenticated fails every command with `ACCOUNT_LOCK_INVALID` rather than quietly falling back — a typo must not become "acted as somebody else."
+
+This is an **accident boundary, not a security boundary** — anything that can run `gws-axi` can also `unset GWS_AXI_ACCOUNT`. For a real boundary, give the agent a config directory holding only that account's tokens, and use both together:
+
+```bash
+export XDG_CONFIG_HOME=/srv/agent-home/config   # bounds which accounts exist at all
+export GWS_AXI_ACCOUNT=you@example.com          # bounds which one is used
+```
+
+These two are the only environment variables gws-axi reads.
 
 ## Usage
 
@@ -422,68 +480,6 @@ Conversations are addressed by id (from `chat spaces`) or by `--with <email>` �
 
 <sub>`chat send` posts immediately to **one** conversation and can't be undone from gws-axi. The body is Markdown; mention someone with `@` + their email (`@bob@example.com`) — they must be in the conversation, or nothing is sent. Pass `--request-id` to make a send safe to retry — a second send with the same id posts nothing. Sending needs a Chat app configured on your Google Cloud project (Chat API → Configuration); its name appears beside each message. Marking read is conversation-level only: Google's API can't mark a thread read.</sub>
 
-## Accounts
-
-### Write protection
-
-gws-axi supports multiple Google accounts under one OAuth client. When two or more are authenticated, write operations require `--account <email>` explicitly — silent wrong-account mutations are impossible:
-
-```bash
-gws-axi calendar events                         # read: uses default account
-gws-axi calendar create --summary "..."         # write: ACCOUNT_REQUIRED error
-gws-axi calendar create --account you@example.com --summary "..."  # OK
-```
-
-### Pinning an agent to one account
-
-`GWS_AXI_ACCOUNT` pins every command in an environment to one authenticated account. Unlike the default account, nothing inside that environment can change it, and unlike `--account`, the agent doesn't get to choose per call:
-
-```bash
-export GWS_AXI_ACCOUNT=you@example.com
-
-gws-axi calendar events                          # acts as you@example.com
-gws-axi calendar create --summary "..."          # OK — no --account needed
-gws-axi calendar events --account other@x.com    # ACCOUNT_LOCKED — refused, not overridden
-```
-
-The pin beats `default_account`, and it **satisfies write protection**: it is already the explicit account choice, made once by whoever configured the environment. Every response says so with `account_source: env`. A pin naming an account that isn't authenticated fails every command with `ACCOUNT_LOCK_INVALID` rather than quietly falling back — a typo must not become "acted as somebody else."
-
-This is an **accident boundary, not a security boundary** — anything that can run `gws-axi` can also `unset GWS_AXI_ACCOUNT`. For a real boundary, give the agent a config directory holding only that account's tokens, and use both together:
-
-```bash
-export XDG_CONFIG_HOME=/srv/agent-home/config   # bounds which accounts exist at all
-export GWS_AXI_ACCOUNT=you@example.com          # bounds which one is used
-```
-
-These two are the only environment variables gws-axi reads.
-
-## Output and errors
-
-Output is TOON: a few header fields, then compact tables, then `help[]` lines suggesting what to run next.
-
-```
-account: you@example.com
-account_source: default
-count: 3
-range: "2026-04-20T10:00:00-04:00 → 2026-04-27T10:00:00-04:00"
-events[3]{id,summary,start,end,my_response}:
-  abc123,Team standup,"2026-04-21T10:00:00-04:00","2026-04-21T10:15:00-04:00",accepted
-  def456,1:1 with Ari,"2026-04-22T11:30:00-04:00","2026-04-22T12:00:00-04:00",accepted
-  ghi789,Board meeting,2026-04-25,2026-04-26,needsAction
-help[2]:
-  Run `gws-axi calendar get <id>` for full event details (id is the first column)
-  Add `--fields attendees,location,status` to show more columns
-```
-
-Errors are structured too: a stable `code` (`ACCOUNT_REQUIRED`, `SCOPE_MISSING`, `MULTIPLE_MATCHES`, …) and suggestions naming the fix. An unknown flag is an error, never silently ignored — a misspelled `--free` can't be reported as a success that didn't do what was asked.
-
-## Design docs
-
-- [`docs/design.md`](https://github.com/JarvusInnovations/gws-axi/blob/main/docs/design.md) — architecture, auth model, doctor tiers, command surface
-- [`docs/shared-client-future.md`](https://github.com/JarvusInnovations/gws-axi/blob/main/docs/shared-client-future.md) — why BYO-only for v1, what a shared-client public distribution would involve
-- [`docs/shared-client-onboarding.md`](https://github.com/JarvusInnovations/gws-axi/blob/main/docs/shared-client-onboarding.md) — running a client your teammates `auth join`
-- [`specs/`](https://github.com/JarvusInnovations/gws-axi/tree/main/specs) — per-command behavior specs, the source of truth for what each command does
-
 ## Known issues & roadmap
 
 - **Gmail `send`**: intentionally unsupported — gws-axi drafts mail but leaves sending to a human in the Gmail UI. See [Gmail](#gmail).
@@ -498,6 +494,13 @@ Errors are structured too: a stable `code` (`ACCOUNT_REQUIRED`, `SCOPE_MISSING`,
 - **Slides writes**: `skip` / `unskip` (hide slides in presentation mode) are shipped; `create` / `update` are still scaffolded as `NOT_IMPLEMENTED`.
 - **Sheets writes** (`update`, `append`, `clear`, `create`, `add-tab`): scaffolded as `NOT_IMPLEMENTED`; `read` (with inline-markdown links + cell notes) and `comments` are shipped.
 - **Testing-mode tokens** still expire every 7 days *if* you haven't published your OAuth app yet. Run `gws-axi auth publish` for the walkthrough — it covers the single-developer Production flow and removes the expiry once you've re-auth'd each account.
+
+## Design docs
+
+- [`docs/design.md`](https://github.com/JarvusInnovations/gws-axi/blob/main/docs/design.md) — architecture, auth model, doctor tiers, command surface
+- [`docs/shared-client-future.md`](https://github.com/JarvusInnovations/gws-axi/blob/main/docs/shared-client-future.md) — why BYO-only for v1, what a shared-client public distribution would involve
+- [`docs/shared-client-onboarding.md`](https://github.com/JarvusInnovations/gws-axi/blob/main/docs/shared-client-onboarding.md) — running a client your teammates `auth join`
+- [`specs/`](https://github.com/JarvusInnovations/gws-axi/tree/main/specs) — per-command behavior specs, the source of truth for what each command does
 
 ## Contributing
 
