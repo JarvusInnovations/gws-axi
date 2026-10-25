@@ -48,7 +48,9 @@ grouped so conflicts are keep-both.
 - [ ] Every "To verify live" row Observed (or amended) with a date.
 - [ ] Live: `insert-rows 3:5` on a formatted table — rows 3–5 empty with the table's
       formatting, old row 3 at 6, a `SUM(B2:B9)` below now reads `B2:B12`, `inherit: from
-      row 2`; `--no-inherit` leaves them unformatted; `insert-rows 1` reports `inherit: none`.
+      row 2`; `--no-inherit` leaves them unformatted; `insert-rows 1` reports `inherit: from
+      row N (was row 1)` (amended: upstream has no un-inherited insert — see the spec's
+      `inheritFromBefore: false` row).
 - [ ] Live: `delete-rows 3:5` reports the removed cells in `cells[]` with old row numbers,
       the `shifted` sentence, and a `#REF!` in a formula that read a deleted cell, with a fix
       line; `errors_fixed` when re-inserting and re-filling.
