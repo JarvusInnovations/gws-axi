@@ -311,3 +311,17 @@ describe("extractGrid — formulas and errors", () => {
     ]);
   });
 });
+
+describe("nonGridLine", () => {
+  it("calls only OBJECT sheets charts", async () => {
+    const { nonGridLine } = await import("./read.js");
+    expect(nonGridLine(0, 0, "1AbC")).toBeUndefined();
+    expect(nonGridLine(2, 0, "1AbC")).toBe(
+      "2 chart sheet(s) not listed here; run `gws-axi sheets tabs 1AbC` for every sheet",
+    );
+    expect(nonGridLine(1, 1, "1AbC")).toBe(
+      "1 chart sheet(s) and 1 other non-grid sheet(s) not listed here; run `gws-axi sheets tabs 1AbC` for every sheet",
+    );
+    expect(nonGridLine(0, 1, "1AbC")).toMatch(/^1 other non-grid sheet\(s\) not listed/);
+  });
+});

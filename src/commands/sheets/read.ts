@@ -410,6 +410,23 @@ const FORMULAS_CAP = 20;
 /** Rows of the errors[] block before `errors_total`. */
 const ERRORS_CAP = 50;
 
+/**
+ * The help line for sheets `sheets read` leaves out of its listing. Chart
+ * sheets are upstream's `OBJECT` type; anything else non-grid (a data-source
+ * sheet) is not called a chart.
+ */
+export function nonGridLine(
+  charts: number,
+  others: number,
+  spreadsheetId: string,
+): string | undefined {
+  const parts: string[] = [];
+  if (charts > 0) parts.push(`${charts} chart sheet(s)`);
+  if (others > 0) parts.push(`${others} other non-grid sheet(s)`);
+  if (parts.length === 0) return undefined;
+  return `${parts.join(" and ")} not listed here; run \`gws-axi sheets tabs ${spreadsheetId}\` for every sheet`;
+}
+
 export async function sheetsReadCommand(account: string, args: string[]): Promise<string> {
   const flags = parseFlags(args);
   const api = await sheetsClient(account);
@@ -437,13 +454,14 @@ export async function sheetsReadCommand(account: string, args: string[]): Promis
     .map(toTabInfo);
 
   // Chart sheets have no cells, so the listings here leave them out — say so.
-  const chartSheets = (meta.sheets ?? []).filter(
-    (s) => (s.properties?.sheetType ?? "GRID") !== "GRID",
-  ).length;
-  const chartLine =
-    chartSheets > 0
-      ? `${chartSheets} chart sheet(s) not listed here; run \`gws-axi sheets tabs ${flags.spreadsheetId}\` for every sheet`
-      : undefined;
+  const nonGrid = (meta.sheets ?? [])
+    .map((s) => s.properties?.sheetType ?? "GRID")
+    .filter((t) => t !== "GRID");
+  const chartLine = nonGridLine(
+    nonGrid.filter((t) => t === "OBJECT").length,
+    nonGrid.filter((t) => t !== "OBJECT").length,
+    flags.spreadsheetId,
+  );
 
   // Resolve which tab (if any) to render.
   //  - tab-qualified --range → that tab
@@ -470,6 +488,7 @@ export async function sheetsReadCommand(account: string, args: string[]): Promis
         [
           `Available tabs: ${gridSheets.map((t) => `${t.title} (gid ${t.gid})`).join(", ") || "none"}`,
           `Run \`gws-axi sheets read ${flags.spreadsheetId}\` to list tabs`,
+          ...(chartLine ? [chartLine] : []),
         ],
       );
     }
