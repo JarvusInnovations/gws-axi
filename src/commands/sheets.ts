@@ -8,6 +8,17 @@ import { CREATE_FLAGS, CREATE_HELP, sheetsCreateCommand } from "./sheets/create.
 import { NOTE_FLAGS, NOTE_HELP, sheetsNoteCommand } from "./sheets/note.js";
 import { READ_HELP, sheetsReadCommand } from "./sheets/read.js";
 import {
+  TABS_DELETE_FLAGS,
+  TABS_DELETE_HELP,
+  TABS_FLAGS,
+  TABS_HELP,
+  TABS_UPDATE_FLAGS,
+  TABS_UPDATE_HELP,
+  sheetsTabsCommand,
+  sheetsTabsDeleteCommand,
+  sheetsTabsUpdateCommand,
+} from "./sheets/tabs.js";
+import {
   APPEND_FLAGS,
   APPEND_HELP,
   CLEAR_FLAGS,
@@ -111,6 +122,23 @@ export const SUBCOMMANDS: SheetsSubcommand[] = [
     help: NOTE_HELP,
     handler: sheetsNoteCommand,
   },
+  // Two-word subcommands (as in `docs`): the dispatcher tries `tabs update`
+  // before `tabs`, so write protection applies to exactly the tab writes.
+  { name: "tabs", mutation: false, flags: TABS_FLAGS, help: TABS_HELP, handler: sheetsTabsCommand },
+  {
+    name: "tabs update",
+    mutation: true,
+    flags: TABS_UPDATE_FLAGS,
+    help: TABS_UPDATE_HELP,
+    handler: sheetsTabsUpdateCommand,
+  },
+  {
+    name: "tabs delete",
+    mutation: true,
+    flags: TABS_DELETE_FLAGS,
+    help: TABS_DELETE_HELP,
+    handler: sheetsTabsDeleteCommand,
+  },
 ];
 
 const SUB_BY_NAME: Record<string, SheetsSubcommand> = Object.fromEntries(
@@ -156,6 +184,7 @@ ${renderAlternatives(SUBCOMMANDS)}subcommand help:
   gws-axi sheets append --help     for adding rows (CSV, JSON, header-keyed)
   gws-axi sheets comments --help   for review comments (Drive comments)
   gws-axi sheets note --help       for setting or clearing one cell's note
+  gws-axi sheets tabs --help       for listing, moving, renaming, hiding, freezing, deleting tabs
 examples:
   gws-axi sheets read 1AbC...
   gws-axi sheets read 1AbC... --tab Costs --range A1:D50
@@ -164,6 +193,7 @@ examples:
   gws-axi sheets append 1AbC... --tab Costs --content 'bolts,40' --account you@example.com
   gws-axi sheets create --title "Q4 Tracker" costs.csv --header --account you@example.com
   gws-axi sheets comments 1AbC...
+  gws-axi sheets tabs update 1AbC... Archive --first --freeze-rows 1 --account you@example.com
 `;
 
 export async function sheetsCommand(args: string[]): Promise<string> {
@@ -171,7 +201,8 @@ export async function sheetsCommand(args: string[]): Promise<string> {
     return SHEETS_HELP;
   }
 
-  const sub = args[0];
+  const twoWord = args.length > 1 ? `${args[0]} ${args[1]}` : undefined;
+  const sub = twoWord && SUB_BY_NAME[twoWord] ? twoWord : args[0];
   const def = SUB_BY_NAME[sub];
   if (!def) {
     throw new AxiError(`Unknown sheets subcommand: ${sub}`, "VALIDATION_ERROR", [
@@ -179,7 +210,7 @@ export async function sheetsCommand(args: string[]): Promise<string> {
     ]);
   }
 
-  const rest = args.slice(1);
+  const rest = args.slice(sub === twoWord ? 2 : 1);
   if (rest.includes("--help")) {
     return def.handler ? def.help : withInstead(def.help, def.instead);
   }

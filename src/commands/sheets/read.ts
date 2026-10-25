@@ -436,6 +436,15 @@ export async function sheetsReadCommand(account: string, args: string[]): Promis
     .filter((p): p is sheets_v4.Schema$SheetProperties => !!p && (p.sheetType ?? "GRID") === "GRID")
     .map(toTabInfo);
 
+  // Chart sheets have no cells, so the listings here leave them out — say so.
+  const chartSheets = (meta.sheets ?? []).filter(
+    (s) => (s.properties?.sheetType ?? "GRID") !== "GRID",
+  ).length;
+  const chartLine =
+    chartSheets > 0
+      ? `${chartSheets} chart sheet(s) not listed here; run \`gws-axi sheets tabs ${flags.spreadsheetId}\` for every sheet`
+      : undefined;
+
   // Resolve which tab (if any) to render.
   //  - tab-qualified --range → that tab
   //  - --tab → by title, else by gid
@@ -498,6 +507,7 @@ export async function sheetsReadCommand(account: string, args: string[]): Promis
         `Run \`gws-axi sheets read ${flags.spreadsheetId} --tab ${shellArg(t.title)}\` to read the '${t.title}' tab`,
       );
     }
+    if (chartLine) suggestions.push(chartLine);
     if (suggestions.length) blocks.push(renderHelp(suggestions));
     return joinBlocks(...blocks);
   }
@@ -546,6 +556,7 @@ export async function sheetsReadCommand(account: string, args: string[]): Promis
     suggestions.push(
       `Run \`gws-axi drive revisions ${flags.spreadsheetId}\` to see this spreadsheet's version history`,
     );
+    if (chartLine) suggestions.push(chartLine);
     blocks.push(renderHelp(suggestions));
     return joinBlocks(...blocks);
   }
@@ -661,6 +672,7 @@ export async function sheetsReadCommand(account: string, args: string[]): Promis
       `formulas and errors count the fetched window only; run with --full to scan the whole tab`,
     );
   }
+  if (chartLine) suggestions.push(chartLine);
   suggestions.push(
     `Run \`gws-axi sheets comments ${flags.spreadsheetId}\` for review comments, or \`gws-axi drive revisions ${flags.spreadsheetId}\` / \`gws-axi drive activity ${flags.spreadsheetId}\` for version history`,
   );
