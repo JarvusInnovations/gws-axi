@@ -40,6 +40,9 @@ gws-axi sheets delete-cols <spreadsheetId> <cols> [--tab <name|gid>]
 | Formulas referencing rows/columns at or after an insertion point are shifted by Sheets; a range that spans the insertion point grows (`SUM(B2:B9)` → `SUM(B2:B12)` after three rows at 3) | **Observed 2026-10-25** |
 | `deleteDimension` removes the range; what follows moves up/left; a range partly deleted shrinks (`SUM(B2:B12)` → `SUM(B2:B11)`). A formula that read a deleted cell becomes `#REF!` — and **its text is rewritten**: `=B7` is stored as `=#REF!`, so the original formula exists only in a read taken before the delete | **Observed 2026-10-25** (amended: the rewrite was not documented) |
 | Deleting every row (or every column) of a sheet is refused (400 "You can't delete all the rows on the sheet." / "… all the columns …") | **Observed 2026-10-25**; refused locally first |
+| Deleting every **non-frozen** row (or column) is refused too, whether or not the range also reaches into the freeze (400 "Sorry, it is not possible to delete all non-frozen rows." / "… columns."); deleting only frozen rows, or part of the non-frozen ones, is allowed | **Observed 2026-10-25** (amended: found in review); refused locally first |
+| An insert inside a data-validation or conditional-format range extends it over the new cells, `--no-inherit`'s format clear notwithstanding (validation is a cell property `userEnteredFormat` doesn't cover; a conditional-format rule's range just grows). An insert at the range's first row lands above it and is not covered | **Observed 2026-10-25** |
+| `values.get` over a whole-row or whole-column range returns values from the range's first row/column, keeping leading empty rows (`[]`) and trimming trailing ones | **Observed 2026-10-25** |
 | A range starting past the allocation is refused: insert 400 "range.startIndex is larger than current grid size (N)", delete 400 "Cannot delete a row that doesn't exist". An insert starting **at** the allocation (one past the last row) is accepted and adds rows at the end. A delete that starts inside the allocation and runs past it is **accepted and silently clipped** — only the existing part is deleted | **Observed 2026-10-25** (amended: the silent clip is why a delete past the end is refused locally) |
 | Deleting rows/columns inside the frozen area reduces the frozen count; deleting all frozen rows is allowed (the count goes to 0). **Inserting** inside the frozen area *grows* the count (an insert at row 1 or 2 of a 3-row freeze → 4). Columns behave the same | **Observed 2026-10-25** (amended: the insert half) |
 | An insert that would exceed the 10,000,000-cell spreadsheet limit is refused (400) | Documented. Not exercised; translated generically |
@@ -73,7 +76,9 @@ gws-axi sheets delete-cols <spreadsheetId> <cols> [--tab <name|gid>]
   `userEnteredFormat` over the new rows/columns go in **one** `batchUpdate` (all or
   nothing). The response says `inherit: none`, and a help line discloses that the row
   height / column width still came from the neighbor (upstream has no un-inherited insert,
-  and resetting a size would mean guessing the tab's default).
+  and resetting a size would mean guessing the tab's default), and that data validation and
+  conditional formatting whose range spans the insertion point now cover the new cells
+  (they are range properties, not cell formats; observed).
 - The tab's allocation grows by the inserted count (upstream does this); the response
   carries `grid: R×C` after.
 - A request that starts **past** the current allocation is a `VALIDATION_ERROR` pointing at
@@ -84,12 +89,22 @@ gws-axi sheets delete-cols <spreadsheetId> <cols> [--tab <name|gid>]
 
 ### Delete
 
-- Before the write, the deleted range's populated cells are fetched (the write mask:
-  entered value + display) and rendered in the read's grid shape, capped at 50 rows with
-  `cells_total_rows` past the cap (the read's name for the same count; `cells` is already
-  the number of populated cells) — the undo record, as `written[]` is for a value write.
-- A delete covering the whole allocation (every row, or every column) is refused locally
-  with `VALIDATION_ERROR`, pointing at `sheets clear --all` or `sheets tabs delete`.
+- Before the write, the deleted range's cells are fetched and rendered in the read's grid
+  shape — the undo record, as `written[]` is for a value write. The block is **anchored**:
+  it starts at the range's first row (rows) or at row 1 (columns), and at column A (rows) or
+  the range's first column (columns), and runs through the last populated row, with empty
+  rows and cells kept as empty — so `insert-*` at the same range then `sheets update --range
+  <anchor>` with the block puts every value back where it was.
+- The fetch is **bounded**: the render window (the first 50 rows of the block, by old row
+  number, clipped to the allocation) under the write mask (entered value + display), and a
+  `values.get` (display only) over the whole range for the count — `cells` (populated
+  cells) and `cells_total_rows` (rows from the anchor through the last populated row) when
+  that exceeds the 50 rendered (the read's name for the same count). When the range holds
+  more than 200,000 cells, the count is skipped: `cells: not counted (range is N cells)`,
+  and the block is what the window holds.
+- A delete covering the whole allocation (every row, or every column) — or every row/column
+  **outside the freeze** (upstream refuses that too; observed) — is refused locally with
+  `VALIDATION_ERROR`, pointing at `sheets clear --all` or `sheets tabs delete`.
 - A delete whose range runs past the allocation is refused locally with `VALIDATION_ERROR`
   naming the last row/column: upstream would silently delete only the part that exists,
   and `count` would then be wrong.
@@ -97,9 +112,11 @@ gws-axi sheets delete-cols <spreadsheetId> <cols> [--tab <name|gid>]
   count when it changed. (An insert inside the frozen area grows the count; it is reported
   the same way.)
 - A `#REF!` the delete caused names its formula **as it was before the delete** (from the
-  pre-scan) in its fix line — the stored formula is now `=#REF!`, so offering it back would
-  write the error again. The fix line points at `sheets cell` / `sheets update --cell` for the
-  agent to re-address it.
+  pre-scan) **and as it is now**: the stored formula has the broken reference rewritten to
+  `#REF!` and every surviving reference already shifted (`=B7+C20` → `=#REF!+C17` after rows
+  5:7 go), so the old text alone would send a re-pointed `C20` to the wrong cell. The
+  runnable `sheets update --cell` carries the **current** formula, `#REF!` and all, for the
+  agent to edit.
 - **Not idempotent** in the usual sense: a second identical call deletes the rows that
   moved into the range. The response says so, naming the rows that now occupy the range.
 
@@ -132,18 +149,18 @@ action: deleted
 range: Costs!3:5
 count: 3
 shifted: rows 6 and below moved up by 3 (old row 6 is now row 3)
-cells: 11
+cells: 8
 cells[3]{row,A,B,C,D}:
-  3,bolts,40,"$4.00","$160.00"
-  4,nuts,,"$0.20",
-  5,washers,200,"$0.05","$10.00"
+  3,bolts,40,"$4.00",=B3*C3
+  4,"","","",""
+  5,washers,200,"$0.05",=B5*C5
 errors: 1
 errors[1]{cell,error,message,written}:
   D12,REF,…,no
 help[4]:
   1 formula error after this delete — see errors[]
-  Fix D12 (#REF!, …): it was =C4*1.1 before the delete, and row 4 is gone — re-point it with gws-axi sheets update 1AbC… --tab Costs --cell D12='=…' --account alice@example.com
-  The deleted cells are above and in version history: `gws-axi drive revisions 1AbC…`; `gws-axi sheets insert-rows 1AbC… 3:5 --tab Costs` then `sheets update --range A3` restores them
+  Fix D12 (#REF!, …): it was =C4*1.1+D20 (in D15) before the delete; it is now =#REF!*1.1+D17 — re-point the #REF! in the current formula: gws-axi sheets update 1AbC… --tab Costs --cell D12='=#REF!*1.1+D17' --account alice@example.com
+  The deleted cells are above and in version history: `gws-axi drive revisions 1AbC…`; `gws-axi sheets insert-rows 1AbC… 3:5 --tab Costs` then `sheets update --range A3` with cells[] as-is (empty rows included) restores them
   Rows 3:5 are now what was 6:8 — re-running would delete those
 ```
 
@@ -154,8 +171,9 @@ help[4]:
   N (was row 1)` (an insert at row/column 1, which inherits from below/right), or `none`
   (`--no-inherit`).
 - `grid` — the tab's allocation after an insert.
-- `cells` + `cells[N]{row,…}` (delete) — the populated cells removed, in the read's grid
-  shape; the block's `row` numbers are the **old** numbers. Omitted (`cells: 0`) when the
+- `cells` + `cells[N]{row,…}` (delete) — `cells` counts the populated cells removed (or
+  `not counted (range is N cells)` past the bound); the block is the anchored grid described
+  above, empty rows included, with the **old** row numbers. Omitted (`cells: 0`) when the
   range held nothing.
 - `errors[]`, `errors_fixed`, `errors_elsewhere`, `error_scan` — as a value write, with the
   pre-call errors re-keyed to their post-call addresses first (an error that only moved is
@@ -170,7 +188,7 @@ help[4]:
 
 | Code | When |
 | --- | --- |
-| `VALIDATION_ERROR` | Missing id or range; a range that is not a row range (for `*-rows`) or column range (for `*-cols`); `--tab` disagreeing with a qualified range; start past the allocation; a delete whose end is past the allocation; a delete covering every row/column; `--no-inherit` on a delete |
+| `VALIDATION_ERROR` | Missing id or range; a range that is not a row range (for `*-rows`) or column range (for `*-cols`); `--tab` disagreeing with a qualified range; start past the allocation; a delete whose end is past the allocation; a delete covering every row/column, or every one outside the freeze; `--no-inherit` on a delete |
 | `SPREADSHEET_NOT_FOUND`, `TAB_REQUIRED`, `TAB_NOT_FOUND` | As `sheets update` |
 | `PROTECTED_RANGE` | Upstream refused because a protected range overlaps |
 
