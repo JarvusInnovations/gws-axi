@@ -188,6 +188,9 @@ The contract is the same on every command that offers it:
   that does not exist is created for an auto path and is `EXPORT_WRITE_FAILED` for an explicit
   one.
 - **At most one `*-out` flag per invocation**; two is a `VALIDATION_ERROR` naming both.
+- **A failed write does not discard the result.** The preview renders as usual and
+  `export_error: {code: EXPORT_WRITE_FAILED, message, path}` takes the place of `wrote:`; the
+  command exits 1 (the partial-failure rule, as `drive share`).
 - **The preview does not change** when a file is written. The response **adds** three things:
   `wrote: <path> (<rows> rows, <cols> cols)`; `columns: <name>:<type>, …` so follow-up
   processing can be written without opening the file; and one `help[]` line with a runnable
