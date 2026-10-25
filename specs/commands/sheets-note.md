@@ -77,7 +77,7 @@ help[2]:
 | --- | --- |
 | `VALIDATION_ERROR` | Missing id or cell; a range; neither or both of `--text`/`--clear`; empty `--text`; `--tab` disagreeing with a qualified cell |
 | `SPREADSHEET_NOT_FOUND`, `TAB_REQUIRED`, `TAB_NOT_FOUND` | As `sheets update` |
-| `RANGE_INVALID` | Not an A1 cell |
+| `RANGE_INVALID` | Not an A1 cell; a cell outside the tab's grid (checked locally from the tab's row and column counts, before any read) |
 | `PROTECTED_RANGE` | Upstream refused |
 
 ## Out of scope
