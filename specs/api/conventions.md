@@ -170,6 +170,41 @@ command that has to turn such an id into a person does it through **one shared r
 
 When the upstream API documents that a response may be incomplete, or returns a lossy/partial representation of the underlying data, the command states that limit in its output (a `note`/`warning` field or a `help[]` line) rather than presenting the partial result as whole ([principles.md#surface-completeness-limits](../principles.md#surface-completeness-limits)).
 
+## Export files
+
+A command whose payload can exceed its display cap may offer the full payload as a **file**,
+beside the capped preview on stdout
+([principles.md#preview-to-stdout-full-data-to-a-file](../principles.md#preview-to-stdout-full-data-to-a-file)).
+The contract is the same on every command that offers it:
+
+- **One flag per format, named for the format**: `--json-out[=<path>]`, `--csv-out[=<path>]`.
+  No generic `--out`, no `--format`, no extension sniffing. A command offers only the formats
+  that are faithful for its payload (a grid offers both; a tree offers JSON only).
+- **The `=<path>` is optional.** Bare, the file is auto-generated at
+  `<os-temp-dir>/gws-axi/<UTC-timestamp>-<kind>.<ext>` and written **`0600`** — an export is
+  ephemeral scratch and may be sensitive, and the temp dir is OS-pruned and sometimes
+  world-readable. `=<path>` writes exactly there (`~/` expanded, relative to the working
+  directory), with the default umask: the caller chose where it persists. A parent directory
+  that does not exist is created for an auto path and is `EXPORT_WRITE_FAILED` for an explicit
+  one.
+- **At most one `*-out` flag per invocation**; two is a `VALIDATION_ERROR` naming both.
+- **The preview does not change** when a file is written. The response **adds** three things:
+  `wrote: <path> (<rows> rows, <cols> cols)`; `columns: <name>:<type>, …` so follow-up
+  processing can be written without opening the file; and one `help[]` line with a runnable
+  command against the path (`jq '.rows[]' <path>` for JSON, `head <path>` or a `csvkit` form
+  for CSV).
+- **The file is the source's real output where one exists** (a native CSV export upstream),
+  else gws-axi's own serialization of the complete, uncapped payload. JSON files carry the
+  columns and every row; nothing in them is truncated.
+- `--json-out` and `--csv-out` are declared like any flag and refused where not offered
+  ([fail-loud-on-unknown-flags](../principles.md#fail-loud-on-unknown-flags)).
+
+**Optional-value syntax.** These are the one place a flag takes an optional value, so the
+value rides on the flag with `=`: `--csv-out=./q4.csv`. `parseArgs` accepts `--<flag>=<value>`
+only for flags declared `optional`, and never for value flags (`--range=B2` stays a usage
+error, so the two forms are not confused). A bare `--csv-out` followed by a path-looking
+token does not consume it.
+
 ## Unimplemented and unsupported surfaces
 
 A subcommand may be **scaffolded** (listed, `--help`-documented, no handler — throws
