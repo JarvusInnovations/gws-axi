@@ -81,6 +81,46 @@ describe("parseUpdateFlags", () => {
   });
 });
 
+describe("parseUpdateFlags (keyed)", () => {
+  const objs = ["--json", "--content", '[{"Name":"x","Status":"done"}]'];
+  it("takes --key and --append-missing with --json objects", () => {
+    expect(parseUpdateFlags(["1AbC", ...objs, "--key", "Name", "--append-missing"])).toMatchObject({
+      keyed: true,
+      key: "Name",
+      appendMissing: true,
+    });
+  });
+  it("treats a --json source with no --range or --cell as keyed on column A", () => {
+    const f = parseUpdateFlags(["1AbC", ...objs]);
+    expect(f).toMatchObject({ keyed: true, appendMissing: false });
+    expect(f.key).toBeUndefined();
+  });
+  it("still needs --range for a CSV block", () => {
+    expect(codeOf(() => parseUpdateFlags(["1AbC", "--content", "a,b"]))).toBe("VALIDATION_ERROR");
+  });
+  it("refuses --key / --append-missing beside --range, --cell or --header", () => {
+    for (const extra of [["--range", "A2"], ["--cell", "B2=1"], ["--header"]]) {
+      expect(codeOf(() => parseUpdateFlags(["1AbC", ...objs, "--key", "Name", ...extra]))).toBe(
+        "VALIDATION_ERROR",
+      );
+      expect(codeOf(() => parseUpdateFlags(["1AbC", ...objs, "--append-missing", ...extra]))).toBe(
+        "VALIDATION_ERROR",
+      );
+    }
+  });
+  it("refuses --key without --json, with an empty name, or without one source", () => {
+    expect(codeOf(() => parseUpdateFlags(["1AbC", "--key", "Name", "--content", "x"]))).toBe(
+      "VALIDATION_ERROR",
+    );
+    expect(codeOf(() => parseUpdateFlags(["1AbC", ...objs, "--key", " "]))).toBe(
+      "VALIDATION_ERROR",
+    );
+    expect(codeOf(() => parseUpdateFlags(["1AbC", "--json", "--key", "Name"]))).toBe(
+      "VALIDATION_ERROR",
+    );
+  });
+});
+
 describe("parseAppendFlags / parseClearFlags", () => {
   it("append needs a source", () => {
     expect(codeOf(() => parseAppendFlags(["1AbC"]))).toBe("VALIDATION_ERROR");

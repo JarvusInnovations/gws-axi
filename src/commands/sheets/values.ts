@@ -133,8 +133,8 @@ export type JsonBlock =
   | { kind: "keyed"; objects: Array<Record<string, InputValue>> };
 
 /**
- * A JSON block: a 2-D array of rows; for `append` (`allowObjects`) also an
- * array of objects keyed by header title.
+ * A JSON block: a 2-D array of rows; for `append` and keyed `update`
+ * (`allowObjects`) also an array of objects keyed by header title.
  */
 export function parseJsonGrid(text: string, opts: { allowObjects: boolean }): JsonBlock {
   let data: unknown;
@@ -154,11 +154,12 @@ export function parseJsonGrid(text: string, opts: { allowObjects: boolean }): Js
   if (data.length > 0 && data.every(isObject)) {
     if (!opts.allowObjects) {
       throw new AxiError(
-        "JSON objects keyed by header are an `append` block only",
+        "JSON objects keyed by header are an `append` or keyed `update` block only",
         "VALIDATION_ERROR",
         [
           'Pass a 2-D array of rows instead, e.g. [["Name","Qty"],["bolts",40]]',
           "Or append the rows: `gws-axi sheets append <id> --json …`",
+          "Or edit existing rows by their label, without --range: `gws-axi sheets update <id> --json --key <header> …`",
         ],
       );
     }
@@ -245,7 +246,8 @@ export interface CellArg {
   a1: string;
   row0: number;
   col0: number;
-  value: string;
+  /** A string from `--cell`; a typed JSON value from a keyed update. */
+  value: Exclude<InputValue, null>;
 }
 
 /** Split `Costs!B5=4800` at the first `=` after the cell (a quoted title may hold one). */

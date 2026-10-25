@@ -57,6 +57,7 @@ import {
   parseCsv,
   parseJsonGrid,
 } from "./values.js";
+import { appendedCells, matchKeyedRows, resolveKeyColumn } from "./keyed.js";
 
 /**
  * The range writers — `sheets update`, `sheets append`, `sheets clear` — and
@@ -90,11 +91,11 @@ const OUTPUT_NOTES = `output:
   errors[N]{cell,error,message,written} lists formula errors this write left
   anywhere in the tab, with a runnable fix line per error in help[].`;
 
-export const UPDATE_HELP = `usage: gws-axi sheets update <spreadsheetId> (--range <A1> (<file> | - | --content <values>) | --cell <A1>=<value>...) [--tab <name|gid>] [flags]
+export const UPDATE_HELP = `usage: gws-axi sheets update <spreadsheetId> (--range <A1> (<file> | - | --content <values>) | --cell <A1>=<value>... | --json [--key <header>] (<file> | - | --content <objects>)) [--tab <name|gid>] [flags]
 args[2]:
   <spreadsheetId>      The spreadsheet ID (the portion of the URL after /d/)
 ${BLOCK_HELP}
-flags[9]:
+flags[11]:
   --range <A1>         Where the block goes: a cell anchors it (B2), a range bounds
                        it (B2:D9, B:B, 3:3) and a larger block is refused. A
                        tab-qualified range (Costs!B2) makes --tab optional
@@ -102,6 +103,12 @@ flags[9]:
   --cell <A1>=<value>  One cell, repeatable: --cell B5=4800 --cell D2='=B2*C2'.
                        Everything after the first = is the value. Replaces
                        --range and the block
+  --key <header>       Edit existing rows by label: with --json objects keyed by
+                       row 1's headers and no --range, each object finds the row
+                       whose <header> cell displays its value (default: column
+                       A's header) and writes its other keys into that row
+  --append-missing     With a keyed update: add objects whose label matches no
+                       row as new rows under the headers, instead of refusing
   --tab <name|gid>     The tab, by title or numeric gid. Required on a multi-tab
                        spreadsheet unless the range names it
 ${ENCODING_HELP}
@@ -112,13 +119,21 @@ examples:
   gws-axi sheets update 1AbC... --range 'Costs!A1' --content 'Item,Qty' --header --account you@example.com
   gws-axi sheets update 1AbC... --tab Costs --cell B5=4800 --cell D2='=B2*C2' --account you@example.com
   gws-axi sheets update 1AbC... --tab Costs --range A2 --json --content '[["bolts",40,null]]' --account you@example.com
+  gws-axi sheets update 1AbC... --tab Tasks --json --key Name --content '[{"Name":"Ship it","Status":"done"}]' --account you@example.com
 ${OUTPUT_NOTES}
+  A keyed update adds rows[N]{key,row,cells,action}: the row each object
+  matched and whether it was updated, unchanged or appended.
 notes:
   A block smaller than --range writes its own extent and leaves the rest of the
   range as it was; \`sheets clear\` empties a range. A block wider or longer than
   the tab grows the tab (grid: in the output). Nothing but values is touched:
   formats, widths, validation and notes stay. Re-running is action: unchanged
   when every cell already holds what the block would store.
+  Keyed rows match the key column's displayed text exactly (trimmed,
+  case-sensitive): a column formatted 0001 matches "0001", not 1. No match is
+  ROW_NOT_FOUND and two matches ROW_AMBIGUOUS, for the whole block before
+  anything is written. The key cell, headers an object does not name, and every
+  other row are left as they are.
 ${CSV_NOTES}
 `;
 
@@ -171,8 +186,8 @@ notes:
 `;
 
 export const UPDATE_FLAGS: FlagSpec = {
-  value: ["--range", "--content", "--cell", "--tab"],
-  boolean: ["--json", "--tsv", "--raw", "--header"],
+  value: ["--range", "--content", "--cell", "--tab", "--key"],
+  boolean: ["--json", "--tsv", "--raw", "--header", "--append-missing"],
 };
 export const APPEND_FLAGS: FlagSpec = {
   value: ["--content", "--tab"],
@@ -216,10 +231,15 @@ export interface UpdateFlags extends BlockFlags {
   cells?: CellArg[];
   tab?: string;
   header: boolean;
+  /** A keyed update: JSON objects edit existing rows found by `key`. */
+  keyed?: boolean;
+  /** The label column's header; column A's when absent. */
+  key?: string;
+  appendMissing: boolean;
 }
 
 const UPDATE_USAGE =
-  "gws-axi sheets update <spreadsheetId> (--range <A1> (<file> | - | --content <values>) | --cell <A1>=<value>...) [--tab <name|gid>]";
+  "gws-axi sheets update <spreadsheetId> (--range <A1> (<file> | - | --content <values>) | --cell <A1>=<value>... | --json [--key <header>] (<file> | - | --content <objects>)) [--tab <name|gid>]";
 
 function positionalsOf(
   parsed: ParsedArgs,
@@ -255,8 +275,41 @@ export function parseUpdateFlags(args: string[]): UpdateFlags {
     range: parsed.values["--range"],
     tab: parsed.values["--tab"],
     header: parsed.booleans.has("--header"),
+    key: parsed.values["--key"],
+    appendMissing: parsed.booleans.has("--append-missing"),
   };
   const cellArgs = parsed.lists["--cell"];
+  if (flags.key !== undefined || flags.appendMissing) {
+    const what = flags.key !== undefined ? "--key" : "--append-missing";
+    const others = [
+      flags.range !== undefined && "--range",
+      cellArgs?.length && "--cell",
+      flags.header && "--header",
+    ].filter(Boolean);
+    if (others.length) {
+      throw new AxiError(
+        `${what} edits rows by label; it cannot be combined with ${others.join(", ")}`,
+        "VALIDATION_ERROR",
+        [
+          "A keyed update finds each row itself: drop --range/--cell and pass --json objects",
+          "Address cells directly with --cell or --range instead, without --key",
+        ],
+      );
+    }
+    if (!flags.json) {
+      throw new AxiError(`${what} takes --json objects keyed by header`, "VALIDATION_ERROR", [
+        `e.g. --json --key Name --content '[{"Name":"Ship it","Status":"done"}]'`,
+      ]);
+    }
+    if (flags.key !== undefined && flags.key.trim() === "") {
+      throw new AxiError("--key needs a header name", "VALIDATION_ERROR", [
+        "Omit --key to match on column A's header",
+      ]);
+    }
+    checkOneSource(flags, { optional: false, what: "objects", usage: UPDATE_USAGE });
+    flags.keyed = true;
+    return flags;
+  }
   if (cellArgs?.length) {
     const others = [
       flags.range !== undefined && "--range",
@@ -281,14 +334,26 @@ export function parseUpdateFlags(args: string[]): UpdateFlags {
     return flags;
   }
   if (flags.range === undefined) {
-    throw new AxiError("Missing --range (or --cell)", "VALIDATION_ERROR", [
-      "--range <A1> says where the block goes: a cell anchors it, a range bounds it",
-      "Or write single cells: --cell B5=4800 --cell C9=3",
-      `Usage: ${UPDATE_USAGE}`,
-    ]);
+    // A JSON block with no --range may be objects: a keyed update keyed on
+    // column A. Whether it is objects is known once the block is read.
+    if (flags.json && (flags.localPath || flags.stdin || flags.content !== undefined)) {
+      checkOneSource(flags, { optional: false, what: "values", usage: UPDATE_USAGE });
+      flags.keyed = true;
+      return flags;
+    }
+    throw missingRange();
   }
   checkOneSource(flags, { optional: false, what: "values", usage: UPDATE_USAGE });
   return flags;
+}
+
+function missingRange(): AxiError {
+  return new AxiError("Missing --range (or --cell)", "VALIDATION_ERROR", [
+    "--range <A1> says where the block goes: a cell anchors it, a range bounds it",
+    "Or write single cells: --cell B5=4800 --cell C9=3",
+    "Or edit rows by label with --json objects: --key <header>",
+    `Usage: ${UPDATE_USAGE}`,
+  ]);
 }
 
 export interface AppendFlags extends BlockFlags {
@@ -445,6 +510,8 @@ export interface WriteOutcome {
   errors?: ErrorDiff;
   errorScan?: string;
   writtenCells: string[];
+  /** The planned cells whose stored value differs from the input (pre-read). */
+  changedCells: string[];
   /** Current formulas of reported error cells, for the fix lines. */
   formulas: Map<string, string>;
 }
@@ -633,6 +700,7 @@ export async function writePlan(
     shape,
     cells: planned.length,
     writtenCells,
+    changedCells: diffs.filter((d) => d.changed).map((d) => d.cell),
     formulas: new Map<string, string>(),
     errorScan: wholeScan ? undefined : `written range only (tab is ${grid.rows}×${grid.cols})`,
   };
@@ -893,6 +961,7 @@ export function placeBlock(
 
 export async function sheetsUpdateCommand(account: string, args: string[]): Promise<string> {
   const flags = parseUpdateFlags(args);
+  if (flags.keyed) return updateKeyed(account, flags);
   let plan: WritePlan;
   let qualified: string | undefined;
   let rangeA1: string | undefined;
@@ -944,11 +1013,134 @@ export async function sheetsUpdateCommand(account: string, args: string[]): Prom
   return renderUpdate(target, plan, outcome, { ...flags, leftOver });
 }
 
+interface KeyedRow {
+  key: string;
+  row: number;
+  cells: number;
+  action: "updated" | "unchanged" | "appended";
+}
+
+/**
+ * `update --json [--key <header>]`: objects edit the existing rows their key
+ * labels, through the `--cell` path — every named cell in one
+ * values.batchUpdate, `--append-missing` rows after them in the same call
+ * (specs/commands/sheets-write.md § Header-keyed rows).
+ */
+async function updateKeyed(account: string, flags: UpdateFlags): Promise<string> {
+  const block = (await loadBlock(flags, { allowObjects: true })) as JsonBlock;
+  if (block.kind === "grid") {
+    if (flags.key === undefined && !flags.appendMissing) throw missingRange();
+    throw new AxiError(
+      "A keyed update takes JSON objects keyed by header, not a grid of rows",
+      "VALIDATION_ERROR",
+      [
+        `e.g. --json --key Name --content '[{"Name":"Ship it","Status":"done"}]'`,
+        "A grid block goes through --range, without --key",
+      ],
+    );
+  }
+
+  const api = await sheetsClient(account);
+  const meta = await fetchMeta(api, account, flags.spreadsheetId);
+  const tab = requireTab(
+    meta,
+    flags.tab,
+    (t) => `gws-axi sheets update ${meta.id} --tab ${shellArg(t)} --json … --account ${account}`,
+  );
+  const target: WriteTarget = { api, account, meta, tab };
+
+  const headerCells = await fetchHeaderCells(target);
+  const key = resolveKeyColumn(headerCells, flags.key);
+  const letter = columnLetter(key.col0);
+  const keyData = await fetchGrid(
+    api,
+    account,
+    meta.id,
+    [`${quoteTitle(tab.title)}!${letter}2:${letter}`],
+    "sheets(data(startRow,startColumn,rowData(values(formattedValue))))",
+  );
+  const keyTexts: Array<string | undefined> = [];
+  for (const [, { row0, cell }] of gridCells(keyData)) keyTexts[row0] = cell.formattedValue ?? "";
+  const matched = matchKeyedRows(block.objects, headerCells, key, keyTexts, {
+    appendMissing: flags.appendMissing,
+  });
+
+  let appended: CellArg[][] = [];
+  let appendedFrom = 0;
+  let lastCol = "A";
+  if (matched.missing.length > 0) {
+    lastCol = columnLetter(Math.max(headerCells.length, 1) - 1);
+    appendedFrom = Math.max(await lastDataRow(target, lastCol), 1);
+    appended = appendedCells(matched.missing, appendedFrom);
+  }
+  const cells = [...matched.matches.flatMap((m) => m.cells), ...appended.flat()];
+  if (cells.length === 0) {
+    throw new AxiError(
+      "The block writes no cell: every object names only its key",
+      "VALIDATION_ERROR",
+      [
+        `Add the columns to change, e.g. {"${key.name}":"…","Status":"done"}`,
+        "Nothing was written",
+      ],
+    );
+  }
+
+  const plan: WritePlan = { kind: "cells", cells };
+  const outcome = await writePlan(target, plan, { raw: flags.raw, header: false });
+  const changed = new Set(outcome.changedCells);
+  const rows: KeyedRow[] = [
+    ...matched.matches.map((m) => ({
+      index: m.index,
+      key: m.key,
+      row: m.row0 + 1,
+      cells: m.cells.length,
+      action: m.cells.some((c) => outcome.action === "updated" && changed.has(c.a1))
+        ? ("updated" as const)
+        : ("unchanged" as const),
+    })),
+    ...matched.missing.map((m, i) => ({
+      index: m.index,
+      key: m.key,
+      row: appendedFrom + i + 1,
+      cells: appended[i].filter((c) => c.col0 !== key.col0).length,
+      action: "appended" as const,
+    })),
+  ]
+    .sort((a, b) => a.index - b.index)
+    .map(({ index: _index, ...r }) => r);
+
+  const help: string[] = [
+    `Rows were matched on the displayed text of column ${letter} (${key.name}), exactly (trimmed, case-sensitive)`,
+  ];
+  if (matched.missing.length > 0) {
+    help.push(
+      `${matched.missing.length} unmatched ${matched.missing.length === 1 ? "object was" : "objects were"} appended under row 1's headers, after the last row with data in A:${lastCol}; re-running matches ${matched.missing.length === 1 ? "it" : "them"} instead`,
+    );
+  }
+  return renderUpdate(
+    target,
+    plan,
+    outcome,
+    { ...flags, leftOver: 0 },
+    {
+      rowsBlock: renderList(
+        "rows",
+        rows as unknown as Record<string, unknown>[],
+        KEYED_ROWS_SCHEMA,
+      ),
+      help,
+    },
+  );
+}
+
+const KEYED_ROWS_SCHEMA = [field("key"), field("row"), field("cells"), field("action")];
+
 function renderUpdate(
   target: WriteTarget,
   plan: WritePlan,
   outcome: WriteOutcome,
   flags: UpdateFlags & { leftOver: number },
+  keyed?: { rowsBlock: string; help: string[] },
 ): string {
   const { meta, tab, account } = target;
   const id = meta.id;
@@ -972,6 +1164,7 @@ function renderUpdate(
       account,
       writtenCells: outcome.writtenCells,
     }),
+    ...(keyed?.help ?? []),
   ];
   if (outcome.action === "unchanged") {
     help.push(
@@ -1003,6 +1196,7 @@ function renderUpdate(
     renderObject(head),
     renderObject({ spreadsheet: spreadsheetBlock(meta, tab) }),
     renderObject(summary),
+    ...(keyed ? [keyed.rowsBlock] : []),
     ...body.blocks,
     renderHelp(help),
   );
@@ -1109,37 +1303,12 @@ async function appendKeyed(
   objects: Array<Record<string, InputValue>>,
   raw: boolean,
 ): Promise<string> {
-  const { api, account, meta, tab } = target;
-  const q = quoteTitle(tab.title);
-  const headerData = await fetchGrid(
-    api,
-    account,
-    meta.id,
-    [`${q}!1:1`],
-    "sheets(data(startRow,startColumn,rowData(values(formattedValue))))",
-  );
-  const headerCells: string[] = [];
-  for (const [, { col0, row0, cell }] of gridCells(headerData)) {
-    if (row0 === 0) headerCells[col0] = cell.formattedValue ?? "";
-  }
-  const rows = mapKeyedRows(
-    objects,
-    Array.from(headerCells, (h) => h ?? ""),
-  );
+  const headerCells = await fetchHeaderCells(target);
+  const rows = mapKeyedRows(objects, headerCells);
   refuseEmptyBlock(rows);
 
   const lastCol = columnLetter(Math.max(headerCells.length, 1) - 1);
-  let lastRow: number;
-  try {
-    const res = await api.spreadsheets.values.get({
-      spreadsheetId: meta.id,
-      range: `${q}!A:${lastCol}`,
-      fields: "values",
-    });
-    lastRow = res.data.values?.length ?? 1;
-  } catch (err) {
-    throw translateGoogleError(err, { account, operation: "sheets.spreadsheets.values.get" });
-  }
+  const lastRow = await lastDataRow(target, lastCol);
   const plan: WritePlan = { kind: "block", row0: Math.max(lastRow, 1), col0: 0, rows };
   const outcome = await writePlan(target, plan, { raw, header: false });
   return renderAppend(target, {
@@ -1153,6 +1322,38 @@ async function appendKeyed(
     grid: outcome.grid,
     keyedThrough: `A:${lastCol}`,
   });
+}
+
+/** Row 1's displayed text, gaps as "" — the header keyed rows are aligned to. */
+async function fetchHeaderCells(target: WriteTarget): Promise<string[]> {
+  const { api, account, meta, tab } = target;
+  const headerData = await fetchGrid(
+    api,
+    account,
+    meta.id,
+    [`${quoteTitle(tab.title)}!1:1`],
+    "sheets(data(startRow,startColumn,rowData(values(formattedValue))))",
+  );
+  const headerCells: string[] = [];
+  for (const [, { col0, row0, cell }] of gridCells(headerData)) {
+    if (row0 === 0) headerCells[col0] = cell.formattedValue ?? "";
+  }
+  return Array.from(headerCells, (h) => h ?? "");
+}
+
+/** The number of the last row with data in `A:<lastCol>` (1 when only the header). */
+async function lastDataRow(target: WriteTarget, lastCol: string): Promise<number> {
+  const { api, account, meta, tab } = target;
+  try {
+    const res = await api.spreadsheets.values.get({
+      spreadsheetId: meta.id,
+      range: `${quoteTitle(tab.title)}!A:${lastCol}`,
+      fields: "values",
+    });
+    return res.data.values?.length ?? 1;
+  } catch (err) {
+    throw translateGoogleError(err, { account, operation: "sheets.spreadsheets.values.get" });
+  }
 }
 
 function renderAppend(
