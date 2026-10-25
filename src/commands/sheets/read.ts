@@ -441,6 +441,7 @@ export function readExport(
   const columns = letters.map((letter, j) => {
     let name = (padded[0]?.[j] ?? "").trim() || letter;
     if (used.has(name)) name = `${name} (${letter})`;
+    while (used.has(name)) name = `${name}'`;
     used.add(name);
     return name;
   });

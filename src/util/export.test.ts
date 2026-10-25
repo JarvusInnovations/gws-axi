@@ -1,7 +1,16 @@
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AxiError } from "axi-sdk-js";
 import { parseArgs } from "./flags.js";
 import {
@@ -53,10 +62,10 @@ describe("parseExportRequest", () => {
 });
 
 describe("resolveExportPath", () => {
-  it("auto-generates <tmp>/gws-axi/<UTC stamp>-<kind>.<ext>", () => {
+  it("auto-generates <tmp>/gws-axi-<uid>/<UTC stamp>-<kind>.<ext>", () => {
     const now = new Date("2026-10-25T08:30:04.123Z");
     expect(resolveExportPath({ format: "csv", flag: "--csv-out" }, "query", now)).toEqual({
-      path: join(tmpdir(), "gws-axi", "2026-10-25T08-30-04-123Z-query.csv"),
+      path: join(tmpdir(), `gws-axi-${process.getuid?.()}`, "2026-10-25T08-30-04-123Z-query.csv"),
       auto: true,
     });
   });
@@ -83,16 +92,86 @@ describe("writeExport", () => {
     expect(out.helpLine).toContain(`jq '.rows[]' ${path}`);
   });
 
-  it("writes an auto path 0600 under the temp dir", () => {
-    const out = writeExport({ format: "csv", flag: "--csv-out" }, "test", "a,b\r\n", {
-      rows: 1,
-      cols: 2,
+  describe("auto paths (TMPDIR pointed at a scratch dir)", () => {
+    const savedTmp = process.env.TMPDIR;
+    let root: string;
+    let dir: string;
+    const NOW = new Date("2026-10-25T08:30:04.123Z");
+    const NAME = "2026-10-25T08-30-04-123Z-test.csv";
+    const csvReq = { format: "csv" as const, flag: "--csv-out" };
+
+    beforeEach(() => {
+      root = tempDir();
+      process.env.TMPDIR = root;
+      dir = join(root, `gws-axi-${process.getuid?.()}`);
     });
-    expect(out.ok).toBe(true);
-    expect(out.path.startsWith(join(tmpdir(), "gws-axi"))).toBe(true);
-    expect(statSync(out.path).mode & 0o777).toBe(0o600);
-    expect(out.helpLine).toContain(`head ${out.path}`);
-    rmSync(out.path);
+    afterEach(() => {
+      if (savedTmp === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = savedTmp;
+    });
+
+    it("creates the per-user dir 0700 and writes the file 0600", () => {
+      const out = writeExport(csvReq, "test", "a,b\r\n", { rows: 1, cols: 2 }, NOW);
+      expect(out.ok).toBe(true);
+      expect(out.path).toBe(join(dir, NAME));
+      expect(statSync(dir).mode & 0o777).toBe(0o700);
+      expect(statSync(out.path).mode & 0o777).toBe(0o600);
+      expect(out.helpLine).toContain(`head ${out.path}`);
+    });
+
+    it("refuses a pre-existing dir that others can write, writing nothing", () => {
+      mkdirSync(dir);
+      chmodSync(dir, 0o777);
+      const out = writeExport(csvReq, "test", "secret", { rows: 1, cols: 1 }, NOW);
+      expect(out.ok).toBe(false);
+      if (!out.ok) {
+        expect(out.error.code).toBe("EXPORT_WRITE_FAILED");
+        expect(out.error.message).toContain("readable or writable by others");
+      }
+      expect(() => statSync(join(dir, NAME))).toThrow();
+    });
+
+    it("refuses a symlink in place of the dir", () => {
+      const elsewhere = join(root, "elsewhere");
+      mkdirSync(elsewhere, { mode: 0o700 });
+      symlinkSync(elsewhere, dir);
+      const out = writeExport(csvReq, "test", "secret", { rows: 1, cols: 1 }, NOW);
+      expect(out.ok).toBe(false);
+      expect(() => statSync(join(elsewhere, NAME))).toThrow();
+    });
+
+    it("never writes through a symlink at the target name, taking the next suffix instead", () => {
+      mkdirSync(dir, { mode: 0o700 });
+      const victim = join(root, "victim.txt");
+      writeFileSync(victim, "untouched");
+      symlinkSync(victim, join(dir, NAME));
+      const out = writeExport(csvReq, "test", "secret", { rows: 1, cols: 1 }, NOW);
+      expect(out.ok).toBe(true);
+      expect(out.path).toBe(join(dir, "2026-10-25T08-30-04-123Z-test-2.csv"));
+      expect(readFileSync(victim, "utf-8")).toBe("untouched");
+    });
+
+    it("suffixes -2, -3 on a name collision instead of overwriting", () => {
+      const a = writeExport(csvReq, "test", "one", { rows: 1, cols: 1 }, NOW);
+      const b = writeExport(csvReq, "test", "two", { rows: 1, cols: 1 }, NOW);
+      const c = writeExport(csvReq, "test", "three", { rows: 1, cols: 1 }, NOW);
+      expect([a.path, b.path, c.path]).toEqual([
+        join(dir, NAME),
+        join(dir, "2026-10-25T08-30-04-123Z-test-2.csv"),
+        join(dir, "2026-10-25T08-30-04-123Z-test-3.csv"),
+      ]);
+      expect(readFileSync(a.path, "utf-8")).toBe("one");
+    });
+  });
+
+  it("says overwrote when an explicit path replaced a file", () => {
+    const path = join(tempDir(), "out.csv");
+    writeFileSync(path, "old");
+    const out = writeExport({ format: "csv", flag: "--csv-out", path }, "q", "new", {
+      rows: 1,
+      cols: 1,
+    });
+    expect(out.ok && out.wrote).toBe(`${path} (1 rows, 1 cols, overwrote)`);
   });
 
   it("is EXPORT_WRITE_FAILED, not a throw, when an explicit path's directory is missing", () => {

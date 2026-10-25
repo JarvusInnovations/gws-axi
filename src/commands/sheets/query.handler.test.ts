@@ -295,3 +295,22 @@ describe("sheetsQueryCommand", () => {
     expect(process.exitCode).toBe(1);
   });
 });
+
+describe("sheetsQueryCommand --csv-out when Google's CSV fails", () => {
+  it("reports export_error with the resolved path and keeps the preview", async () => {
+    tabs([{ gid: 0, title: "Costs" }]);
+    respond(
+      { body: wrapped(OK) },
+      {
+        body: '{"version":"0.6","status":"error","errors":[{"reason":"internal_error","message":"boom"}]}',
+      },
+    );
+    const path = join(tmpdir(), "gws-axi-query-csv-fail.csv");
+    const out = await sheetsQueryCommand(ACCOUNT, [ID, "select A", `--csv-out=${path}`]);
+    expect(out).toContain("export_error:");
+    expect(out).toContain(`path: ${path}`);
+    expect(out).toContain("rows[3]");
+    expect(existsSync(path)).toBe(false);
+    expect(process.exitCode).toBe(1);
+  });
+});

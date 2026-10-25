@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { AxiError } from "axi-sdk-js";
@@ -52,9 +52,19 @@ export function expandPath(path: string): string {
 }
 
 /**
+ * The auto-export directory: per-user (`gws-axi-<uid>`) so a shared temp dir
+ * never hands us someone else's directory by name; `gws-axi` where there is
+ * no uid (Windows).
+ */
+export function autoExportDir(): string {
+  const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
+  return join(tmpdir(), uid === undefined ? "gws-axi" : `gws-axi-${uid}`);
+}
+
+/**
  * Where the file goes: the explicit path, or
- * `<os-temp-dir>/gws-axi/<UTC-timestamp>-<kind>.<ext>` — ephemeral scratch the
- * OS prunes.
+ * `<os-temp-dir>/gws-axi-<uid>/<UTC-timestamp>-<kind>.<ext>` — ephemeral
+ * scratch the OS prunes.
  */
 export function resolveExportPath(
   req: ExportRequest,
@@ -63,7 +73,7 @@ export function resolveExportPath(
 ): { path: string; auto: boolean } {
   if (req.path !== undefined) return { path: expandPath(req.path), auto: false };
   const stamp = now.toISOString().replace(/[:.]/g, "-");
-  return { path: join(tmpdir(), "gws-axi", `${stamp}-${kind}.${req.format}`), auto: true };
+  return { path: join(autoExportDir(), `${stamp}-${kind}.${req.format}`), auto: true };
 }
 
 /** POSIX-quote a path for a runnable help line, only when it needs it. */
@@ -94,11 +104,68 @@ export type ExportOutcome =
       helpLine: string;
     };
 
+class UnsafeDir extends Error {}
+
 /**
- * Write the payload. Auto paths get their directory created and the file
- * `0600` (the temp dir can be world-readable; results may be sensitive); an
- * explicit path is written as asked with the default umask, and a missing
- * parent there is EXPORT_WRITE_FAILED rather than a directory made silently.
+ * Make (or accept) the auto directory only when it is ours alone: a real
+ * directory, not a symlink, owned by this uid, no group/other bits. `mkdir`'s
+ * mode does nothing to a directory that already exists, so it is checked.
+ */
+function ensurePrivateDir(dir: string): void {
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const st = lstatSync(dir);
+  const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
+  if (!st.isDirectory()) throw new UnsafeDir(`${dir} is not a directory (a symlink?)`);
+  if (uid === undefined) return; // Windows: no POSIX owner/mode to check
+  if (st.uid !== uid) throw new UnsafeDir(`${dir} belongs to another user`);
+  if ((st.mode & 0o077) !== 0) {
+    throw new UnsafeDir(
+      `${dir} is readable or writable by others (mode ${(st.mode & 0o777).toString(8)})`,
+    );
+  }
+}
+
+/** Create the file exclusively (never through an existing file or symlink), suffixing on a collision. */
+function writeExclusive(path: string, data: string): string {
+  const dot = path.lastIndexOf(".");
+  for (let n = 1; n < 100; n++) {
+    const candidate = n === 1 ? path : `${path.slice(0, dot)}-${n}${path.slice(dot)}`;
+    try {
+      writeFileSync(candidate, data, { mode: 0o600, flag: "wx" });
+      return candidate;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+    }
+  }
+  throw new UnsafeDir(`no free name beside ${path}`);
+}
+
+function failure(req: ExportRequest, path: string, reason: string, auto: boolean): ExportOutcome {
+  return {
+    ok: false,
+    path,
+    error: {
+      code: "EXPORT_WRITE_FAILED",
+      message: `Could not write the ${req.flag} file: ${reason}`,
+      path,
+    },
+    helpLine: auto
+      ? `Nothing was written; pass a path you can write: ${req.flag}=<path>`
+      : `Nothing was written; create the directory first, or pass ${req.flag} alone for a file in the temp dir`,
+  };
+}
+
+/** An export that failed before anything could be written (e.g. the upstream CSV fetch). */
+export function exportFailed(req: ExportRequest, kind: string, reason: string): ExportOutcome {
+  const { path, auto } = resolveExportPath(req, kind);
+  return failure(req, path, reason, auto);
+}
+
+/**
+ * Write the payload. Auto paths go in the per-user directory, checked private,
+ * created exclusively at `0600`; an explicit path is written as asked with the
+ * default umask (replacing a file there, disclosed as `overwrote`), and a
+ * missing parent is EXPORT_WRITE_FAILED rather than a directory made silently.
  * Never throws: a failed write must not discard the result already fetched.
  */
 export function writeExport(
@@ -108,16 +175,20 @@ export function writeExport(
   meta: { rows: number; cols: number },
   now?: Date,
 ): ExportOutcome {
-  const { path, auto } = resolveExportPath(req, kind, now);
+  const resolved = resolveExportPath(req, kind, now);
+  const { auto } = resolved;
+  let path = resolved.path;
+  let overwrote = false;
   try {
     if (auto) {
-      mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-      writeFileSync(path, data, { mode: 0o600 });
-      chmodSync(path, 0o600);
+      ensurePrivateDir(dirname(path));
+      path = writeExclusive(path, data);
     } else {
+      overwrote = existsSync(path) && statSync(path).isFile();
       writeFileSync(path, data);
     }
   } catch (err) {
+    if (err instanceof UnsafeDir) return failure(req, path, `refused: ${err.message}`, auto);
     const code = (err as NodeJS.ErrnoException).code;
     const reason =
       code === "ENOENT"
@@ -127,23 +198,12 @@ export function writeExport(
           : code === "EISDIR"
             ? "that path is a directory"
             : (code ?? (err as Error).message);
-    return {
-      ok: false,
-      path,
-      error: {
-        code: "EXPORT_WRITE_FAILED",
-        message: `Could not write the ${req.flag} file: ${reason}`,
-        path,
-      },
-      helpLine: auto
-        ? `Nothing was written; pass a path you can write: ${req.flag}=<path>`
-        : `Nothing was written; create the directory first, or pass ${req.flag} alone for a file in the temp dir`,
-    };
+    return failure(req, path, reason, auto);
   }
   return {
     ok: true,
     path,
-    wrote: `${path} (${meta.rows} rows, ${meta.cols} cols)`,
+    wrote: `${path} (${meta.rows} rows, ${meta.cols} cols${overwrote ? ", overwrote" : ""})`,
     helpLine: exportHelpLine(req.format, path),
   };
 }

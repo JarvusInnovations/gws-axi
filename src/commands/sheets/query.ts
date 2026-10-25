@@ -10,7 +10,12 @@ import {
   runGvizQuery,
 } from "../../google/gviz.js";
 import { field, joinBlocks, renderHelp, renderList, renderObject } from "../../output/index.js";
-import { type ExportOutcome, parseExportRequest, writeExport } from "../../util/export.js";
+import {
+  type ExportOutcome,
+  exportFailed,
+  parseExportRequest,
+  writeExport,
+} from "../../util/export.js";
 import { type FlagSpec, parseArgs } from "../../util/flags.js";
 import {
   columnLetter,
@@ -315,17 +320,7 @@ export async function sheetsQueryCommand(account: string, args: string[]): Promi
       outcome =
         csv && "csv" in csv
           ? writeExport(exportReq, "query", csv.csv, { rows: rows.length, cols: cols.length })
-          : {
-              ok: false,
-              path: "",
-              error: {
-                code: "EXPORT_WRITE_FAILED",
-                message: `Google's CSV of this query failed: ${failure}`,
-                path: "",
-              },
-              helpLine:
-                "Nothing was written; --json-out writes the same result from the response shown here",
-            };
+          : exportFailed(exportReq, "query", `Google's CSV of this query failed: ${failure}`);
     }
   }
 
