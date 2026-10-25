@@ -41,7 +41,7 @@ Read coverage is complete across all seven services; write coverage is rolling o
 | **Docs** | ✅ read · find · comments · download · revisions · diff · tabs | ✅ create · write · append · replace-text · edit-cell · tabs update/delete &nbsp;·&nbsp; 🚧 insert-text · delete-range · style-text · style-paragraph · insert-table · comment writes |
 | **Drive** | ✅ ls · get · search · permissions · download · revisions · activity | ✅ upload · mkdir · rename · move · trash · untrash · share · unshare &nbsp;·&nbsp; 🚧 create · copy &nbsp;·&nbsp; ✋ permanent delete |
 | **Slides** | ✅ get · page · summarize · comments | ✅ skip · unskip &nbsp;·&nbsp; 🚧 create · update |
-| **Sheets** | ✅ read · cell · comments | ✅ update · append · clear · create · add-tab · note |
+| **Sheets** | ✅ read · cell · comments · tabs | ✅ update · append · clear · create · add-tab · note · tabs update · tabs delete |
 | **Chat** | ✅ spaces · messages · search · members · download · wait · watch | ✅ send · react · unreact · mark-read · mark-unread |
 
 <sub>✅ shipped · 🚧 planned · ✋ out of scope by design</sub>
@@ -475,6 +475,17 @@ gws-axi sheets note <id> B2 --tab Costs --text 'source: Q3 invoice' --account <e
 gws-axi sheets note <id> 'Costs!B2' --clear --account <email>
 ```
 
+Tabs are objects too: `sheets tabs` lists every sheet (chart sheets included), and `tabs update` / `tabs delete` change them with the placement flags `add-tab` takes.
+
+```bash
+gws-axi sheets tabs <id>                                                          # every sheet: gid, index, kind, hidden, freezes
+gws-axi sheets tabs update <id> Archive --first --title "Archive 2025" --hide --account <email>
+gws-axi sheets tabs update <id> Costs --freeze-rows 1 --account <email>         # the header row `sheets read` promotes
+gws-axi sheets tabs delete <id> Archive --account <email>                       # reports the #REF! it causes elsewhere
+```
+
+`tabs update` sends only what differs (`action: unchanged` otherwise) and prints an undo line. `tabs delete` records how many populated cells the tab held and reports, with a fix line each, the formulas on other tabs it broke; the content stays in version history.
+
 ### Chat
 
 Reads Google Chat over the ordinary Chat API — no Workspace Developer Preview enrollment, and it works for personal `@gmail.com` accounts as well as Workspace ones.
@@ -522,7 +533,7 @@ Conversations are addressed by id (from `chat spaces`) or by `--with <email>` �
 - **Revision exports cover every tab**: `docs diff` and `docs download --revision` export the whole Doc, so on a multi-tab Doc they include all tabs ([#110](https://github.com/JarvusInnovations/gws-axi/issues/110)).
 - **Drive writes**: `upload`, `mkdir`, `rename`, `move`, `trash`, `untrash`, `share`, and `unshare` are shipped; `create` / `copy` are still scaffolded as `NOT_IMPLEMENTED`. There is no permanent delete by design — `trash` is reversible for 30 days.
 - **Slides writes**: `skip` / `unskip` (hide slides in presentation mode) are shipped; `create` / `update` are still scaffolded as `NOT_IMPLEMENTED`.
-- **Sheets writes** set values and the top-row freeze only: no formatting, widths, validation, tab rename/reorder/delete, or row/column insertion yet. Sheets exposes no revision id, so the undo is the `written[]` block plus the editor's version history.
+- **Sheets writes** set values, plus tab properties through `sheets tabs`: no formatting, widths, validation, or row/column insertion yet. Tabs can be renamed, moved, hidden, frozen and deleted (`sheets tabs`), but not colored, copied or protected. Sheets exposes no revision id, so the undo is the `written[]` block plus the editor's version history.
 - **Sheets notes**: `sheets note` writes one cell's note per call; there is no batch form. Comments (`sheets comments`) are read-only.
 - **Testing-mode tokens** still expire every 7 days *if* you haven't published your OAuth app yet. Run `gws-axi auth publish` for the walkthrough — it covers the single-developer Production flow and removes the expiry once you've re-auth'd each account.
 
