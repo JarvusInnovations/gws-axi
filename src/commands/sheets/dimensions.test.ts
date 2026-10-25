@@ -6,14 +6,16 @@ import { parseDimensionRange, type TabInfo } from "./shared.js";
 // request built and the response rendered.
 const get = vi.fn();
 const batchUpdate = vi.fn();
+const valuesGet = vi.fn();
 vi.mock("../../google/client.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../google/client.js")>()),
-  sheetsClient: async () => ({ spreadsheets: { get, batchUpdate } }),
+  sheetsClient: async () => ({ spreadsheets: { get, batchUpdate, values: { get: valuesGet } } }),
 }));
 
 const {
   checkBounds,
-  deletedCells,
+  countHeld,
+  deletedBlock,
   dimLabel,
   dimensionCommand,
   dimensionRequests,
@@ -150,6 +152,25 @@ describe("checkBounds", () => {
     expect(codeOf(() => checkBounds("delete", rows(0, 999), tab(1000, 26), ctx))).toBe("none");
   });
 
+  it("refuses deleting every row or column outside the freeze", () => {
+    expect(() => checkBounds("delete", rows(2, 1000), tab(1000, 26), ctx, 2)).toThrow(
+      /outside the freeze \(rows 1:2 frozen\)/,
+    );
+    expect(() => checkBounds("delete", rows(1, 1000), tab(1000, 26), ctx, 2)).toThrow(
+      /outside the freeze/,
+    );
+    expect(() => checkBounds("delete", cols(1, 26), tab(1000, 26), ctx, 1)).toThrow(
+      /every column .* outside the freeze \(column A frozen\)/,
+    );
+    expect(codeOf(() => checkBounds("delete", rows(3, 1000), tab(1000, 26), ctx, 2))).toBe("none");
+    expect(codeOf(() => checkBounds("delete", rows(0, 2), tab(1000, 26), ctx, 2))).toBe("none");
+  });
+
+  it("says a delete starts past the end when it does", () => {
+    expect(() => checkBounds("delete", rows(10, 11), tab(10, 26), ctx)).toThrow(/^11 starts past/);
+    expect(() => checkBounds("delete", rows(8, 12), tab(10, 26), ctx)).toThrow(/runs past/);
+  });
+
   it("points a past-the-end delete at the range that exists", () => {
     try {
       checkBounds("delete", rows(994, 1010), tab(1000, 26), ctx);
@@ -217,51 +238,64 @@ describe("inherit", () => {
   });
 });
 
-describe("deletedCells", () => {
-  it("renders populated rows with old row numbers, entered text, empty rows left out", () => {
-    const out = deletedCells(
+describe("deletedBlock", () => {
+  const cell = (v: string) => ({ userEnteredValue: { stringValue: v }, formattedValue: v });
+
+  it("anchors at the range's first row, keeping an empty first and middle row", () => {
+    const out = deletedBlock(
       [
         {
           startRow: 2,
           startColumn: 0,
           rowData: [
+            { values: [] },
             {
               values: [
-                { userEnteredValue: { stringValue: "bolts" }, formattedValue: "bolts" },
+                cell("bolts"),
                 { userEnteredValue: { numberValue: 40 }, formattedValue: "40" },
                 {},
-                { userEnteredValue: { formulaValue: "=B3*C3" }, formattedValue: "$160.00" },
+                { userEnteredValue: { formulaValue: "=B4*C4" }, formattedValue: "$160.00" },
               ],
             },
             { values: [{}, {}] },
-            { values: [{ userEnteredValue: { stringValue: "nuts" }, formattedValue: "nuts" }] },
+            { values: [cell("nuts")] },
           ],
         },
       ],
       "rows",
       2,
     );
-    expect(out.count).toBe(4);
-    expect(out.totalRows).toBe(2);
+    expect(out.populated).toBe(4);
     expect(out.schema.map((f) => f.name)).toEqual(["row", "A", "B", "C", "D"]);
     expect(out.rows).toEqual([
-      { row: 3, A: "bolts", B: "40", C: "", D: "=B3*C3" },
-      { row: 5, A: "nuts", B: "", C: "", D: "" },
+      { row: 3, A: "", B: "", C: "", D: "" },
+      { row: 4, A: "bolts", B: "40", C: "", D: "=B4*C4" },
+      { row: 5, A: "", B: "", C: "", D: "" },
+      { row: 6, A: "nuts", B: "", C: "", D: "" },
     ]);
   });
 
-  it("letters a column delete from its own column and caps at 50 rows", () => {
+  it("anchors a column delete at row 1 of its own column, and caps at 50 rows", () => {
     const rowData = Array.from({ length: 60 }, (_, i) => ({
       values: [{ userEnteredValue: { numberValue: i }, formattedValue: String(i) }],
     }));
-    const out = deletedCells([{ startRow: 0, startColumn: 3, rowData }], "cols", 3);
+    const out = deletedBlock([{ startRow: 3, startColumn: 3, rowData }], "cols", 3);
     expect(out.schema.map((f) => f.name)).toEqual(["row", "D"]);
+    expect(out.rows[0]).toEqual({ row: 1, D: "" });
+    expect(out.rows[3]).toEqual({ row: 4, D: "0" });
     expect(out.rows).toHaveLength(50);
-    expect(out.totalRows).toBe(60);
   });
 
   it("is empty for a range that held nothing", () => {
-    expect(deletedCells([], "rows", 0)).toMatchObject({ count: 0, totalRows: 0 });
+    expect(deletedBlock([], "rows", 0)).toMatchObject({ populated: 0, rows: [] });
+  });
+});
+
+describe("countHeld", () => {
+  it("counts populated cells and the rows through the last populated one", () => {
+    expect(countHeld([[], ["a", "", "b"], [], ["c"]])).toEqual({ cells: 3, rows: 4 });
+    expect(countHeld([[], [""]])).toEqual({ cells: 0, rows: 0 });
+    expect(countHeld(undefined)).toEqual({ cells: 0, rows: 0 });
   });
 });
 
@@ -298,6 +332,8 @@ describe("dimensionCommand", () => {
     get.mockReset();
     batchUpdate.mockReset();
     batchUpdate.mockResolvedValue({ data: {} });
+    valuesGet.mockReset();
+    valuesGet.mockResolvedValue({ data: {} });
   });
 
   it("inserts rows, inheriting from the row above, and reports the shift", async () => {
@@ -326,7 +362,8 @@ describe("dimensionCommand", () => {
     expect(out).toContain("none errored");
   });
 
-  it("deletes rows, carries the removed cells, and names a #REF! by its old formula", async () => {
+  it("deletes rows, carries the removed cells, and shows a #REF! before and after", async () => {
+    valuesGet.mockResolvedValue({ data: { values: [["bolts"]] } });
     let propsCalls = 0;
     let scans = 0;
     get.mockImplementation(async (req: { fields: string; includeGridData?: boolean }) => {
@@ -348,7 +385,8 @@ describe("dimensionCommand", () => {
           },
         };
       }
-      // Errors + formulas scan: before, D6 reads A3; after, it is D5 and broken.
+      // Errors + formulas scan: before, D6 reads A3 and C10; after, it is D5,
+      // A3 is #REF! and C10 has shifted to C9.
       const before = scans++ === 0;
       const rows: unknown[] = Array.from({ length: 6 }, () => ({ values: [] }));
       rows[before ? 5 : 4] = {
@@ -357,9 +395,9 @@ describe("dimensionCommand", () => {
           {},
           {},
           before
-            ? { userEnteredValue: { formulaValue: "=A3" } }
+            ? { userEnteredValue: { formulaValue: "=A3+C10" } }
             : {
-                userEnteredValue: { formulaValue: "=#REF!" },
+                userEnteredValue: { formulaValue: "=#REF!+C9" },
                 effectiveValue: {
                   errorValue: { type: "REF", message: "Reference does not exist." },
                 },
@@ -382,7 +420,11 @@ describe("dimensionCommand", () => {
     expect(out).toContain("cells: 1");
     expect(out).toContain("cells[1]{row,A}:\n  3,bolts");
     expect(out).toContain("D5,REF,Reference does not exist.,no");
-    expect(out).toContain("it was =A3 (in D6) before the delete, and row 3 is gone");
+    expect(out).toContain(
+      "it was =A3+C10 (in D6) before the delete; it is now =#REF!+C9 — re-point the #REF! in the current formula",
+    );
+    expect(out).toContain("--cell D5='=#REF!+C9' --account alice@example.com");
+    expect(valuesGet.mock.calls[0][0].range).toBe("'Costs'!3:3");
     expect(out).toContain("Row 3 is now what was row 4 — re-running would delete it");
     expect(out).toContain("insert-rows 1AbC 3 --tab Costs --account alice@example.com");
   });

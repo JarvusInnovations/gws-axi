@@ -17,6 +17,7 @@ import {
   type GridDataLike,
   type TabInfo,
   cellA1,
+  cellArg,
   collectErrors,
   columnLetter,
   diffErrors,
@@ -61,9 +62,9 @@ export type Dim = "rows" | "cols";
 
 const RANGE_ARG = {
   rows: `  <rows>               A row range: 3:5 (rows 3 to 5) or 3 (one row). A
-                       tab-qualified range (Costs!3:5) makes --tab optional`,
+                       tab-qualified range ('Costs!3:5') makes --tab optional`,
   cols: `  <cols>               A column range: B:D (columns B to D) or B (one column). A
-                       tab-qualified range (Costs!B:D) makes --tab optional`,
+                       tab-qualified range ('Costs!B:D') makes --tab optional`,
 };
 
 const TAB_FLAG = `  --tab <name|gid>     The tab, by title or numeric gid. Required on a multi-tab
@@ -189,6 +190,8 @@ export function checkBounds(
   range: DimensionRange,
   tab: TabInfo,
   ctx: { spreadsheetId: string; account: string },
+  /** Frozen rows (for rows) or columns (for cols): upstream also refuses deleting all the rest. */
+  frozen = 0,
 ): void {
   const dim = range.kind;
   const alloc = dim === "rows" ? tab.rows : tab.cols;
@@ -210,27 +213,29 @@ export function checkBounds(
   }
   if (op === "delete" && range.end0 > alloc) {
     throw new AxiError(
-      `${label} runs past the end of tab '${tab.title}' (${size}, last ${noun(dim, 1)} ${last})`,
+      `${label} ${range.start0 >= alloc ? "starts" : "runs"} past the end of tab '${tab.title}' (${size}, last ${noun(dim, 1)} ${last})`,
       "VALIDATION_ERROR",
       [
         range.start0 < alloc
           ? `Delete up to the last ${noun(dim, 1)}: \`gws-axi sheets delete-${dim} ${ctx.spreadsheetId} ${dimLabel(dim, range.start0, alloc)} --tab ${tabArg} --account ${ctx.account}\``
           : `Run \`gws-axi sheets read ${ctx.spreadsheetId} --tab ${tabArg}\` to see where the tab's data is`,
-        "Upstream would delete only the part that exists; the range is refused so the count stays true",
+        range.start0 < alloc
+          ? "Upstream would delete only the part that exists; the range is refused so the count stays true"
+          : `The tab has no ${noun(dim, 1)} ${dimName(dim, range.start0)} to delete`,
         "Nothing was changed",
       ],
     );
   }
-  if (op === "delete" && range.start0 === 0 && range.end0 >= alloc) {
-    throw new AxiError(
-      `${label} is every ${noun(dim, 1)} of tab '${tab.title}' — a tab keeps at least one`,
-      "VALIDATION_ERROR",
-      [
-        `To empty the tab: \`gws-axi sheets clear ${ctx.spreadsheetId} --tab ${tabArg} --all --account ${ctx.account}\``,
-        "To remove the tab itself: `gws-axi sheets tabs delete`",
-        "Nothing was changed",
-      ],
-    );
+  if (op === "delete" && range.end0 >= alloc && range.start0 <= frozen) {
+    const what =
+      range.start0 === 0
+        ? `every ${noun(dim, 1)} of tab '${tab.title}' — a tab keeps at least one`
+        : `every ${noun(dim, 1)} of tab '${tab.title}' outside the freeze (${noun(dim, frozen)} ${dimLabel(dim, 0, frozen)} frozen) — Sheets keeps at least one unfrozen`;
+    throw new AxiError(`${label} is ${what}`, "VALIDATION_ERROR", [
+      `To empty the tab: \`gws-axi sheets clear ${ctx.spreadsheetId} --tab ${tabArg} --all --account ${ctx.account}\``,
+      "To remove the tab itself: `gws-axi sheets tabs delete`",
+      "Nothing was changed",
+    ]);
   }
 }
 
@@ -305,47 +310,63 @@ export function shiftErrors(
   return out;
 }
 
-export interface DeletedCells {
-  /** Populated cells in the range. */
-  count: number;
+export interface DeletedBlock {
   rows: Array<Record<string, unknown>>;
   schema: FieldDef[];
-  /** Rows with a populated cell, before the cap. */
-  totalRows: number;
+  /** Populated cells in the window. */
+  populated: number;
 }
 
 /**
- * The populated cells of a deleted range in the read's `cells[N]{row,A,…}`
- * shape, with OLD row numbers and letters; empty rows are left out. Values are
- * entered text (a formula as typed), so the block re-fills the range as-is.
+ * The cells of a deleted range in the read's `cells[N]{row,A,…}` shape, with
+ * OLD row numbers and letters, **anchored**: from the range's first row (rows)
+ * or row 1 (columns), and column A (rows) or the range's first column
+ * (columns), through the last populated row and column — empty rows and cells
+ * kept, so the block pastes back at the anchor as-is. Values are entered text
+ * (a formula as typed). `data` is the render window; at most 50 rows render.
  */
-export function deletedCells(data: GridDataLike[], dim: Dim, start0: number): DeletedCells {
+export function deletedBlock(data: GridDataLike[], dim: Dim, start0: number): DeletedBlock {
   const held: Array<{ row0: number; col0: number; text: string }> = [];
   for (const { row0, col0, cell } of gridCells(data).values()) {
     if (!isEmptyCell(cell)) held.push({ row0, col0, text: enteredText(cell) });
   }
-  if (held.length === 0) return { count: 0, rows: [], schema: [], totalRows: 0 };
+  if (held.length === 0) return { rows: [], schema: [], populated: 0 };
+  const rowAnchor = dim === "rows" ? start0 : 0;
   const colOrigin = dim === "cols" ? start0 : 0;
-  const rowMin = Math.min(...held.map((h) => h.row0));
-  const rowMax = Math.max(...held.map((h) => h.row0));
+  const rowMax = Math.min(Math.max(...held.map((h) => h.row0)), rowAnchor + WRITTEN_CAP - 1);
   const colMax = Math.max(...held.map((h) => h.col0));
-  const values: string[][] = Array.from({ length: rowMax - rowMin + 1 }, () =>
+  const values: string[][] = Array.from({ length: rowMax - rowAnchor + 1 }, () =>
     Array.from({ length: colMax - colOrigin + 1 }, () => ""),
   );
-  for (const h of held) values[h.row0 - rowMin][h.col0 - colOrigin] = h.text;
+  let populated = 0;
+  for (const h of held) {
+    if (h.row0 < rowAnchor || h.row0 > rowMax || h.col0 < colOrigin) continue;
+    values[h.row0 - rowAnchor][h.col0 - colOrigin] = h.text;
+    populated++;
+  }
   const grid = buildGrid(
     values,
-    { col0: colOrigin, row1: rowMin + 1 },
-    { headerRow: false, maxRows: 0, full: true },
+    { col0: colOrigin, row1: rowAnchor + 1 },
+    { headerRow: false, maxRows: WRITTEN_CAP, full: false },
   );
-  const letters = grid.schema.map((f) => f.name).filter((n) => n !== "row");
-  const rows = grid.rows.filter((r) => letters.some((l) => r[l] !== ""));
-  return {
-    count: held.length,
-    rows: rows.slice(0, WRITTEN_CAP),
-    schema: grid.schema,
-    totalRows: rows.length,
-  };
+  return { rows: grid.rows, schema: grid.schema, populated };
+}
+
+/**
+ * Count a range's populated cells from a display-only `values.get` (which keeps
+ * leading empty rows and trims trailing ones — observed): `cells`, and the rows
+ * from the anchor through the last populated one.
+ */
+export function countHeld(values: unknown[][] | undefined | null): { cells: number; rows: number } {
+  const rows = values ?? [];
+  let cells = 0;
+  let last = 0;
+  rows.forEach((row, i) => {
+    const n = (row ?? []).filter((v) => v != null && v !== "").length;
+    cells += n;
+    if (n > 0) last = i + 1;
+  });
+  return { cells, rows: last };
 }
 
 /**
@@ -405,25 +426,47 @@ interface GridProps {
   frozenCols: number;
 }
 
+/** Every tab's grid and freeze, by gid. */
 async function fetchProps(
   api: sheets_v4.Sheets,
   account: string,
   spreadsheetId: string,
-  gid: number,
-): Promise<GridProps | undefined> {
+): Promise<Map<number, GridProps>> {
   try {
     const res = await api.spreadsheets.get({ spreadsheetId, fields: PROPS_FIELDS });
-    const p = (res.data.sheets ?? []).find((s) => (s.properties?.sheetId ?? 0) === gid)?.properties
-      ?.gridProperties;
-    if (!p) return undefined;
-    return {
-      rows: p.rowCount ?? 0,
-      cols: p.columnCount ?? 0,
-      frozenRows: p.frozenRowCount ?? 0,
-      frozenCols: p.frozenColumnCount ?? 0,
-    };
+    const out = new Map<number, GridProps>();
+    for (const sheet of res.data.sheets ?? []) {
+      const p = sheet.properties?.gridProperties;
+      if (!p) continue;
+      out.set(sheet.properties?.sheetId ?? 0, {
+        rows: p.rowCount ?? 0,
+        cols: p.columnCount ?? 0,
+        frozenRows: p.frozenRowCount ?? 0,
+        frozenCols: p.frozenColumnCount ?? 0,
+      });
+    }
+    return out;
   } catch (err) {
     throw translateGoogleError(err, { account, operation: "sheets.spreadsheets.get" });
+  }
+}
+
+/** The display values of a range, for the deleted-cell count. */
+async function fetchValues(
+  api: sheets_v4.Sheets,
+  account: string,
+  spreadsheetId: string,
+  range: string,
+): Promise<unknown[][]> {
+  try {
+    const res = await api.spreadsheets.values.get({
+      spreadsheetId,
+      range,
+      valueRenderOption: "FORMATTED_VALUE",
+    });
+    return (res.data.values ?? []) as unknown[][];
+  } catch (err) {
+    throw translateGoogleError(err, { account, operation: "sheets.spreadsheets.values.get" });
   }
 }
 
@@ -502,7 +545,7 @@ function dimFixLines(
     if (ctx.op === "delete" && now?.includes("#REF!") && old && old !== now) {
       const why = `${errorText(err.error)}${err.message ? `, ${err.message}` : ""}`;
       lines.push(
-        `Fix ${err.cell} (${why}): it was ${old}${oldAt !== err.cell ? ` (in ${oldAt})` : ""} before the delete, and ${gone} ${ctx.end0 - ctx.start0 === 1 ? "is" : "are"} gone — re-point it with gws-axi sheets update ${ctx.spreadsheetId} --tab ${tab} --cell ${err.cell}='=…' --account ${ctx.account}`,
+        `Fix ${err.cell} (${why}): it was ${old}${oldAt !== err.cell ? ` (in ${oldAt})` : ""} before the delete; it is now ${now} — re-point the #REF! in the current formula (${gone} ${ctx.end0 - ctx.start0 === 1 ? "is" : "are"} gone; its other references are already shifted): gws-axi sheets update ${ctx.spreadsheetId} --tab ${tab} --cell ${cellArg(err.cell, now)} --account ${ctx.account}`,
       );
     } else {
       lines.push(
@@ -529,7 +572,11 @@ export async function dimensionCommand(
   const flags = parseDimFlags(args, op, dim);
   const range = parseDimensionRange(flags.range, dim);
   const api = await sheetsClient(account);
-  const meta = await fetchMeta(api, account, flags.spreadsheetId);
+  const [meta, allPropsBefore] = await Promise.all([
+    fetchMeta(api, account, flags.spreadsheetId),
+    // Best-effort: the meta read carries the error a missing spreadsheet gets.
+    fetchProps(api, account, flags.spreadsheetId).catch(() => undefined),
+  ]);
   const id = meta.id;
   const tab = tabFromFlags(
     meta,
@@ -538,7 +585,14 @@ export async function dimensionCommand(
     (t) =>
       `gws-axi sheets ${op}-${dim} ${id} ${dimLabel(dim, range.start0, range.end0)} --tab ${shellArg(t)} --account ${account}`,
   );
-  checkBounds(op, range, tab, { spreadsheetId: id, account });
+  const propsBefore = allPropsBefore?.get(tab.gid);
+  checkBounds(
+    op,
+    range,
+    tab,
+    { spreadsheetId: id, account },
+    (dim === "rows" ? propsBefore?.frozenRows : propsBefore?.frozenCols) ?? 0,
+  );
 
   const { start0, end0 } = range;
   const n = end0 - start0;
@@ -553,14 +607,25 @@ export async function dimensionCommand(
       ? `${q}!${start0 + 1}:${end0}`
       : `${q}!${columnLetter(start0)}:${columnLetter(end0 - 1)}`;
 
-  // 1. Pre-read: the grid and freeze, the tab's errors (+ formulas), and — for a
-  //    delete — the cells about to go.
-  const [propsBefore, preScan, preCells] = await Promise.all([
-    fetchProps(api, account, id, tab.gid),
+  // The delete's undo, bounded: the 50-row render window under the write mask,
+  // and a display-only count over the range unless it is past the scan bound.
+  const windowRange =
+    dim === "rows"
+      ? `${q}!${start0 + 1}:${Math.min(end0, start0 + WRITTEN_CAP)}`
+      : `${q}!${columnLetter(start0)}1:${columnLetter(end0 - 1)}${Math.max(1, Math.min(tab.rows, WRITTEN_CAP))}`;
+  const rangeCells = n * (dim === "rows" ? tab.cols : tab.rows);
+  const countable = rangeCells <= ERROR_SCAN_BOUND;
+
+  // 1. Pre-read: the tab's errors (+ formulas), and — for a delete — the cells
+  //    about to go.
+  const [preScan, preCells, preValues] = await Promise.all([
     wholeScan ? fetchGrid(api, account, id, [wholeScan], SCAN_FIELDS) : Promise.resolve(undefined),
     op === "delete"
-      ? fetchGrid(api, account, id, [goingRange], TARGET_FIELDS)
+      ? fetchGrid(api, account, id, [windowRange], TARGET_FIELDS)
       : Promise.resolve([] as GridDataLike[]),
+    op === "delete" && countable
+      ? fetchValues(api, account, id, goingRange)
+      : Promise.resolve(undefined),
   ]);
 
   // 2. The request — with --no-inherit, the format clear rides in the same batch.
@@ -577,10 +642,11 @@ export async function dimensionCommand(
   }
 
   // 3. Read back: the grid and freeze, and the tab's errors now.
-  const [propsAfter, postScan] = await Promise.all([
-    fetchProps(api, account, id, tab.gid),
+  const [allPropsAfter, postScan] = await Promise.all([
+    fetchProps(api, account, id).catch(() => undefined),
     wholeScan ? fetchGrid(api, account, id, [wholeScan], SCAN_FIELDS) : Promise.resolve(undefined),
   ]);
+  const propsAfter = allPropsAfter?.get(tab.gid);
   const formulasBefore = formulasOf(preScan);
   const formulas = formulasOf(postScan);
   const errors =
@@ -611,13 +677,18 @@ export async function dimensionCommand(
     count: n,
     shifted: shiftedSentence(op, dim, start0, end0, alloc),
   };
-  const removed = op === "delete" ? deletedCells(preCells, dim, start0) : undefined;
+  const block = op === "delete" ? deletedBlock(preCells, dim, start0) : undefined;
+  const held = preValues ? countHeld(preValues) : undefined;
+  // A formula showing "" counts in the window (entered text), not in the display.
+  const heldCells = held ? Math.max(held.cells, block?.populated ?? 0) : undefined;
+  const heldRows = held?.rows ?? 0;
+  const anyHeld = (heldCells ?? 0) > 0 || (block?.populated ?? 0) > 0;
   if (op === "insert") {
     summary.inherit = inheritLabel(dim, start0, end0, flags.noInherit);
     if (propsAfter) summary.grid = `${propsAfter.rows}×${propsAfter.cols}`;
-  } else if (removed) {
-    summary.cells = removed.count;
-    if (removed.totalRows > WRITTEN_CAP) summary.cells_total_rows = removed.totalRows;
+  } else {
+    summary.cells = heldCells ?? `not counted (range is ${rangeCells} cells)`;
+    if (heldRows > WRITTEN_CAP) summary.cells_total_rows = heldRows;
   }
   if (propsBefore && propsAfter) {
     if (propsAfter.frozenRows !== propsBefore.frozenRows)
@@ -627,7 +698,7 @@ export async function dimensionCommand(
   }
 
   const blocks: string[] = [];
-  if (removed && removed.count > 0) blocks.push(renderList("cells", removed.rows, removed.schema));
+  if (block && block.populated > 0) blocks.push(renderList("cells", block.rows, block.schema));
   if (errors)
     blocks.push(...outcomeBlocks({ formulas: [], written: [], changed: 0 }, errors).blocks);
 
@@ -653,7 +724,7 @@ export async function dimensionCommand(
     if (flags.noInherit) {
       const from = start0 > 0 ? dimName(dim, start0 - 1) : dimName(dim, end0);
       help.push(
-        `--no-inherit cleared the new cells' formatting; their ${dim === "rows" ? "height" : "width"} still came from ${noun(dim, 1)} ${from} (upstream has no un-inherited insert)`,
+        `--no-inherit cleared the new cells' formatting; their ${dim === "rows" ? "height" : "width"} still came from ${noun(dim, 1)} ${from} (upstream has no un-inherited insert), and data validation or conditional formatting whose range spans ${span} now covers them too`,
       );
     }
     if (start0 < alloc) {
@@ -672,18 +743,22 @@ export async function dimensionCommand(
   } else {
     const restore = `\`gws-axi sheets insert-${dim} ${id} ${span} --tab ${tabArg} ${acct}\``;
     help.push(
-      removed && removed.count > 0
-        ? `The deleted cells are in cells[] above and in version history (\`gws-axi drive revisions ${id}\`); ${restore} then \`sheets update --range ${anchor}\` with them restores them`
+      anyHeld
+        ? `The deleted cells are in cells[] above and in version history (\`gws-axi drive revisions ${id}\`); ${restore} then \`sheets update --range ${anchor}\` with cells[] as-is (empty rows included) restores them`
         : `The deleted ${what} held no values; ${restore} puts the ${what} back, empty (${n === 1 ? "its" : "their"} formatting is in \`gws-axi drive revisions ${id}\`)`,
     );
-    if (removed && removed.totalRows > WRITTEN_CAP) {
+    if (heldRows > WRITTEN_CAP) {
       help.push(
-        `cells[] shows the first ${WRITTEN_CAP} of ${removed.totalRows} rows that held values; the rest are in the version history`,
+        `cells[] shows the first ${WRITTEN_CAP} of ${heldRows} rows; the rest are in the version history`,
+      );
+    } else if (!held && anyHeld) {
+      help.push(
+        `cells[] shows the range's first ${WRITTEN_CAP} rows only (the range is too large to count); the rest are in the version history`,
       );
     }
     if (!errors) {
       help.push(
-        `The error scan did not run (tab over ${ERROR_SCAN_BOUND} cells): any formula that read the deleted ${what} is now #REF! — \`gws-axi sheets read ${id} --tab ${tabArg}\` lists the tab's errors`,
+        `The error scan did not run (tab over ${ERROR_SCAN_BOUND} cells): a reference to a removed cell is now #REF! — \`gws-axi sheets read ${id} --tab ${tabArg}\` lists the tab's errors`,
       );
     }
     const allocAfter = alloc - n;

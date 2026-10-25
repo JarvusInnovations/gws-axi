@@ -170,8 +170,8 @@ export function parseDimensionRange(text: string, kind: "rows" | "cols"): Dimens
     "VALIDATION_ERROR",
     [
       kind === "rows"
-        ? "Give rows as 3:5 (rows 3 to 5) or 3 (one row), optionally tab-qualified: Costs!3:5"
-        : "Give columns as B:D (columns B to D) or B (one column), optionally tab-qualified: Costs!B:D",
+        ? "Give rows as 3:5 (rows 3 to 5) or 3 (one row), optionally tab-qualified: 'Costs!3:5'"
+        : "Give columns as B:D (columns B to D) or B (one column), optionally tab-qualified: 'Costs!B:D'",
       ofOther
         ? `For ${other === "rows" ? "rows" : "columns"}, use ${otherVerbs}`
         : "A cell range (B2:D9) is not accepted: these verbs move whole rows or columns",
