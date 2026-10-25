@@ -1,5 +1,6 @@
 ---
-status: in-progress
+status: done
+pr: 146
 depends: []
 specs:
   - specs/commands/sheets-read.md
@@ -39,9 +40,9 @@ listing on a rendered-tab response (its grid shows row 1).
 
 ## Validation
 
-- [ ] `bun run build`, `lint`, `format:check`, `test` pass.
-- [ ] Unit tests above.
-- [ ] Live: `sheets read <multi-tab id>` shows `row1` per tab; `sheets query <id> "select A"`
+- [x] `bun run build`, `lint`, `format:check`, `test` pass.
+- [x] Unit tests above.
+- [x] Live: `sheets read <multi-tab id>` shows `row1` per tab; `sheets query <id> "select A"`
       without `--tab` shows the `TAB_REQUIRED` listing with `row1`.
 
 ## Risks / unknowns
@@ -51,8 +52,9 @@ listing on a rendered-tab response (its grid shows row 1).
 
 ## Notes
 
-(At closeout.)
+- Built inline (small change). The dispatcher re-render keeps `requireTab` synchronous for its eight callers; the error carries its spreadsheet under a symbol, so nothing else sees it.
+- Live on a scratch spreadsheet in the owner's safe-to-delete folder: a 5-tab listing and a `sheets query` `TAB_REQUIRED` both showed every tab's row 1, including a title with an apostrophe (the range is always quoted).
 
 ## Follow-ups
 
-(At closeout.)
+None.
