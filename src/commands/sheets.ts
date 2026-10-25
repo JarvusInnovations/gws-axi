@@ -18,6 +18,7 @@ import {
   sheetsInsertColsCommand,
   sheetsInsertRowsCommand,
 } from "./sheets/dimensions.js";
+import { QUERY_FLAGS, QUERY_HELP, sheetsQueryCommand } from "./sheets/query.js";
 import { READ_HELP, sheetsReadCommand } from "./sheets/read.js";
 import {
   TABS_DELETE_FLAGS,
@@ -84,6 +85,13 @@ const sheetsCommentsCommand = (account: string, args: string[]): Promise<string>
 
 export const SUBCOMMANDS: SheetsSubcommand[] = [
   { name: "read", mutation: false, flags: "self", help: READ_HELP, handler: sheetsReadCommand },
+  {
+    name: "query",
+    mutation: false,
+    flags: QUERY_FLAGS,
+    help: QUERY_HELP,
+    handler: sheetsQueryCommand,
+  },
   {
     name: "comments",
     mutation: false,
@@ -221,6 +229,7 @@ notes:
   cells after them, and say where everything went in old-row terms.
 ${renderAlternatives(SUBCOMMANDS)}subcommand help:
   gws-axi sheets read --help       for spreadsheetId + tab/range handling
+  gws-axi sheets query --help      for a SQL-like query over one tab (=QUERY's language)
   gws-axi sheets cell --help       for one cell: its formula and what it reads
   gws-axi sheets update --help     for writing a block, or single cells
   gws-axi sheets append --help     for adding rows (CSV, JSON, header-keyed)
@@ -232,6 +241,7 @@ ${renderAlternatives(SUBCOMMANDS)}subcommand help:
 examples:
   gws-axi sheets read 1AbC...
   gws-axi sheets read 1AbC... --tab Costs --range A1:D50
+  gws-axi sheets query 1AbC... "select A, sum(C) group by A" --tab Costs
   gws-axi sheets cell 1AbC... D2 --tab Costs
   gws-axi sheets update 1AbC... --tab Costs --range B2 costs.csv --account you@example.com
   gws-axi sheets append 1AbC... --tab Costs --content 'bolts,40' --account you@example.com

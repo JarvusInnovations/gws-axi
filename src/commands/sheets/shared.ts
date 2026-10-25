@@ -382,6 +382,7 @@ export function requireTab(
   meta: SpreadsheetMeta,
   selector: string | undefined,
   retry: (tab: string) => string,
+  opts: { read?: boolean } = {},
 ): TabInfo {
   if (selector !== undefined) {
     const tab = findTab(meta.tabs, selector);
@@ -395,7 +396,11 @@ export function requireTab(
     [
       renderTabs(meta.tabs),
       `Run \`${retry(meta.tabs[0]?.title ?? "<name>")}\` (or another title / gid above)`,
-      "Nothing was written. There is no all-tabs write; `gws-axi drive upload --update --replace-all-tabs` replaces the whole file",
+      ...(opts.read
+        ? []
+        : [
+            "Nothing was written. There is no all-tabs write; `gws-axi drive upload --update --replace-all-tabs` replaces the whole file",
+          ]),
     ],
   );
 }
