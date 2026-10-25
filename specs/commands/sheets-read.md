@@ -56,6 +56,18 @@ Output order: account header, `spreadsheet{}` header, `sheets[N]` tabs listing, 
 
 Always shown when the file has tabs. `gid` is the numeric `sheetId` (first-class, never truncated — it is the stable handle `--tab` accepts and the value a future write targets). `rows`/`cols` are the tab's grid dimensions from `gridProperties` (allocation, not necessarily populated extent). Multi-tab spreadsheets with neither `--tab` nor a tab-qualified `--range` render **only** this listing (no grid) so the agent can pick one.
 
+**`row1` on the disambiguation listing.** When the listing is all there is (multi-tab, no tab
+chosen), it gains a sixth column, `row1`: each tab's first-row text, non-empty cells joined
+with `, ` and truncated to 120 characters (`…`). An agent choosing among `Sheet1`, `Data` and
+`Q3` sees what each holds without reading each one. It comes from **one** `spreadsheets.get`
+with a `ranges` entry per grid tab (`'<title>'!1:1`, `formattedValue` only), whatever the tab
+count. It is named for what it is — the first row — not `headers`: on many tabs row 1 is a
+title, a blank line or data; whether it is a header is the reader's call, and `sheets read
+--tab` applies the frozen-row rule once a tab is chosen. Empty for a tab whose row 1 is empty.
+Past 100 grid tabs only the first 100 get `row1` (the request carries one range per tab). Best-effort: a failed read leaves the column out and adds `row1: unavailable (<reason>)` to
+the `spreadsheet{}` header. A rendered-tab response keeps the five-column listing — the grid
+below it already shows row 1.
+
 ### Grid content
 
 Rendered only when a tab is selected. Two shapes:
