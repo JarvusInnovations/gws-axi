@@ -36,6 +36,7 @@ gws-axi sheets delete-cols <spreadsheetId> <cols> [--tab <name|gid>]
 | Fact | Status |
 | --- | --- |
 | `insertDimension` with `range{sheetId,dimension,startIndex,endIndex}` inserts `end−start` empty rows/columns **before** `startIndex`; `inheritFromBefore: true` copies the formatting of the row/column before the range (background, borders, number format — values are not copied), and is refused (400 "range.startIndex must not be 0 if inheritFromBefore is true") when `startIndex` is 0 | **Observed 2026-10-25** |
+| `inheritFromBefore: false` does **not** mean "no formatting": the new rows/columns inherit from the row/column **after** the range instead — cell formats *and* row height (an insert at row 1 above a bold, green, 40px header gets a bold, green, 40px row). There is no un-inherited insert. A `repeatCell` with `fields: "userEnteredFormat"` and an empty `cell` clears the cell formats; the row height stays | **Observed 2026-10-25** (amended: the spec read `false` as "off") |
 | Formulas referencing rows/columns at or after an insertion point are shifted by Sheets; a range that spans the insertion point grows (`SUM(B2:B9)` → `SUM(B2:B12)` after three rows at 3) | **Observed 2026-10-25** |
 | `deleteDimension` removes the range; what follows moves up/left; a range partly deleted shrinks (`SUM(B2:B12)` → `SUM(B2:B11)`). A formula that read a deleted cell becomes `#REF!` — and **its text is rewritten**: `=B7` is stored as `=#REF!`, so the original formula exists only in a read taken before the delete | **Observed 2026-10-25** (amended: the rewrite was not documented) |
 | Deleting every row (or every column) of a sheet is refused (400 "You can't delete all the rows on the sheet." / "… all the columns …") | **Observed 2026-10-25**; refused locally first |
@@ -64,8 +65,15 @@ gws-axi sheets delete-cols <spreadsheetId> <cols> [--tab <name|gid>]
 - `inheritFromBefore` is **true by default** when the insertion point is not the first
   row/column: the new rows take the formatting of the row above (the editor's "insert
   below" behavior — a row inserted mid-table gets the table's borders and number formats,
-  which is what a human doing this gets). `--no-inherit` turns it off. At row/column 1 it is
-  always off (upstream refuses it), and the response says `inherit: none`.
+  which is what a human doing this gets); `inherit: from row N`. At row/column 1 upstream
+  refuses `true`, and `false` inherits from the row **after** — the old row 1, as the
+  editor's "insert above" does; `inherit: from row N (was row 1)`, naming where that row is
+  now.
+- `--no-inherit` leaves the new cells unformatted: the insert and a `repeatCell` clearing
+  `userEnteredFormat` over the new rows/columns go in **one** `batchUpdate` (all or
+  nothing). The response says `inherit: none`, and a help line discloses that the row
+  height / column width still came from the neighbor (upstream has no un-inherited insert,
+  and resetting a size would mean guessing the tab's default).
 - The tab's allocation grows by the inserted count (upstream does this); the response
   carries `grid: R×C` after.
 - A request that starts **past** the current allocation is a `VALIDATION_ERROR` pointing at
@@ -142,7 +150,9 @@ help[4]:
 - `range` — the tab-qualified dimension range as given; `count` the number of rows/columns.
 - `shifted` — one sentence stating the move in old-row terms, so an agent holding a stale read
   can re-address.
-- `inherit` (insert) — `from row N` / `from column X` / `none`.
+- `inherit` (insert) — `from row N` / `from column X` (the neighbor above/left), `from row
+  N (was row 1)` (an insert at row/column 1, which inherits from below/right), or `none`
+  (`--no-inherit`).
 - `grid` — the tab's allocation after an insert.
 - `cells` + `cells[N]{row,…}` (delete) — the populated cells removed, in the read's grid
   shape; the block's `row` numbers are the **old** numbers. Omitted (`cells: 0`) when the
@@ -194,4 +204,5 @@ parser lives beside `parseA1`. `sheets --help` groups them under writes.
 - **The editor's default for formatting continuity, nothing more.** An inserted row inherits
   its neighbor's formatting because that is what the editor does and a table with one
   unbordered row is a defect, not a choice; the flag to turn it off exists because the
-  `sheets` writers otherwise never touch formatting.
+  `sheets` writers otherwise never touch formatting. Turning it off has to *clear* the
+  inherited formats, because upstream always copies from one side or the other.
