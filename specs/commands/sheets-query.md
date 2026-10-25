@@ -136,8 +136,10 @@ help[3]:
   the sheet, over the tab's whole column span (`Costs!A:Z` for a 26-column tab) and with the
   `headers` count as its third argument when one was sent (omitted otherwise: `QUERY`'s own
   default detects, as the endpoint does).
-- On `QUERY_ERROR`: Google's message verbatim, the query with a caret under the position
-  when the message names one, and a link line to the query-language reference.
+- On `QUERY_ERROR`: Google's message verbatim (its line breaks folded to spaces), the query
+  with `»` inserted at the position when the message names one (`line L, column C`) — an
+  error's `help[]` renders on one line, so a caret on a line below cannot line up — and a link
+  line to the query-language reference.
 
 ## Errors
 
