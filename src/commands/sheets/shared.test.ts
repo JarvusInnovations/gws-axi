@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   cellArg,
   collectErrors,
+  legendLine,
   diffErrors,
   fixLines,
   formulaMentions,
@@ -238,5 +239,13 @@ describe("translateWriteError", () => {
     expect(
       translateWriteError(upstream("Invalid data[1]: Unable to parse range: Nope!A1"), ctx).code,
     ).toBe("RANGE_INVALID");
+  });
+});
+
+describe("legendLine", () => {
+  it("lists letter=header and counts the rest past the max", () => {
+    const entries = ["A", "B", "C"].map((letter, i) => ({ letter, header: `h${i}` }));
+    expect(legendLine(entries)).toBe("Columns in row 1: A=h0, B=h1, C=h2");
+    expect(legendLine(entries, 2)).toBe("Columns in row 1: A=h0, B=h1, … 1 more");
   });
 });
