@@ -29,10 +29,10 @@ gws-axi sheets note <spreadsheetId> <A1> (--text <note> | --clear) [--tab <name|
 
 | Fact | Status |
 | --- | --- |
-| `updateCells` with `rows[0].values[0].note` and `fields: "note"` sets the note and changes nothing else about the cell (value, format) | Documented. **To verify live** |
-| `note: ""` (or an unset `note` with `fields: "note"`) clears it | Documented. **To verify live** which form clears |
-| A note's length limit, if any, and what the refusal looks like | Unknown. **To verify live** (50,000-character cell limit is for values) |
-| A note on a cell in a protected range is refused for a non-editor (400 "protected cell or object") | **To verify live** |
+| `updateCells` with `rows[0].values[0].note` and `fields: "note"` sets the note and changes nothing else about the cell (value, format) | **Observed 2026-10-25**: a cell holding `4200` with a currency format (`"$"#,##0`, showing `$4,200`) kept its value, format and display through a set, a replace and both clear forms. A two-line note came back with its `\n` intact |
+| `note: ""` (or an unset `note` with `fields: "note"`) clears it | **Observed 2026-10-25**: both forms clear — afterwards the cell carries no `note` key at all, not an empty one. `--clear` sends the cell with no `note` under the `note` mask (the mask's documented "listed but absent means cleared") |
+| A note's length limit, if any, and what the refusal looks like | **Observed 2026-10-25**: none hit at 2,000,000 characters — 50,000, 100,000, 1,000,000 and 2,000,000 each stored and read back at full length. The 50,000-character cell limit is for values only. No local cap |
+| A note on a cell in a protected range is refused for a non-editor (400 "protected cell or object") | **Observed 2026-10-25**: an editor of the file outside the range's editors got 400 `INVALID_ARGUMENT` "Invalid requests[0].updateCells: You are trying to edit a protected cell or object…" — the same phrase `translateWriteError` maps to `PROTECTED_RANGE` |
 
 ## Behavior
 
@@ -41,7 +41,7 @@ gws-axi sheets note <spreadsheetId> <A1> (--text <note> | --clear) [--tab <name|
 2. **Compare**: the same text already there → `action: unchanged`, nothing sent, exit 0.
    `--clear` on a cell with no note → `unchanged`.
 3. **Write**: one `batchUpdate` `updateCells` with the single cell's `note` and the field mask
-   `note`.
+   `note`. `--clear` sends the cell with no `note` under the same mask.
 4. No read-back is needed: a note has no evaluation. The response echoes the text as sent.
 
 ## Output
