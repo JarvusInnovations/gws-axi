@@ -110,7 +110,17 @@ function cellName(r: number, c: number): string {
 
 function checkScalar(value: unknown, where: string): InputValue {
   if (value === null || typeof value === "string" || typeof value === "boolean") return value;
-  if (typeof value === "number") return value;
+  if (typeof value === "number") {
+    // JSON.parse turns 1e400 into Infinity, which would serialize as null — a
+    // silent skip of a cell counted as written.
+    if (!Number.isFinite(value)) {
+      throw new AxiError(`JSON ${where} is not a finite number`, "VALIDATION_ERROR", [
+        'Write very large numbers as strings, e.g. "1e400"',
+        "Nothing was written",
+      ]);
+    }
+    return value;
+  }
   throw new AxiError(
     `JSON ${where} is ${Array.isArray(value) ? "an array" : "an object"} — a cell takes a string, number, boolean or null`,
     "VALIDATION_ERROR",

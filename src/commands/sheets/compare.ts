@@ -22,6 +22,28 @@ export function inputText(input: Exclude<InputValue, null>): string {
 }
 
 const CANONICAL_NUMBER = /^-?(0|[1-9][0-9]*)(\.[0-9]*[1-9])?$/;
+const CANONICAL_INTEGER = /^-?(0|[1-9][0-9]*)$/;
+
+/** How typed text parses where it lands: the spreadsheet's locale. */
+export interface ParseContext {
+  locale?: string;
+}
+
+/** The locale's decimal separator; `.` when the locale is unknown or unreadable. */
+export function decimalSeparator(locale: string | undefined): string {
+  if (!locale) return ".";
+  try {
+    const parts = new Intl.NumberFormat(locale.replace(/_/g, "-")).formatToParts(1.5);
+    return parts.find((p) => p.type === "decimal")?.value ?? ".";
+  } catch {
+    return ".";
+  }
+}
+
+/** TRUE/FALSE read as booleans only in an English locale (or an unknown one). */
+function englishLocale(locale: string | undefined): boolean {
+  return !locale || /^en([_-]|$)/i.test(locale);
+}
 
 /** A USER_ENTERED string that can only be stored as the same text. */
 function isPlainText(s: string): boolean {
@@ -40,16 +62,29 @@ export function storesSame(
   input: Exclude<InputValue, null>,
   stored: CellLike | undefined,
   raw: boolean,
+  ctx: ParseContext = {},
 ): boolean {
   const v = stored?.userEnteredValue;
   if (isEmptyCell(stored)) return input === "";
   if (input === "") return false;
-  if (typeof input === "number") return v?.numberValue === input;
-  if (typeof input === "boolean") return v?.boolValue === input;
+  // A TEXT-formatted cell stores what is typed as a string (observed), so no
+  // number or boolean shortcut holds there.
+  const textCell = stored?.effectiveFormat?.numberFormat?.type === "TEXT";
+  if (typeof input === "number") return !textCell && v?.numberValue === input;
+  if (typeof input === "boolean") return !textCell && v?.boolValue === input;
   if (raw) return v?.stringValue === input;
   if (input.startsWith("=")) return v?.formulaValue === input;
-  if (CANONICAL_NUMBER.test(input)) return v?.numberValue === Number(input);
-  if (/^(true|false)$/i.test(input)) return v?.boolValue === (input.toLowerCase() === "true");
+  if (CANONICAL_NUMBER.test(input)) {
+    // An integer reads the same everywhere; a decimal only where `.` is the
+    // separator (in de_DE `5.5` is a date — observed).
+    const sure = CANONICAL_INTEGER.test(input) || decimalSeparator(ctx.locale) === ".";
+    return sure && !textCell && v?.numberValue === Number(input);
+  }
+  if (/^(true|false)$/i.test(input)) {
+    return (
+      englishLocale(ctx.locale) && !textCell && v?.boolValue === (input.toLowerCase() === "true")
+    );
+  }
   if (isPlainText(input)) return v?.stringValue === input;
   return false;
 }
@@ -65,13 +100,14 @@ export function diffBlock(
   planned: PlannedCell[],
   current: Map<string, CellLike>,
   raw: boolean,
+  ctx: ParseContext = {},
 ): CellDiff[] {
   return planned.map((p) => {
     const stored = current.get(p.a1);
     return {
       cell: p.a1,
       before: isEmptyCell(stored) ? "" : enteredText(stored),
-      changed: !storesSame(p.input, stored, raw),
+      changed: !storesSame(p.input, stored, raw, ctx),
     };
   });
 }

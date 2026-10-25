@@ -66,6 +66,14 @@ describe("parseJsonGrid", () => {
       "VALIDATION_ERROR",
     );
   });
+  it("refuses a non-finite number (1e400 parses to Infinity)", () => {
+    expect(() => parseJsonGrid("[[1e400]]", { allowObjects: false })).toThrow(
+      /not a finite number/,
+    );
+    expect(codeOf(() => parseJsonGrid('[{"A":-1e999}]', { allowObjects: true }))).toBe(
+      "VALIDATION_ERROR",
+    );
+  });
   it("accepts objects for append only", () => {
     expect(parseJsonGrid('[{"Name":"x"}]', { allowObjects: true })).toEqual({
       kind: "keyed",

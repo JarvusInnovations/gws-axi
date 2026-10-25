@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   type PlannedCell,
+  decimalSeparator,
   diffBlock,
   displayNow,
   parsedLine,
@@ -54,6 +55,33 @@ describe("storesSame", () => {
     expect(storesSame("", undefined, false)).toBe(true);
     expect(storesSame("", str("x"), false)).toBe(false);
     expect(storesSame("x", undefined, false)).toBe(false);
+  });
+});
+
+describe("storesSame — locale and TEXT format", () => {
+  const textCell = (n: number): CellLike => ({
+    ...num(n),
+    effectiveFormat: { numberFormat: { type: "TEXT" } },
+  });
+  it("treats a TEXT-formatted cell as changed for number and boolean shortcuts", () => {
+    expect(storesSame("5", textCell(5), false)).toBe(false);
+    expect(storesSame(5, textCell(5), false)).toBe(false);
+    expect(storesSame("5", num(5), false)).toBe(true);
+  });
+  it("takes the decimal shortcut only where '.' is the separator", () => {
+    expect(storesSame("5.5", num(5.5), false, { locale: "en_US" })).toBe(true);
+    expect(storesSame("5.5", num(5.5), false, { locale: "de_DE" })).toBe(false);
+    // Integers read the same everywhere.
+    expect(storesSame("5", num(5), false, { locale: "de_DE" })).toBe(true);
+  });
+  it("takes the TRUE/FALSE shortcut only in an English locale", () => {
+    expect(storesSame("TRUE", bool(true), false, { locale: "en_GB" })).toBe(true);
+    expect(storesSame("TRUE", bool(true), false, { locale: "de_DE" })).toBe(false);
+  });
+  it("knows each locale's decimal separator", () => {
+    expect(decimalSeparator("en_US")).toBe(".");
+    expect(decimalSeparator("de_DE")).toBe(",");
+    expect(decimalSeparator(undefined)).toBe(".");
   });
 });
 
