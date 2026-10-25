@@ -24,6 +24,7 @@ import {
   cellA1,
   collectErrors,
   columnLetter,
+  displayTitle,
   diffErrors,
   enteredText,
   errorCountLine,
@@ -491,6 +492,41 @@ export function grownGrid(
   return { rows, cols, grown: rows > tab.rows || cols > tab.cols };
 }
 
+/**
+ * Growth as `appendDimension` — relative to the allocation the command read, so
+ * it can only add. An absolute rowCount computed from that snapshot would lower
+ * a tab that grew since, and lowering it deletes the trailing rows (observed).
+ */
+export function growthRequests(
+  tab: { gid: number; rows: number; cols: number },
+  needed: { rows: number; cols: number },
+): sheets_v4.Schema$Request[] {
+  const out: sheets_v4.Schema$Request[] = [];
+  if (needed.rows > tab.rows) {
+    out.push({
+      appendDimension: { sheetId: tab.gid, dimension: "ROWS", length: needed.rows - tab.rows },
+    });
+  }
+  if (needed.cols > tab.cols) {
+    out.push({
+      appendDimension: { sheetId: tab.gid, dimension: "COLUMNS", length: needed.cols - tab.cols },
+    });
+  }
+  return out;
+}
+
+/** The tab's allocation after growth, from a batchUpdate reply with the spreadsheet. */
+export function grownTo(
+  reply: sheets_v4.Schema$BatchUpdateSpreadsheetResponse,
+  gid: number,
+): { rows: number; cols: number } | undefined {
+  const props = reply.updatedSpreadsheet?.sheets?.find(
+    (sh) => (sh.properties?.sheetId ?? 0) === gid,
+  )?.properties?.gridProperties;
+  if (props?.rowCount == null || props.columnCount == null) return undefined;
+  return { rows: props.rowCount, cols: props.columnCount };
+}
+
 /** `header:` for --header: what the freeze is, and whether to send it. */
 export function headerState(frozenRows: number): { send: boolean; text: string } {
   if (frozenRows === 0) return { send: true, text: "frozen" };
@@ -503,11 +539,15 @@ async function batchUpdate(
   requests: sheets_v4.Schema$Request[],
   operation: string,
   range: string,
+  withSpreadsheet = false,
 ): Promise<sheets_v4.Schema$BatchUpdateSpreadsheetResponse> {
   try {
     const res = await target.api.spreadsheets.batchUpdate({
       spreadsheetId: target.meta.id,
-      requestBody: { requests },
+      requestBody: {
+        requests,
+        ...(withSpreadsheet ? { includeSpreadsheetInResponse: true } : {}),
+      },
     });
     return res.data;
   } catch (err) {
@@ -543,7 +583,7 @@ async function collateralFormulas(
 }
 
 /** Whole-tab error scan when the allocation allows it, else `undefined`. */
-function scanRange(tab: TabInfo, grid: { rows: number; cols: number }): string | undefined {
+export function scanRange(tab: TabInfo, grid: { rows: number; cols: number }): string | undefined {
   return grid.rows * grid.cols <= ERROR_SCAN_BOUND ? quoteTitle(tab.title) : undefined;
 }
 
@@ -562,6 +602,7 @@ export async function writePlan(
   const rects = planRects(plan);
   const a1 = plan.kind === "cells" ? plan.cells.map((c) => c.a1).join(",") : rectA1(rects[0]);
   const range = `${q}!${a1}`;
+  const label = `${displayTitle(tab.title)}!${a1}`;
   const shape = plan.kind === "block" ? blockShape(plan.rows) : undefined;
   const grid = grownGrid(tab, rects);
   const wholeScan = scanRange(tab, grid);
@@ -583,11 +624,11 @@ export async function writePlan(
   const pre = cellMap(preData);
 
   // 2. Compare.
-  const diffs = diffBlock(planned, pre, opts.raw);
+  const diffs = diffBlock(planned, pre, opts.raw, { locale: meta.locale });
   const anyChange = diffs.some((d) => d.changed);
   const header = opts.header ? headerState(tab.frozenRows) : undefined;
   const base = {
-    range,
+    range: label,
     a1,
     shape,
     cells: planned.length,
@@ -608,23 +649,15 @@ export async function writePlan(
   // 3. Grow the allocation so the values call is never refused for its extent.
   let gridNote: string | undefined;
   if (grid.grown) {
-    await batchUpdate(
+    const reply = await batchUpdate(
       target,
-      [
-        {
-          updateSheetProperties: {
-            properties: {
-              sheetId: tab.gid,
-              gridProperties: { rowCount: grid.rows, columnCount: grid.cols },
-            },
-            fields: "gridProperties.rowCount,gridProperties.columnCount",
-          },
-        },
-      ],
-      "sheets.spreadsheets.batchUpdate(updateSheetProperties)",
+      growthRequests(tab, grid),
+      "sheets.spreadsheets.batchUpdate(appendDimension)",
       range,
+      true,
     );
-    gridNote = `grown to ${grid.rows}×${grid.cols}`;
+    const now = grownTo(reply, tab.gid) ?? grid;
+    gridNote = `grown to ${now.rows}×${now.cols}`;
   }
 
   // 4. The values call.
@@ -719,6 +752,7 @@ export function errorHeader(
   const out: Record<string, unknown> = {};
   if (errors && (errors.errors.length > 0 || errors.fixed > 0)) {
     out.errors = errors.errors.length;
+    if (errors.errors.length > WRITTEN_CAP) out.errors_total = errors.errors.length;
     if (errors.fixed > 0) out.errors_fixed = errors.fixed;
   }
   if (errors && errors.elsewhere > 0) out.errors_elsewhere = errors.elsewhere;
@@ -1036,11 +1070,9 @@ export async function sheetsAppendCommand(account: string, args: string[]): Prom
   const plan: WritePlan = { kind: "block", row0: landed?.r0 ?? 0, col0: landed?.c0 ?? 0, rows };
   const planned = plannedCells(plan);
   const rect = planRects(plan)[0];
-  const grown = {
-    rows: Math.max(tab.rows + rows.length, rect.r1),
-    cols: Math.max(tab.cols, rect.c1),
-  };
-  const postScan = preErr ? scanRange(tab, grown) : undefined;
+  // One scope, decided from the pre-append size, on both sides — a post-only
+  // narrowing would count every error outside the rows as fixed.
+  const postScan = wholeScan;
   const [postData, postErr] = await Promise.all([
     fetchGrid(api, account, meta.id, [`${q}!${rectA1(rect)}`], TARGET_FIELDS),
     postScan
@@ -1062,7 +1094,7 @@ export async function sheetsAppendCommand(account: string, args: string[]): Prom
     errors,
     formulas,
     raw: flags.raw,
-    errorScan: postScan ? undefined : `written range only (tab is ${grown.rows}×${grown.cols})`,
+    errorScan: postScan ? undefined : `written range only (tab is ${tab.rows}×${tab.cols})`,
   });
 }
 
@@ -1138,13 +1170,12 @@ function renderAppend(
   },
 ): string {
   const { meta, tab, account } = target;
-  const q = quoteTitle(tab.title);
   const planned = plannedCells(r.plan);
   const head: Record<string, unknown> = { account, action: "appended" };
   Object.assign(head, errorHeader(r.errors, r.errorScan));
   const shape = blockShape(r.plan.rows);
   const summary: Record<string, unknown> = {
-    range: `${q}!${rectA1(r.rect)}`,
+    range: `${displayTitle(tab.title)}!${rectA1(r.rect)}`,
     shape: `${shape.rows}x${shape.cols}`,
     cells: shape.cells,
   };
@@ -1216,6 +1247,7 @@ export async function sheetsClearCommand(account: string, args: string[]): Promi
     : { r0: 0, c0: 0, r1: Math.max(tab.rows, 1), c1: Math.max(tab.cols, 1) };
   const a1 = rectA1(rect);
   const range = `${q}!${a1}`;
+  const label = `${displayTitle(tab.title)}!${a1}`;
   const clipped = clipRect(rect, tab);
   const wholeScan = scanRange(tab, tab);
 
@@ -1238,7 +1270,7 @@ export async function sheetsClearCommand(account: string, args: string[]): Promi
     return joinBlocks(
       renderObject(head),
       renderObject({ spreadsheet: spreadsheetBlock(meta, tab) }),
-      renderObject({ range, cells: 0 }),
+      renderObject({ range: label, cells: 0 }),
       renderHelp([
         "Nothing was cleared: the range holds no values",
         `Run \`gws-axi sheets read ${meta.id} --tab ${tabArg}\` to see where the tab's data is`,
@@ -1283,7 +1315,7 @@ export async function sheetsClearCommand(account: string, args: string[]): Promi
       wholeScan ? undefined : `written range only (tab is ${tab.rows}×${tab.cols})`,
     ),
   );
-  const summary: Record<string, unknown> = { range, cells: held.length };
+  const summary: Record<string, unknown> = { range: label, cells: held.length };
   const body = outcomeBlocks({ formulas: [], written: [], changed: 0 }, errors, held);
   if (body.writtenTotal) summary.written_total = body.writtenTotal;
   const help = [

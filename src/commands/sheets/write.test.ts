@@ -5,6 +5,8 @@ import {
   type WriteTarget,
   clipRect,
   grownGrid,
+  grownTo,
+  growthRequests,
   headerHint,
   headerState,
   parseAppendFlags,
@@ -13,6 +15,7 @@ import {
   placeBlock,
   plannedCells,
   planRects,
+  scanRange,
   writePlan,
 } from "./write.js";
 import { SHEETS_HELP, SUBCOMMANDS } from "../sheets.js";
@@ -141,6 +144,47 @@ describe("grid growth", () => {
   });
 });
 
+describe("growth requests", () => {
+  it("appends only what the block needs beyond the read allocation, per dimension", () => {
+    const tab = { gid: 7, rows: 1000, cols: 26 };
+    expect(growthRequests(tab, { rows: 1002, cols: 30 })).toEqual([
+      { appendDimension: { sheetId: 7, dimension: "ROWS", length: 2 } },
+      { appendDimension: { sheetId: 7, dimension: "COLUMNS", length: 4 } },
+    ]);
+    expect(growthRequests(tab, { rows: 1000, cols: 31 })).toEqual([
+      { appendDimension: { sheetId: 7, dimension: "COLUMNS", length: 5 } },
+    ]);
+    // Never an absolute count, so never a shrink.
+    expect(growthRequests(tab, { rows: 10, cols: 2 })).toEqual([]);
+    expect(JSON.stringify(growthRequests(tab, { rows: 2000, cols: 40 }))).not.toContain("rowCount");
+  });
+  it("reads the grown size back from the reply", () => {
+    expect(
+      grownTo(
+        {
+          updatedSpreadsheet: {
+            sheets: [
+              { properties: { sheetId: 0, gridProperties: { rowCount: 5, columnCount: 5 } } },
+              { properties: { sheetId: 7, gridProperties: { rowCount: 1500, columnCount: 30 } } },
+            ],
+          },
+        },
+        7,
+      ),
+    ).toEqual({ rows: 1500, cols: 30 });
+    expect(grownTo({}, 7)).toBeUndefined();
+  });
+});
+
+describe("error-scan scope", () => {
+  it("is decided from the allocation read before the write", () => {
+    const tab = { gid: 0, title: "Q4", index: 0, rows: 7692, cols: 26, frozenRows: 0 };
+    // 199,992 cells: whole tab, quoted (Q4 alone would be a cell).
+    expect(scanRange(tab, tab)).toBe("'Q4'");
+    expect(scanRange(tab, { rows: 7700, cols: 26 })).toBeUndefined();
+  });
+});
+
 describe("plans", () => {
   it("skips null cells and offsets by the anchor", () => {
     const plan = {
@@ -244,11 +288,11 @@ describe("writePlan request sequence", () => {
       { raw: false, header: false },
     );
     expect(calls).toEqual([
-      "get cells Costs!B5;Costs!C9",
-      "get errors Costs",
+      "get cells 'Costs'!B5;'Costs'!C9",
+      "get errors 'Costs'",
       "values.batchUpdate 2",
-      "get cells Costs!B5;Costs!C9",
-      "get errors Costs",
+      "get cells 'Costs'!B5;'Costs'!C9",
+      "get errors 'Costs'",
     ]);
   });
   it("grows the grid before the values call and freezes after it", async () => {
@@ -259,10 +303,11 @@ describe("writePlan request sequence", () => {
       { raw: false, header: true },
     );
     expect(calls.filter((c) => !c.startsWith("get"))).toEqual([
-      "batchUpdate updateSheetProperties",
-      "values.update Costs!A1:C1",
+      "batchUpdate appendDimension",
+      "values.update 'Costs'!A1:C1",
       "batchUpdate updateSheetProperties",
     ]);
+    // The fake reply carries no spreadsheet, so the note falls back to the computed size.
     expect(out.grid).toBe("grown to 1000×3");
     expect(out.header).toBe("frozen");
   });
@@ -273,7 +318,7 @@ describe("writePlan request sequence", () => {
       { kind: "block", row0: 0, col0: 0, rows: [["a"]] },
       { raw: false, header: false, fresh: true },
     );
-    expect(calls[0]).toBe("values.update Costs!A1");
+    expect(calls[0]).toBe("values.update 'Costs'!A1");
   });
 });
 

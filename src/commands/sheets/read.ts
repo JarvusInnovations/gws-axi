@@ -495,7 +495,7 @@ export async function sheetsReadCommand(account: string, args: string[]): Promis
     blocks.push(renderList("sheets", gridSheets, tabsSchema));
     for (const t of gridSheets.slice(0, 4)) {
       suggestions.push(
-        `Run \`gws-axi sheets read ${flags.spreadsheetId} --tab ${quoteTitle(t.title)}\` to read the '${t.title}' tab`,
+        `Run \`gws-axi sheets read ${flags.spreadsheetId} --tab ${shellArg(t.title)}\` to read the '${t.title}' tab`,
       );
     }
     if (suggestions.length) blocks.push(renderHelp(suggestions));
@@ -631,7 +631,7 @@ export async function sheetsReadCommand(account: string, args: string[]): Promis
   }
   if (grid.truncated) {
     suggestions.push(
-      `Run \`gws-axi sheets read ${flags.spreadsheetId} --tab ${quoteTitle(target.title)} --full\` to render all ${grid.totalRows} rows, or add \`--range <A1>\` to scope`,
+      `Run \`gws-axi sheets read ${flags.spreadsheetId} --tab ${shellArg(target.title)} --full\` to render all ${grid.totalRows} rows, or add \`--range <A1>\` to scope`,
     );
   }
   if (grid.listName === "rows") {
