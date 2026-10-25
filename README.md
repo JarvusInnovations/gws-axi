@@ -462,7 +462,7 @@ gws-axi sheets query <id> "select A, B" --tab Costs --headers 0          # name 
 gws-axi sheets query <id> "select *" --tab Costs --json-out=./costs.json  # every row to a file
 ```
 
-`--json-out[=<path>]` and `--csv-out[=<path>]` write the full result to a file and leave the preview as it is. Without `=<path>` the file goes in the OS temp dir (`gws-axi/<timestamp>-<kind>.<ext>`, owner-only). The response names the file, its row and column counts, and the columns, and gives a `jq` or `head` command for it. `sheets query --csv-out` saves Google's own CSV of the query. `sheets read` writes the whole tab as display strings, header row first.
+`--json-out[=<path>]` and `--csv-out[=<path>]` write the full result to a file and leave the preview as it is. Without `=<path>` the file goes in a per-user folder in the OS temp dir (`gws-axi-<uid>/<timestamp>-<kind>.<ext>`), owner-only: gws-axi refuses to write into that folder if someone else owns it or can read it, and never writes through an existing file or symlink. An explicit `=<path>` replaces a file that is there, and the response says `overwrote`. The response names the file, its row and column counts, and the columns, and gives a `jq` or `head` command for it. `sheets query --csv-out` saves Google's own CSV of the query. `sheets read` writes the whole tab as display strings, header row first.
 
 The writes put **values** into one tab and leave everything else — formats, widths, validation, other tabs — as it was. Values come as CSV (default), TSV, or a JSON 2-D array (`null` leaves a cell as it is), from a file, `-`, or `--content`. Strings are parsed as typed (`=formulas`, dates, currencies) unless `--raw`.
 
