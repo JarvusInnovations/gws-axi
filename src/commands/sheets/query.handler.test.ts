@@ -207,6 +207,16 @@ describe("sheetsQueryCommand", () => {
     );
   });
 
+  it("points a spaced export path at the = form", async () => {
+    let msg = "";
+    try {
+      await sheetsQueryCommand(ACCOUNT, [ID, "select A", "--csv-out", "out.csv"]);
+    } catch (err) {
+      msg = (err as AxiError).message;
+    }
+    expect(msg).toBe("--csv-out takes its path with =: --csv-out=out.csv");
+  });
+
   it("refuses bad arguments before any call", async () => {
     for (const args of [
       [ID],

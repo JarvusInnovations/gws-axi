@@ -118,7 +118,8 @@ describe("sheetsReadCommand exports", () => {
       /one export flag/,
     );
     await expect(sheetsReadCommand(ACCOUNT, [ID, "--csv-out", "./x.csv"])).rejects.toThrow(
-      /Unexpected argument/,
+      "--csv-out takes its path with =: --csv-out=./x.csv",
     );
+    await expect(sheetsReadCommand(ACCOUNT, [ID, "extra"])).rejects.toThrow(/Unexpected argument/);
   });
 });

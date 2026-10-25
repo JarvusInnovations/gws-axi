@@ -38,6 +38,12 @@ export interface ParsedArgs {
   lists: Record<string, string[]>;
   booleans: Set<string>;
   positionals: string[];
+  /**
+   * For a bare optional flag directly followed by a positional (`--csv-out
+   * out.csv`), that positional — so a command refusing it as an extra
+   * argument can say the path rides on `=` (`extraArgumentError`).
+   */
+  optionalFollowers: Record<string, string>;
 }
 
 /** A token that reads as a flag name: `--clear`, `--txet` — not `---` or `-- note`. */
@@ -51,6 +57,15 @@ export function parseArgs(args: string[], spec: FlagSpec, command: string): Pars
   const lists: Record<string, string[]> = {};
   const booleans = new Set<string>();
   const positionals: string[] = [];
+  const optionalFollowers: Record<string, string> = {};
+  const declared = new Set([...valueFlags, ...booleanFlags, ...optionalFlags]);
+  // `--csv-out=x` after a value flag is a flag, not the value (the `=` keeps
+  // it from looking flag-shaped); anything else starting `--` may be a value.
+  const isFlagToken = (token: string): boolean => {
+    if (FLAG_SHAPED.test(token)) return true;
+    const eq = token.indexOf("=");
+    return token.startsWith("--") && eq > 2 && declared.has(token.slice(0, eq));
+  };
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -61,6 +76,10 @@ export function parseArgs(args: string[], spec: FlagSpec, command: string): Pars
     }
     if (booleanFlags.has(arg) || optionalFlags.has(arg)) {
       booleans.add(arg);
+      const next = args[i + 1];
+      if (optionalFlags.has(arg) && next !== undefined && !next.startsWith("--")) {
+        optionalFollowers[arg] = next;
+      }
       continue;
     }
     const eq = arg.indexOf("=");
@@ -94,7 +113,7 @@ export function parseArgs(args: string[], spec: FlagSpec, command: string): Pars
     if (valueFlags.has(arg)) {
       const next = args[i + 1];
       // Only a flag-shaped token is a missing value; `--- draft ---` is a value.
-      if (next === undefined || FLAG_SHAPED.test(next)) {
+      if (next === undefined || isFlagToken(next)) {
         throw new AxiError(`${arg} needs a value`, "VALIDATION_ERROR", [
           `Run \`gws-axi ${command} --help\` for usage`,
         ]);
@@ -122,7 +141,27 @@ export function parseArgs(args: string[], spec: FlagSpec, command: string): Pars
     ]);
   }
 
-  return { values, lists, booleans, positionals };
+  return { values, lists, booleans, positionals, optionalFollowers };
+}
+
+/**
+ * The error for positionals a command does not take. When one of them came
+ * right after a bare optional flag, the likely intent was its path — say how
+ * to pass it (`--csv-out=out.csv`) instead of a generic usage line.
+ */
+export function extraArgumentError(parsed: ParsedArgs, extra: string[], usage: string): AxiError {
+  for (const [flag, token] of Object.entries(parsed.optionalFollowers)) {
+    if (extra.includes(token)) {
+      return new AxiError(`${flag} takes its path with =: ${flag}=${token}`, "VALIDATION_ERROR", [
+        `Run again with ${flag}=${token}, or ${flag} alone for a file in the temp dir`,
+      ]);
+    }
+  }
+  return new AxiError(
+    `Unexpected argument${extra.length > 1 ? "s" : ""}: ${extra.join(" ")}`,
+    "VALIDATION_ERROR",
+    [usage],
+  );
 }
 
 /**

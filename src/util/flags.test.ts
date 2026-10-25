@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AxiError } from "axi-sdk-js";
-import { parseArgs, parseChoice, parseChoices, parseLimit } from "./flags.js";
+import { extraArgumentError, parseArgs, parseChoice, parseChoices, parseLimit } from "./flags.js";
 
 const SPEC = { value: ["--limit", "--since"], boolean: ["--full"] };
 
@@ -147,5 +147,37 @@ describe("parseArgs optional-value flags", () => {
 
   it("still refuses an unknown --name=value", () => {
     expect(errorFrom(() => parseArgs(["--nope=1"], OUT, "x")).message).toContain("Unknown flag");
+  });
+});
+
+describe("parseArgs flag tokens after a value flag", () => {
+  const SPEC2 = { value: ["--tab", "--find"], optional: ["--csv-out"] };
+
+  it("treats --<declared>=… as a flag, so the value flag is missing its value", () => {
+    expect(errorFrom(() => parseArgs(["--tab", "--csv-out=x.csv"], SPEC2, "x")).message).toContain(
+      "--tab needs a value",
+    );
+  });
+
+  it("still takes a value that starts with -- and holds = but names no declared flag", () => {
+    expect(parseArgs(["--find", "--a=b"], SPEC2, "x").values["--find"]).toBe("--a=b");
+  });
+});
+
+describe("extraArgumentError", () => {
+  const SPEC3 = { optional: ["--csv-out"] };
+
+  it("says the path rides on = when the extra token followed a bare optional flag", () => {
+    const parsed = parseArgs(["1AbC", "--csv-out", "out.csv"], SPEC3, "x");
+    expect(parsed.optionalFollowers).toEqual({ "--csv-out": "out.csv" });
+    const err = extraArgumentError(parsed, ["out.csv"], "usage");
+    expect(err.message).toBe("--csv-out takes its path with =: --csv-out=out.csv");
+  });
+
+  it("is the generic error otherwise", () => {
+    const parsed = parseArgs(["1AbC", "stray"], SPEC3, "x");
+    expect(extraArgumentError(parsed, ["stray"], "usage").message).toBe(
+      "Unexpected argument: stray",
+    );
   });
 });

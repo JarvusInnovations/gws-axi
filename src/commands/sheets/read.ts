@@ -7,7 +7,7 @@ import {
   parseExportRequest,
   writeExport,
 } from "../../util/export.js";
-import { type FlagSpec, parseArgs } from "../../util/flags.js";
+import { type FlagSpec, extraArgumentError, parseArgs } from "../../util/flags.js";
 import {
   field,
   joinBlocks,
@@ -114,9 +114,11 @@ function parseFlags(args: string[]): ParsedFlags {
     ]);
   }
   if (extra.length) {
-    throw new AxiError(`Unexpected argument: ${extra.join(" ")}`, "VALIDATION_ERROR", [
+    throw extraArgumentError(
+      parsed,
+      extra,
       "Usage: gws-axi sheets read <spreadsheetId> [--tab <name|gid>] [--range <A1>]",
-    ]);
+    );
   }
   let maxRows = DEFAULT_MAX_ROWS;
   const rawMax = parsed.values["--max-rows"];

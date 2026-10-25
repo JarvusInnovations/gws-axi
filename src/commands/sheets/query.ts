@@ -16,7 +16,7 @@ import {
   parseExportRequest,
   writeExport,
 } from "../../util/export.js";
-import { type FlagSpec, parseArgs } from "../../util/flags.js";
+import { type FlagSpec, extraArgumentError, parseArgs } from "../../util/flags.js";
 import {
   columnLetter,
   displayTitle,
@@ -119,10 +119,10 @@ function parseFlags(args: string[]) {
     ]);
   }
   if (extra.length) {
-    throw new AxiError(
-      `Unexpected argument${extra.length > 1 ? "s" : ""}: ${extra.join(" ")}`,
-      "VALIDATION_ERROR",
-      ['Quote the whole query as one argument: "select A, B where C > 1"'],
+    throw extraArgumentError(
+      parsed,
+      extra,
+      'Quote the whole query as one argument: "select A, B where C > 1"',
     );
   }
   const flags: QueryFlags = {
