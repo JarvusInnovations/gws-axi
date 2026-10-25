@@ -1,5 +1,6 @@
 ---
-status: in-progress
+status: done
+pr: 145
 depends: []
 specs:
   - specs/commands/sheets-query.md
@@ -41,9 +42,9 @@ mis-address columns with the legend in front of them).
 
 ## Validation
 
-- [ ] `bun run build`, `lint`, `format:check`, `test` pass.
-- [ ] Unit/handler tests above.
-- [ ] Live: `sheets query` on a headed scratch tab shows the legend; a wrong-letter query's
+- [x] `bun run build`, `lint`, `format:check`, `test` pass.
+- [x] Unit/handler tests above.
+- [x] Live: `sheets query` on a headed scratch tab shows the legend; a wrong-letter query's
       `QUERY_ERROR` carries the legend line; `sheets read --range C1:E9 --header-row` lists
       C, D, E.
 
@@ -53,8 +54,10 @@ mis-address columns with the legend in front of them).
 
 ## Notes
 
-(At closeout.)
+- Small enough to build inline rather than through a builder subagent.
+- The legend read reuses `fetchGrid` (row 1, `formattedValue` only) and runs beside the gviz call, so it adds no round trip. Existing handler tests needed no change: their mock returns no row-1 data, which is the "no legend, keep the letters line" path.
+- Live on a scratch spreadsheet in the owner's safe-to-delete folder: query legend, the legend line on a `select ZZ` `QUERY_ERROR`, and a `C1:E4` promoted read listing C, D, E.
 
 ## Follow-ups
 
-(At closeout.)
+- Tracked as: backticked-name translation in queries — only if agents still mis-address columns with the legend in front of them.
