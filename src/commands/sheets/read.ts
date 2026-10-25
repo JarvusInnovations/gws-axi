@@ -18,7 +18,9 @@ import {
 } from "../../output/index.js";
 import {
   type CellError,
+  type LegendEntry,
   type RangeOrigin,
+  renderLegend,
   type TabInfo,
   columnLetter,
   errorCountLine,
@@ -196,6 +198,8 @@ export interface GridRender {
   totalRows: number;
   /** Whether the render was capped below totalRows. */
   truncated: boolean;
+  /** Letter → header for a promoted header row (§ Header legend); absent for the letter grid. */
+  legend?: LegendEntry[];
 }
 
 /**
@@ -217,11 +221,13 @@ export function buildGrid(
   if (opts.headerRow) {
     const [headerCells = [], ...dataRows] = values;
     const used = new Set<string>();
+    const legend: LegendEntry[] = [];
     const names = letters.map((letter, j) => {
       const raw = truncateCell(headerCells[j]).trim();
       let name = raw || letter;
       if (used.has(name)) name = `${name} (${letter})`;
       used.add(name);
+      if (raw) legend.push({ letter, header: name });
       return name;
     });
     const totalRows = dataRows.length;
@@ -235,6 +241,7 @@ export function buildGrid(
       listName: "rows",
       totalRows,
       truncated: !opts.full && totalRows > opts.maxRows,
+      legend,
     };
   }
 
@@ -713,6 +720,7 @@ export async function sheetsReadCommand(account: string, args: string[]): Promis
   blocks.push(renderList("sheets", gridSheets, tabsSchema));
   if (written) blocks.push(exportBlock(written));
   blocks.push(renderList(grid.listName, grid.rows, grid.schema));
+  if (grid.legend?.length) blocks.push(renderLegend(grid.legend));
   if (extracted.notes.length > 0) {
     blocks.push(renderList("notes", extracted.notes, [field("cell"), field("note")]));
   }

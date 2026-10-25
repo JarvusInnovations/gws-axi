@@ -835,3 +835,33 @@ function errorMessage(err: unknown): string {
   };
   return e?.response?.data?.error?.message ?? e?.message ?? "";
 }
+
+// ---------------------------------------------------------------------------
+// Header legend (specs/commands/sheets-query.md § Header legend, sheets-read.md)
+
+/** One column of a tab's header row: its A1 letter and the name it is read by. */
+export interface LegendEntry {
+  letter: string;
+  header: string;
+  // Assignable to renderList's Record<string, unknown> row type.
+  [key: string]: unknown;
+}
+
+export const LEGEND_SCHEMA: FieldDef[] = [field("letter"), field("header")];
+
+/** Rows of `headers[N]` before `headers_total`. */
+export const LEGEND_CAP = 100;
+
+export function renderLegend(entries: LegendEntry[]): string {
+  return renderList("headers", entries.slice(0, LEGEND_CAP), LEGEND_SCHEMA);
+}
+
+/** The compact form a QUERY_ERROR carries: `Columns in row 1: A=Item, B=Qty, … 4 more`. */
+export function legendLine(entries: LegendEntry[], max = 30): string {
+  const shown = entries
+    .slice(0, max)
+    .map((e) => `${e.letter}=${e.header}`)
+    .join(", ");
+  const rest = entries.length - max;
+  return `Columns in row 1: ${shown}${rest > 0 ? `, … ${rest} more` : ""}`;
+}
