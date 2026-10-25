@@ -159,6 +159,23 @@ export function undoCommand(
   return `gws-axi sheets note ${spreadsheetId} ${cell} --tab ${shellArg(tab)} ${how} --account ${account}`;
 }
 
+/** Above this, the undo line points at version history instead of repeating the note. */
+export const UNDO_NOTE_CAP = 2_000;
+
+/** The undo help line, or a version-history pointer when the previous note is long. */
+export function undoLine(
+  spreadsheetId: string,
+  cell: string,
+  tab: string,
+  before: string,
+  account: string,
+): string {
+  if (before.length > UNDO_NOTE_CAP) {
+    return `The previous note (${before.length} characters) is in version history: gws-axi drive revisions ${spreadsheetId}`;
+  }
+  return `Run \`${undoCommand(spreadsheetId, cell, tab, before, account)}\` to undo`;
+}
+
 interface NoteCell extends CellLike {
   note?: string | null;
 }
@@ -242,9 +259,7 @@ export async function sheetsNoteCommand(account: string, args: string[]): Promis
   help.push(
     `Run \`gws-axi sheets cell ${meta.id} ${flags.cell} --tab ${tabArg}\` to see the cell with its note`,
   );
-  if (action !== "unchanged") {
-    help.push(`Run \`${undoCommand(meta.id, flags.cell, tab.title, before, account)}\` to undo`);
-  }
+  if (action !== "unchanged") help.push(undoLine(meta.id, flags.cell, tab.title, before, account));
 
   return joinBlocks(
     renderObject({ account, action }),

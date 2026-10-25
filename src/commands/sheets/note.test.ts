@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AxiError } from "axi-sdk-js";
-import { noteArg, parseNoteFlags, planNote, undoCommand } from "./note.js";
+import { noteArg, parseNoteFlags, planNote, undoCommand, undoLine } from "./note.js";
 
 function codeOf(fn: () => unknown): string {
   try {
@@ -91,6 +91,23 @@ describe("undo", () => {
   it("clears when there was no note", () => {
     expect(undoCommand("1AbC", "B2", "My Tab", "", "alice@example.com")).toBe(
       "gws-axi sheets note 1AbC B2 --tab 'My Tab' --clear --account alice@example.com",
+    );
+  });
+  it("restores a note that starts with --, and that note parses back as a value", () => {
+    const undo = undoCommand("1AbC", "B2", "Costs", "--- draft ---", "alice@example.com");
+    expect(undo).toBe(
+      "gws-axi sheets note 1AbC B2 --tab Costs --text '--- draft ---' --account alice@example.com",
+    );
+    expect(parseNoteFlags(["1AbC", "B2", "--tab", "Costs", "--text", "--- draft ---"]).text).toBe(
+      "--- draft ---",
+    );
+  });
+  it("gives way to version history above 2,000 characters", () => {
+    expect(undoLine("1AbC", "B2", "Costs", "x".repeat(2_000), "a@example.com")).toContain(
+      "to undo",
+    );
+    expect(undoLine("1AbC", "B2", "Costs", "x".repeat(2_001), "a@example.com")).toBe(
+      "The previous note (2001 characters) is in version history: gws-axi drive revisions 1AbC",
     );
   });
   it("keeps a multi-line note on one line with $'…'", () => {
