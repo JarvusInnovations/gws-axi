@@ -64,6 +64,16 @@ Rendered only when a tab is selected. Two shapes:
 - **Header promotion** — `rows[N]{<h1>,<h2>,…}`: the first fetched row becomes the column names and is consumed as the header; the `row` column is dropped. Empty/duplicate header cells fall back to (or disambiguate with) their column letter. Convenience for tidy tables at the cost of addressing; disclosed in help.
   - **Auto-detection**: when neither `--header-row` nor `--raw` is given, a **single frozen top row** (`frozenRowCount === 1`) whose row is inside the fetched window (origin row 1) is auto-promoted — a frozen top row is a user-declared header. Multi-row frozen headers are left as the column-letter grid (promoting only the first would misrepresent them). When auto-promotion fires, the header carries `header_source: frozen-row` and help points at `--raw` to override. `--header-row` forces promotion regardless of freezing; `--raw` forces the column-letter grid.
 
+### Header legend
+
+When the grid renders as `rows[N]{…}` (a promoted header row, by `--header-row` or a frozen
+top row), a `headers[N]{letter,header}` block follows it: the A1 letter of each column and
+the column name the grid uses (after the empty-header and duplicate fallbacks). Columns are
+counted from the fetched origin, so `--range C1:E9` lists C, D, E. Header promotion drops A1
+addressing from the rows; the legend gives it back, so an agent that read by names can write
+a `sheets query` (which addresses columns by letter) or a `sheets update --cell` without a
+second read. Not shown for the `cells[N]{row,A,B,…}` grid, whose columns are already letters.
+
 ### Embedded links (inline markdown)
 
 Links embedded in cells are resolved and rendered **inline as markdown** in the grid values, not dropped:
