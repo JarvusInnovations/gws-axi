@@ -81,6 +81,49 @@ describe("parseUpdateFlags", () => {
   });
 });
 
+describe("parseUpdateFlags (keyed)", () => {
+  const objs = ["--json", "--content", '[{"Name":"x","Status":"done"}]'];
+  it("takes --key and --append-missing with --json objects", () => {
+    expect(parseUpdateFlags(["1AbC", ...objs, "--key", "Name", "--append-missing"])).toMatchObject({
+      keyed: true,
+      key: "Name",
+      appendMissing: true,
+    });
+  });
+  it("treats a --json source with no --range or --cell as keyed on column A", () => {
+    const f = parseUpdateFlags(["1AbC", ...objs]);
+    expect(f).toMatchObject({ keyed: true, appendMissing: false });
+    expect(f.key).toBeUndefined();
+  });
+  it("still needs --range for a CSV block", () => {
+    expect(codeOf(() => parseUpdateFlags(["1AbC", "--content", "a,b"]))).toBe("VALIDATION_ERROR");
+  });
+  it("refuses --header on a keyed update without --key too", () => {
+    expect(codeOf(() => parseUpdateFlags(["1AbC", ...objs, "--header"]))).toBe("VALIDATION_ERROR");
+  });
+  it("refuses --key / --append-missing beside --range, --cell or --header", () => {
+    for (const extra of [["--range", "A2"], ["--cell", "B2=1"], ["--header"]]) {
+      expect(codeOf(() => parseUpdateFlags(["1AbC", ...objs, "--key", "Name", ...extra]))).toBe(
+        "VALIDATION_ERROR",
+      );
+      expect(codeOf(() => parseUpdateFlags(["1AbC", ...objs, "--append-missing", ...extra]))).toBe(
+        "VALIDATION_ERROR",
+      );
+    }
+  });
+  it("refuses --key without --json, with an empty name, or without one source", () => {
+    expect(codeOf(() => parseUpdateFlags(["1AbC", "--key", "Name", "--content", "x"]))).toBe(
+      "VALIDATION_ERROR",
+    );
+    expect(codeOf(() => parseUpdateFlags(["1AbC", ...objs, "--key", " "]))).toBe(
+      "VALIDATION_ERROR",
+    );
+    expect(codeOf(() => parseUpdateFlags(["1AbC", "--json", "--key", "Name"]))).toBe(
+      "VALIDATION_ERROR",
+    );
+  });
+});
+
 describe("parseAppendFlags / parseClearFlags", () => {
   it("append needs a source", () => {
     expect(codeOf(() => parseAppendFlags(["1AbC"]))).toBe("VALIDATION_ERROR");
@@ -319,6 +362,45 @@ describe("writePlan request sequence", () => {
       { raw: false, header: false, fresh: true },
     );
     expect(calls[0]).toBe("values.update 'Costs'!A1");
+  });
+});
+
+describe("writePlan keyed rows", () => {
+  const cells = [
+    { a1: "B2", row0: 1, col0: 1, value: "done" },
+    { a1: "D2", row0: 1, col0: 3, value: 3 },
+    { a1: "C4", row0: 3, col0: 2, value: "zed" },
+  ];
+  const rows = [
+    { r0: 1, r1: 2, c0: 0, c1: 4 },
+    { r0: 3, r1: 4, c0: 0, c1: 3 },
+  ];
+  it("reads one rectangle per row and labels the range by its bounds", async () => {
+    const { api, calls } = fakeApi({});
+    const out = await writePlan(
+      target(api),
+      { kind: "cells", cells, rows },
+      { raw: false, header: false },
+    );
+    expect(calls[0]).toBe("get cells 'Costs'!A2:D2;'Costs'!A4:C4");
+    expect(calls).toContain("values.batchUpdate 3");
+    expect(out.range).toBe("Costs!A2:D4 (2 rows)");
+  });
+  it("aborts with ROW_MOVED, writing nothing, when a key cell changed", async () => {
+    // The fake answers every read with this one cell at B2.
+    const { api, calls } = fakeApi({ B2: { formattedValue: "Other" } });
+    let code = "none";
+    try {
+      await writePlan(
+        target(api),
+        { kind: "cells", cells, rows },
+        { raw: false, header: false, keyGuards: [{ a1: "B2", key: "Ship it", keyName: "Name" }] },
+      );
+    } catch (err) {
+      code = (err as AxiError).code;
+    }
+    expect(code).toBe("ROW_MOVED");
+    expect(calls.filter((c) => !c.startsWith("get"))).toEqual([]);
   });
 });
 

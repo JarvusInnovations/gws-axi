@@ -458,6 +458,7 @@ The writes put **values** into one tab and leave everything else — formats, wi
 gws-axi sheets update <id> --tab Costs --range B2 costs.csv --account <email>    # a block anchored at B2
 gws-axi sheets update <id> --tab Costs --cell B5=4800 --cell D2='=B2*C2' --account <email>
 gws-axi sheets append <id> --tab Tasks --json --content '[{"Name":"Ship","Status":"open"}]' --account <email>   # keyed by row 1
+gws-axi sheets update <id> --tab Tasks --json --key Name --content '[{"Name":"Ship","Status":"done"}]' --account <email>   # edit the row labelled Ship
 gws-axi sheets clear  <id> --tab Costs --range B2:D9 --account <email>          # values only
 gws-axi sheets create --title "Q4" costs.csv --tab Costs --tab Notes --header --parent <folderId> --account <email>
 gws-axi sheets add-tab <id> --title Q4 q4.csv --after Q3 --account <email>
