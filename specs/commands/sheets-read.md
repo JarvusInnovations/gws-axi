@@ -21,6 +21,16 @@ Operates only on native Google Sheets. Uploaded `.xlsx`/`.csv` files (Drive file
 - `--formulas` — render each formula cell as its **formula** (`=B2*C2`) in place of its displayed
   value. Non-formula cells are unchanged. The `formulas[]` block is then omitted (the grid
   already shows them).
+- `--json-out[=<path>]`, `--csv-out[=<path>]` — the **whole tab** (or the whole `--range`) to a
+  file ([conventions.md § Export files](../api/conventions.md#export-files)): every populated
+  row and column regardless of the render cap, as the displayed strings (`formattedValue`, links
+  as plain text, not markdown; the formula instead under `--formulas`). The CSV is gws-axi's own
+  RFC 4180 serialization of the grid in sheet order, so a header row is its first line; the JSON
+  is `{tab, origin, columns, rows}` — `origin` the A1 cell of `rows[0][0]`, `columns` the header
+  names when the header was promoted (and the header row is then not in `rows`), else the column
+  letters, `rows` arrays of strings padded to `columns`' width. The preview on stdout is the same
+  capped render as without the flag; the response adds `wrote:`, `columns:` (`<name>:string`
+  each — every value is a display string) and the help line. At most one of the two.
 - `--account <email>` — account override.
 
 ## Data Requirements
@@ -28,6 +38,9 @@ Operates only on native Google Sheets. Uploaded `.xlsx`/`.csv` files (Drive file
 - Sheets `spreadsheets.get` with `fields=spreadsheetId,properties.title,sheets(properties(sheetId,title,index,sheetType,gridProperties(rowCount,columnCount,frozenRowCount)))` — cheap metadata for the tabs listing (and `frozenRowCount` for header auto-detection); **no cell data**.
 - Sheets `spreadsheets.get` with `includeGridData=true`, `ranges=[<window>]`, and `fields=sheets(data(rowData(values(formattedValue,userEnteredValue,effectiveValue,hyperlink,note,textFormatRuns(startIndex,format(link(uri)))))))` — the grid **plus** formulas (`userEnteredValue.formulaValue`), error values (`effectiveValue.errorValue`), embedded links and cell notes in one call (rather than a plain `values.get`, which would return only display text and silently drop links/notes). Only issued once a specific tab is being rendered. Covered by the `spreadsheets` scope; no new scope.
   - **Bounded default window**: with neither `--range` nor `--full`, the window is bounded to the render cap (`A1:<lastCol><maxRows+2>`, `lastCol` from the tab's `columnCount`) rather than the whole sheet — keeps the read context-sized and fast on tall sheets. `--full` fetches the whole tab; an explicit `--range` is honored verbatim. Trailing fully-empty rows padded by the bounded window are trimmed.
+  - **With an export flag** the window is the whole tab (as `--full`) or the explicit `--range`,
+    whatever the render cap; the cap then applies to the preview only, so `cells_total_rows` is
+    exact.
 
 ## Display Rules
 
@@ -118,6 +131,7 @@ Built from the current result:
 - Formatted-values caveat line (see Errors/fidelity).
 - When `errors[]` is non-empty, **first**: "N cell(s) show formula errors — see errors[]".
 - When `formulas[]` was capped: `sheets read <id> --tab <t> --formulas` to see every formula in the grid.
+- When the grid render was capped and no export flag was given: `Save the whole tab: --csv-out or --json-out` ([preview-to-stdout-full-data-to-a-file](../principles.md#preview-to-stdout-full-data-to-a-file)). When one was given: the runnable `jq`/`head` line against the written path.
 
 ## Errors & fidelity
 
@@ -135,3 +149,4 @@ Built from the current result:
 - [contextual-help-suggestions](../principles.md#contextual-help-suggestions) — help names the concrete `--tab`/`--range`/`drive revisions` next steps with real ids.
 - [read-only-stays-read-only](../principles.md#read-only-stays-read-only) — both `spreadsheets.get` and `values.get` are pure reads.
 - [canonical-empty-list-shape](../principles.md#canonical-empty-list-shape) — an empty grid is a scalar under the grid's field name.
+- [preview-to-stdout-full-data-to-a-file](../principles.md#preview-to-stdout-full-data-to-a-file) — `--csv-out` / `--json-out` write the whole tab beside the capped preview.
