@@ -28,7 +28,7 @@ gws-axi sheets cell <spreadsheetId> <A1> [--tab <name|gid>] [--depth <n>] [--acc
    userEnteredFormat.numberFormat`.
 3. When the cell is a formula: the references are parsed from the formula text —
    A1 cells and ranges, tab-qualified or not, absolute `$` forms, whole columns/rows
-   (`B:B`, `3:3`), and named ranges (resolved through step 1). Every distinct reference is
+   (`B:B`, `3:3`), open-ended ranges (`B2:B`, `A2:2`), and named ranges (resolved through step 1). Every distinct reference is
    fetched in **one** further `spreadsheets.get` with one `ranges` entry each and fields
    `formattedValue, userEnteredValue.formulaValue, effectiveValue.errorValue`. References
    inside string literals (`"A1"`) are not references. A function name is never a reference.
@@ -61,9 +61,11 @@ help[2]:
   `validation` (a one-line summary of the rule) only when present. A non-formula cell is the
   same block minus `formula`/`refs`.
 - `refs[N]{ref,kind,value,formula}` — one row per **cell** the formula references, in formula
-  order. A range reference expands to its cells, capped at 20 rows per range (a `SUM(B2:B500)`
-  shows 20 and `ref_cells_total`); whole-column references expand to the tab's data extent
-  under the same cap. `formula` is filled when the referenced cell is itself a formula, so the
+  order. A range reference expands to its cells, capped at **20 cells** per reference (a
+  `SUM(B2:B500)` shows 20; a 2-column range shows its first 10 rows); `ref_cells_total` — the
+  number of cells all the level-1 references cover — is shown whenever any reference was
+  capped. Whole-column (`B:B`) and open-ended (`B2:B`) references expand to the tab's data
+  extent under the same cap. `formula` is filled when the referenced cell is itself a formula, so the
   chain is visible; an erroring reference shows its error as `value` and its `kind` as `error`.
 - With `--depth` > 1, nested `refs` render as further `refs_<ref>[N]{…}` blocks, one per
   expanded formula cell, so each level stays flat and addressable.

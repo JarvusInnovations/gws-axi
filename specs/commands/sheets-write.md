@@ -138,6 +138,13 @@ freeze survives it.
 
 - `--tab <name|gid>` — by title, then by numeric `sheetId`, exactly as `sheets read` resolves
   it. Titles are unique within a spreadsheet, so unlike a Doc tab a title is a safe address.
+  Uniqueness is **case-insensitive** upstream and covers every sheet, chart sheets included
+  (observed: `addSheet` `q4` beside `Q4`, and `diagramm1` beside a chart sheet `Diagramm1`,
+  are both refused); resolving `--tab` stays exact.
+- A tab title that stands alone as a range — the whole-tab `values.append`, the whole-tab
+  error scan, `sheets read --full` — is **always quoted** (`'Q4'`). Unquoted, a title that is
+  also A1 notation is a cell on the first sheet (observed: `values.get` with range `Q4`
+  returned `Sheet1!Q4`).
 - A tab-qualified `--range` (`Costs!B2`) names the tab; `--tab` is then optional and, if also
   given, must agree (`VALIDATION_ERROR` otherwise).
 - Omitted on a single-tab spreadsheet → that tab.
@@ -158,12 +165,16 @@ Only grid tabs are addressable; a chart-only tab is `TAB_NOT_FOUND` with a note.
   both shapes, before any call. A block smaller than the range writes its own extent from the
   range's top-left and leaves the rest of the range untouched — it does **not** clear it. To
   clear, `sheets clear` first, or write empty fields.
-- Column-only or row-only references (`B:B`, `3:3`) are accepted as ranges with the tab's
-  allocated extent.
+- Column-only or row-only references (`B:B`, `3:3`), and open-ended ones (`B2:B`, `A3:3`),
+  are accepted as ranges with the tab's allocated extent.
 
 The written range is **grown into the tab's allocation when it would exceed it**: a 30-column
-block at `A1` on a fresh 26-column tab makes the tab 30 columns wide (one
-`updateSheetProperties` on `gridProperties` before the values call). Upstream is inconsistent
+block at `A1` on a fresh 26-column tab makes the tab 30 columns wide (one `batchUpdate` of
+`appendDimension` requests — rows and columns separately — before the values call). Growth is
+**relative** (`length` = what the block needs beyond the allocation the command read), never an
+absolute `rowCount`/`columnCount`: an absolute count computed from a snapshot lowers a tab that
+grew since (a form response, a concurrent append), and lowering it deletes the trailing rows
+(observed: `rowCount: 3` on a 7-row tab removed four rows). Upstream is inconsistent
 here: a block that spills from an anchor *inside* the allocation is grown by `values.update`
 itself, but a range — or an anchor — that lies outside it is refused ("Range (Tiny!D1:E2)
 exceeds grid limits. Max rows: 3, max columns: 3"), and so is a `--cell` outside it. Growing
@@ -180,9 +191,15 @@ response says `grid: grown to <rows>×<cols>` when it happened.
 2. **Compare** each cell of the block with what is there. A cell is *unchanged* when its
    stored entered value is the same kind and the same text as what the input would store:
    a string against a `stringValue`, a formula (`=…`) against a `formulaValue`, a number or
-   boolean against a `numberValue`/`boolValue` rendering to the same text. Anything the
-   comparison cannot be sure of — a `USER_ENTERED` string that Sheets might parse into a
-   different kind — counts as *changed*. The check errs toward writing: a false "changed"
+   boolean against a `numberValue`/`boolValue` rendering to the same text. The text
+   shortcuts — a typed string read as a number or a boolean — depend on the spreadsheet's
+   `locale` and the cell's format, so they apply only where they hold: an integer string in
+   any locale; a decimal string only when the locale's decimal separator is `.` (in `de_DE`
+   `5.5` is a date and `5,5` the number — observed); `TRUE`/`FALSE` only in an English
+   locale; and none of them on a cell whose number format is `TEXT`, which stores what is
+   typed as a string (observed: `5` into a `TEXT` cell holding the number 5 became the string
+   `"5"`). Anything the comparison cannot be sure of — a `USER_ENTERED` string that Sheets
+   might parse into a different kind — counts as *changed*. The check errs toward writing: a false "changed"
    costs a harmless re-write; a false "unchanged" would leave the sheet wrong.
 3. **Nothing changed** → `action: unchanged`, no write, exit 0.
 4. **Write**: grow the grid if needed, then one `spreadsheets.values.update` of the block at
@@ -236,16 +253,20 @@ asked for. `append`, `create` and `add-tab` read back the same way.
    `spreadsheets.create` cannot). The result has one tab, `Sheet1`.
 2. `--tab <title>` (repeatable) names the tabs: the first renames `Sheet1`, the rest are
    added in order (`batchUpdate`: `updateSheetProperties` + `addSheet`). Duplicate titles in
-   the list are a `VALIDATION_ERROR` before any call.
+   the list — compared case-insensitively, as upstream does — are a `VALIDATION_ERROR` before
+   any call.
 3. A value block, when given, is written into the **first tab at `A1`** through the `update`
    path (grid growth included).
 4. Not idempotent (Drive allows duplicate names); the response says so and names the id.
 
 ### `add-tab`
 
-1. **Read** the tabs. A tab with the same title already exists → `action: exists`, exit 0;
+1. **Read** the tabs. A grid tab with the same title, compared case-insensitively, already
+   exists → `action: exists`, exit 0;
    the response carries that tab's `gid`, and says placement flags and the value block were
    **not** applied. Idempotence is "a tab by that name exists", not "it looks like this".
+   A chart sheet holding the title is a `VALIDATION_ERROR` (the name is taken, and there is
+   no grid to write into), as is the duplicate-name 400 if the tabs changed since the read.
 2. One `batchUpdate` `addSheet` with `title` and the `index` the placement resolves to:
    `--first` → 0, `--last` (default) → the tab count, `--before <tab>` → that tab's index,
    `--after <tab>` → its index + 1; the anchor is resolved like `--tab` (`TAB_NOT_FOUND`
@@ -447,6 +468,10 @@ what makes a collision visible after the fact.
 | A fields mask of `effectiveValue/errorValue` alone returns a compact response for a healthy tab (no per-cell payload for cells with no error) | **Amended 2026-10-24**: not compact — each populated cell returns `{"effectiveValue":{}}`. 585 KB / ~230 ms on a populated 1000×26 tab; 4.5 MB / ~610 ms at 200,000 cells. Bound kept (§ Formula errors) |
 | `values.batchUpdate` with one single-cell range per entry writes them all, or none on a bad range | **Observed 2026-10-24**: a good `H1` beside a bad `Nope!A1` → 400 `Invalid data[1]: Unable to parse range: Nope!A1`, and `H1` stayed empty. A range naming no tab is the same "Unable to parse range" 400 as a malformed one |
 | `values.append` starts the rows at the detected table's first column | **Observed 2026-10-24**: data at `A1:B1` and `C5:D5` → a one-cell row landed at `C6`. Narrowing the range to the header's columns (`A:B`) made it land at `A2` and insert rows above `C5`, shifting that data down — so plain rows keep the whole tab as the range, and header-keyed rows are written by `values.update` under the header instead (observed through the command: a keyed row on a tab whose lowest block started in column B landed at `B9`, misaligned, before this change). A leading `null` does not move the start (`[null, …]` → `A9:C9`) |
+| A tab title alone is a whole-tab range | **Amended 2026-10-24**: only when quoted. `values.get` with range `Q4` on a spreadsheet with a `Q4` tab returned `Sheet1!Q4` (a cell on the first sheet); `'Q4'` returned the tab. Titles standing alone are always quoted |
+| Growing the grid with an absolute `rowCount`/`columnCount` is safe | **Amended 2026-10-24**: not on a tab that grew since it was read — `rowCount: 3` on a 7-row tab deleted four rows. `appendDimension` (`length` relative to the read) only ever adds: 5×3 + 2 rows + 1 column → 7×4 |
+| Tab titles are unique | **Observed 2026-10-24**: case-insensitively, across every sheet: `addSheet` `q4` beside `Q4`, and `diagramm1` beside a chart sheet `Diagramm1`, → 400 `A sheet with the name "…" already exists` |
+| `USER_ENTERED` text reads the same in every spreadsheet | **Amended 2026-10-24**: it follows `properties.locale` and the cell's format. In `de_DE`: `5.5` → a date, `5,5` → 5.5, `1.5` → a date, `WAHR` → text, `TRUE` → boolean. A `TEXT`-formatted cell stores `5` as the string `"5"` |
 | Drive `files.create` with the spreadsheet MIME creates a spreadsheet whose first tab is `Sheet1` | **Observed 2026-10-24**: `Sheet1`, gid `0`, 1000×26, created directly in the `parents` folder |
 
 Each row flips to **Observed <date>** as the plan's live checks run; a contradicted row changes
