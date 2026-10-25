@@ -157,7 +157,12 @@ help[4]:
 - `cells` + `cells[N]{row,…}` (delete) — the populated cells removed, in the read's grid
   shape; the block's `row` numbers are the **old** numbers. Omitted (`cells: 0`) when the
   range held nothing.
-- `errors[]`, `errors_fixed`, `errors_elsewhere`, `error_scan` — exactly as a value write.
+- `errors[]`, `errors_fixed`, `errors_elsewhere`, `error_scan` — as a value write, with the
+  pre-call errors re-keyed to their post-call addresses first (an error that only moved is
+  `errors_elsewhere`, not new); an error cell the delete removed is neither fixed nor
+  reported — it is in `cells[]`. Over the 200,000-cell bound there is no "written range" to
+  fall back to, so the scan is skipped: `error_scan: not run (tab is R×C, over 200000
+  cells)` and a help line pointing at `sheets read` for the tab's errors.
 - `frozen_rows: N` / `frozen_cols: N` — only when the freeze count changed (a delete inside
   the frozen area shrinks it, an insert inside it grows it).
 
