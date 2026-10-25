@@ -77,7 +77,7 @@ tokens down-scoped by refresh to one scope each.
 | `headers=1` names the columns by the first row's text; without `headers`, Google detects a header row by type and the label may be empty, leaving only the letter id | **Observed 2026-10-25.** `headers=1` labels by row 1. `headers=0` leaves every label empty and returns row 1 as data — and a header word in a numeric column comes back `null` (the column is typed by its majority). Unset: on a tab of all-text columns the labels are empty and the header row is data; on a tab with typed columns under a text row, row 1 becomes the labels |
 | Cell values carry `v` (raw: number, string, boolean, `"Date(y,m,d)"`) and `f` (formatted, as the sheet displays) | **Amended 2026-10-25.** `f` is **not** absent when it equals `v`: sheet numbers, booleans and formatted dates always carry `f` (`v: 40.0, f: "40"`; `f: "TRUE"`); strings never do; computed values (aggregates, `toDate()`, `now()`) carry no `f` at all. Dates are `"Date(y,m,d)"` with a **zero-based month** (`Date(2026,0,15)` is 15 January); datetimes `"Date(y,m,d,h,mi,s)"`. A `format` clause changed the column's `pattern` but not `f` (observed: `format B '#,##0.00'` kept `f: "40"`) |
 | The result is capped server-side at some row count, signalled by a `data_truncated` warning | **Not reached 2026-10-25.** 300,000 rows × 1 column (10.6 MB body) and 50,000 rows × 26 columns (1.3 M cells, 36 MB body) both came back whole, `status: "ok"`, no warning. The cap, if any, is above that; the `data_truncated` handling stays, unexercised |
-| `tqx=out:csv` returns the same query as CSV with the labels as the header row | **Observed 2026-10-25.** `text/csv`, every field quoted, **formatted** values (`$0.05`, `2026-01-15`, `TRUE`), labels (including `label` clauses with commas) as the first line. When every label is empty (`headers=0`) there is **no** header line. A query error is the bare JSON error object under `text/csv` with HTTP 200 |
+| `tqx=out:csv` returns the same query as CSV with the labels as the header row | **Observed 2026-10-25.** `text/csv`, every field quoted, **formatted** values (`$0.05`, `2026-01-15`, `TRUE`) — a value the JSON sends without `f` is Google's own text, so a date out of a `group by` reads `2026-1-15`, unpadded — labels (including `label` clauses with commas) as the first line. When every label is empty (`headers=0`) there is **no** header line. A query error is the bare JSON error object under `text/csv` with HTTP 200 |
 | `sheet=<title>` selects a tab by title; `gid=<n>` by id; a title that is not found is an error, not a fallback to the first sheet | **Contradicted 2026-10-25.** An unknown `sheet=` title **and** an unknown `gid=` both silently return the first sheet's data with `status: "ok"`. A title with an apostrophe selects correctly. Hence gws-axi resolves the tab from the spreadsheet's metadata first (`TAB_NOT_FOUND` locally) and sends only the resolved `gid` |
 
 
@@ -98,7 +98,7 @@ rows[12]{Item,sum Qty}:
   nuts,80
   …
 help[3]:
-  Columns are letters in the query (A, B, …); run `gws-axi sheets read 1AbC… --tab Costs --range 1:1` to see what each letter holds
+  Columns are letters in the query (A, B, …); run `gws-axi sheets read 1AbC… --tab Costs --range 1:1 --raw` to see what each letter holds
   Save the full result: --csv-out or --json-out
   The same query inside the sheet: =QUERY(Costs!A:D, "select A, sum(C) where D = 'open' group by A", 1)
 ```
@@ -130,7 +130,8 @@ help[3]:
 ### help[] suggestions
 
 - The letters line (above), always — the query addresses columns by letter and the agent
-  usually read the tab by header names.
+  usually read the tab by header names. It carries `--raw`: without it, a tab whose top row is
+  frozen promotes row 1 to the header and `--range 1:1` renders no rows at all (observed).
 - The export line when no export flag was given; the `jq`/`head` line when one was.
 - The `=QUERY()` equivalent, always: the formula an agent would write to keep the result in
   the sheet, over the tab's whole column span (`Costs!A:Z` for a 26-column tab) and with the
