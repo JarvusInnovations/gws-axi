@@ -471,11 +471,11 @@ Rows and columns can be inserted or deleted in place; everything after them move
 ```bash
 gws-axi sheets insert-rows <id> 3:5 --tab Costs --account <email>   # rows 3–5 are new and empty; formatting from row 2
 gws-axi sheets insert-cols <id> B --tab Costs --no-inherit --account <email>
-gws-axi sheets delete-rows <id> Costs!7 --account <email>           # cells[] holds what row 7 had — the undo
+gws-axi sheets delete-rows <id> 'Costs!7' --account <email>         # cells[] holds what row 7 had — the undo
 gws-axi sheets delete-cols <id> D:E --tab Costs --account <email>
 ```
 
-An insert takes the formatting of the row above (at row 1, the row below), as the editor does; `--no-inherit` clears it. Sheets shifts the formulas; a delete turns any formula that read a removed cell into `#REF!`, and the response lists it in `errors[]` with the formula as it was before. Neither is idempotent — the response says what re-running would hit.
+An insert takes the formatting of the row above (at row 1, the row below), as the editor does; `--no-inherit` clears it (data validation and conditional formatting spanning the insert still cover the new cells). Sheets shifts the formulas; a delete turns a reference to a removed cell into `#REF!`, and the response lists it in `errors[]` with the formula before and after, and a fix that edits the current one. Neither is idempotent — the response says what re-running would hit.
 
 <sub>Cell values are the displayed strings. `drive upload --convert` is the other way in from CSV — Google's importer, whole-file; the `sheets` writers write values, one tab at a time.</sub>
 
