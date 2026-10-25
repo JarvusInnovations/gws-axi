@@ -279,3 +279,35 @@ describe("buildGrid — --header-row promotion", () => {
     expect(g.rows[0]).toEqual({ Name: "a", B: "b", "Name (C)": "c" });
   });
 });
+
+describe("extractGrid — formulas and errors", () => {
+  const rows = [
+    {
+      values: [
+        { formattedValue: "$9,600", userEnteredValue: { formulaValue: "=B2*C2" } },
+        {
+          formattedValue: "#REF!",
+          userEnteredValue: { formulaValue: "=Cost!B2" },
+          effectiveValue: { errorValue: { type: "REF", message: "Unresolved sheet name 'Cost'." } },
+        },
+        { formattedValue: "plain" },
+      ],
+    },
+  ];
+  it("lists formulas and errors by A1 and renders displayed values", () => {
+    const g = extractGrid(rows, { col0: 3, row1: 2 });
+    expect(g.values).toEqual([["$9,600", "#REF!", "plain"]]);
+    expect(g.formulas).toEqual([
+      { cell: "D2", formula: "=B2*C2" },
+      { cell: "E2", formula: "=Cost!B2" },
+    ]);
+    expect(g.errors).toEqual([
+      { cell: "E2", error: "REF", message: "Unresolved sheet name 'Cost'." },
+    ]);
+  });
+  it("--formulas renders the formula in place of the value", () => {
+    expect(extractGrid(rows, { col0: 0, row1: 1 }, { formulas: true }).values).toEqual([
+      ["=B2*C2", "=Cost!B2", "plain"],
+    ]);
+  });
+});

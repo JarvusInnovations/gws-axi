@@ -2,7 +2,21 @@ import { checkFlags, type FlagSpec } from "../util/flags.js";
 import { AxiError } from "axi-sdk-js";
 import { resolveAccount, withAccountSource } from "../google/account.js";
 import { docsCommentsCommand } from "./docs/comments.js";
+import { ADD_TAB_FLAGS, ADD_TAB_HELP, sheetsAddTabCommand } from "./sheets/add-tab.js";
+import { CELL_FLAGS, CELL_HELP, sheetsCellCommand } from "./sheets/cell.js";
+import { CREATE_FLAGS, CREATE_HELP, sheetsCreateCommand } from "./sheets/create.js";
 import { READ_HELP, sheetsReadCommand } from "./sheets/read.js";
+import {
+  APPEND_FLAGS,
+  APPEND_HELP,
+  CLEAR_FLAGS,
+  CLEAR_HELP,
+  UPDATE_FLAGS,
+  UPDATE_HELP,
+  sheetsAppendCommand,
+  sheetsClearCommand,
+  sheetsUpdateCommand,
+} from "./sheets/write.js";
 import { notImplemented, renderAlternatives, withInstead } from "./stub-signposts.js";
 
 // Google Sheets comments are Drive comments — the exact same file-agnostic API
@@ -37,47 +51,6 @@ interface SheetsSubcommand {
   instead?: string[];
 }
 
-// Until the Sheets write surface lands, `drive upload --convert` is the only
-// way to put content into a spreadsheet. It replaces the file wholesale, so
-// each line says so — an agent that reads "use drive upload" and nothing else
-// would silently destroy the sheets it never looked at.
-const REPLACE_WHOLESALE = [
-  "gws-axi drive upload <file.csv> --update <spreadsheetId> --convert --account <email> — replaces the ENTIRE spreadsheet from CSV/TSV (or --content <string>); NOT a per-range write",
-  "Multi-sheet targets are refused with MULTI_TAB_TARGET unless --replace-all-tabs; read them first with `gws-axi sheets read <spreadsheetId>`",
-];
-const CREATE_VIA_UPLOAD = [
-  'gws-axi drive upload <file.csv> --convert --name "<title>" --account <email> — creates a new native Spreadsheet and returns its id',
-];
-
-// Write subcommands are stubs for the next slice — kept with per-command --help
-// so agents can plan around the future surface. They throw NOT_IMPLEMENTED after
-// account resolution runs.
-const UPDATE_HELP = `usage: gws-axi sheets update <spreadsheetId> --tab <name> --range <A1> --values <json|csv> [flags]
-status: planned for writes — not yet implemented
-notes:
-  Will wrap spreadsheets.values.update. Requires --account <email> when 2+
-  accounts are authenticated.
-`;
-const APPEND_HELP = `usage: gws-axi sheets append <spreadsheetId> --tab <name> --values <json|csv> [flags]
-status: planned for writes — not yet implemented
-notes:
-  Will wrap spreadsheets.values.append (adds rows after the used range).
-`;
-const CLEAR_HELP = `usage: gws-axi sheets clear <spreadsheetId> --tab <name> --range <A1> [flags]
-status: planned for writes — not yet implemented
-`;
-const CREATE_HELP = `usage: gws-axi sheets create --title <text> [--tab <name>...] [flags]
-status: planned for writes — not yet implemented
-notes:
-  Will wrap spreadsheets.create. Produces the spreadsheetId that
-  \`sheets read\` / \`sheets update\` consume.
-`;
-const ADD_TAB_HELP = `usage: gws-axi sheets add-tab <spreadsheetId> --title <text> [flags]
-status: planned for writes — not yet implemented
-notes:
-  Will wrap spreadsheets.batchUpdate addSheet.
-`;
-
 const sheetsCommentsCommand = (account: string, args: string[]): Promise<string> =>
   docsCommentsCommand(account, args, {
     resource: "spreadsheet",
@@ -93,13 +66,42 @@ export const SUBCOMMANDS: SheetsSubcommand[] = [
     help: COMMENTS_HELP,
     handler: sheetsCommentsCommand,
   },
-  { name: "update", mutation: true, help: UPDATE_HELP, instead: REPLACE_WHOLESALE },
-  { name: "append", mutation: true, help: APPEND_HELP, instead: REPLACE_WHOLESALE },
-  { name: "clear", mutation: true, help: CLEAR_HELP, instead: REPLACE_WHOLESALE },
-  { name: "create", mutation: true, help: CREATE_HELP, instead: CREATE_VIA_UPLOAD },
-  // Adding a tab needs spreadsheets.batchUpdate — drive upload can only
-  // collapse a spreadsheet to one sheet, never grow it one.
-  { name: "add-tab", mutation: true, help: ADD_TAB_HELP },
+  { name: "cell", mutation: false, flags: CELL_FLAGS, help: CELL_HELP, handler: sheetsCellCommand },
+  {
+    name: "update",
+    mutation: true,
+    flags: UPDATE_FLAGS,
+    help: UPDATE_HELP,
+    handler: sheetsUpdateCommand,
+  },
+  {
+    name: "append",
+    mutation: true,
+    flags: APPEND_FLAGS,
+    help: APPEND_HELP,
+    handler: sheetsAppendCommand,
+  },
+  {
+    name: "clear",
+    mutation: true,
+    flags: CLEAR_FLAGS,
+    help: CLEAR_HELP,
+    handler: sheetsClearCommand,
+  },
+  {
+    name: "create",
+    mutation: true,
+    flags: CREATE_FLAGS,
+    help: CREATE_HELP,
+    handler: sheetsCreateCommand,
+  },
+  {
+    name: "add-tab",
+    mutation: true,
+    flags: ADD_TAB_FLAGS,
+    help: ADD_TAB_HELP,
+    handler: sheetsAddTabCommand,
+  },
 ];
 
 const SUB_BY_NAME: Record<string, SheetsSubcommand> = Object.fromEntries(
@@ -135,15 +137,22 @@ writes[${writes.length}]:
 notes:
   Writes require --account <email> when 2+ accounts are authenticated.
   Reads use the default account when --account is not provided.
-  Write subcommands are scaffolded for the next slice — all currently
-  throw NOT_IMPLEMENTED after account resolution runs.
+  Writes put values into one tab and touch nothing else (formats, widths,
+  validation, other tabs). Each reads back what Sheets made of the values and
+  reports any formula errors it left in the tab.
 ${renderAlternatives(SUBCOMMANDS)}subcommand help:
   gws-axi sheets read --help       for spreadsheetId + tab/range handling
+  gws-axi sheets cell --help       for one cell: its formula and what it reads
+  gws-axi sheets update --help     for writing a block, or single cells
+  gws-axi sheets append --help     for adding rows (CSV, JSON, header-keyed)
   gws-axi sheets comments --help   for review comments (Drive comments)
 examples:
   gws-axi sheets read 1AbC...
   gws-axi sheets read 1AbC... --tab Costs --range A1:D50
-  gws-axi sheets read 1AbC... --tab Costs --header-row
+  gws-axi sheets cell 1AbC... D2 --tab Costs
+  gws-axi sheets update 1AbC... --tab Costs --range B2 costs.csv --account you@example.com
+  gws-axi sheets append 1AbC... --tab Costs --content 'bolts,40' --account you@example.com
+  gws-axi sheets create --title "Q4 Tracker" costs.csv --header --account you@example.com
   gws-axi sheets comments 1AbC...
 `;
 

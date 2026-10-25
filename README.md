@@ -41,7 +41,7 @@ Read coverage is complete across all seven services; write coverage is rolling o
 | **Docs** | ✅ read · find · comments · download · revisions · diff · tabs | ✅ create · write · append · replace-text · edit-cell · tabs update/delete &nbsp;·&nbsp; 🚧 insert-text · delete-range · style-text · style-paragraph · insert-table · comment writes |
 | **Drive** | ✅ ls · get · search · permissions · download · revisions · activity | ✅ upload · mkdir · rename · move · trash · untrash · share · unshare &nbsp;·&nbsp; 🚧 create · copy &nbsp;·&nbsp; ✋ permanent delete |
 | **Slides** | ✅ get · page · summarize · comments | ✅ skip · unskip &nbsp;·&nbsp; 🚧 create · update |
-| **Sheets** | ✅ read · comments | 🚧 update · append · clear · create · add-tab |
+| **Sheets** | ✅ read · cell · comments | ✅ update · append · clear · create · add-tab |
 | **Chat** | ✅ spaces · messages · search · members · download · wait · watch | ✅ send · react · unreact · mark-read · mark-unread |
 
 <sub>✅ shipped · 🚧 planned · ✋ out of scope by design</sub>
@@ -421,7 +421,7 @@ gws-axi drive upload --content '# Notes' --name notes.md --convert --account you
 gws-axi drive upload ./edited.md --convert --update <docId> --account you@example.com          # replace a Doc's content (new revision)
 ```
 
-`drive upload` takes content from a local path, `-` (stdin), or `--content`; `--convert` hands it to Google's importer for the matching native format. With `--update` it replaces an existing file's content — and when that file is already the matching native type, `--convert --update` writes edited markdown back into the same Doc as a new revision. That replaces the whole file: a Doc with several tabs or a spreadsheet with several sheets is refused (`MULTI_TAB_TARGET`) unless you pass `--replace-all-tabs`, because the import would collapse them to one. For one tab, use `docs write --tab`.
+`drive upload` takes content from a local path, `-` (stdin), or `--content`; `--convert` hands it to Google's importer for the matching native format. With `--update` it replaces an existing file's content — and when that file is already the matching native type, `--convert --update` writes edited markdown back into the same Doc as a new revision. That replaces the whole file: a Doc with several tabs or a spreadsheet with several sheets is refused (`MULTI_TAB_TARGET`) unless you pass `--replace-all-tabs`, because the import would collapse them to one. For one tab, use `docs write --tab`; for one sheet, `sheets update --tab`.
 
 `drive share` only grants access to named people and groups. Making a file public or domain-wide is refused, with no override.
 
@@ -439,18 +439,33 @@ gws-axi slides skip <presentationId> <slideId>... --account you@example.com   # 
 
 ### Sheets
 
-A spreadsheet's tabs are its sheets, so `sheets read` mirrors `docs read`: it lists the tabs, and renders one tab's grid into context. Embedded links resolve inline as markdown `[text](url)`; cell notes come back in a `notes[]` block.
+A spreadsheet's tabs are its sheets, so `sheets read` mirrors `docs read`: it lists the tabs, and renders one tab's grid into context. Embedded links resolve inline as markdown `[text](url)`; cell notes come back in a `notes[]` block, formulas in `formulas[]`, and formula errors in `errors[]` with a runnable fix line each.
 
 ```bash
 gws-axi sheets read <spreadsheetId>                       # single tab renders; multi-tab lists tabs to pick
 gws-axi sheets read <spreadsheetId> --tab Costs           # by tab title (or numeric gid)
 gws-axi sheets read <spreadsheetId> --tab Costs --range A1:D50   # scope to an A1 range
 gws-axi sheets read <spreadsheetId> --header-row          # promote row 1 to column names (auto for a frozen top row; --raw to force letters)
+gws-axi sheets read <spreadsheetId> --tab Costs --formulas       # formulas in the grid instead of their values
 gws-axi sheets read <spreadsheetId> --tab Costs --full    # don't cap at 50 rows
+gws-axi sheets cell <spreadsheetId> D2 --tab Costs        # one cell: formula, value, error, and the values it reads
 gws-axi sheets comments <spreadsheetId>                   # review comments (Drive comments)
 ```
 
-<sub>Cell values are the displayed strings (not formulas). Until Sheets writes ship, `drive upload --update --convert` can replace a whole spreadsheet from CSV.</sub>
+The writes put **values** into one tab and leave everything else — formats, widths, validation, other tabs — as it was. Values come as CSV (default), TSV, or a JSON 2-D array (`null` leaves a cell as it is), from a file, `-`, or `--content`. Strings are parsed as typed (`=formulas`, dates, currencies) unless `--raw`.
+
+```bash
+gws-axi sheets update <id> --tab Costs --range B2 costs.csv --account <email>    # a block anchored at B2
+gws-axi sheets update <id> --tab Costs --cell B5=4800 --cell D2='=B2*C2' --account <email>
+gws-axi sheets append <id> --tab Tasks --json --content '[{"Name":"Ship","Status":"open"}]' --account <email>   # keyed by row 1
+gws-axi sheets clear  <id> --tab Costs --range B2:D9 --account <email>          # values only
+gws-axi sheets create --title "Q4" costs.csv --tab Costs --tab Notes --header --parent <folderId> --account <email>
+gws-axi sheets add-tab <id> --title Q4 q4.csv --after Q3 --account <email>
+```
+
+Every write reads back what Sheets made of it: each formula's result or error (`formulas[]`), the cells it replaced with their previous values (`written[]` — the undo), and any formula errors it caused anywhere in the tab (`errors[]`, with a fix line each). Re-running an `update` that changes nothing is `action: unchanged`; `--header` freezes row 1 so `sheets read` names columns by it.
+
+<sub>Cell values are the displayed strings. `drive upload --convert` is the other way in from CSV — Google's importer, whole-file; the `sheets` writers write values, one tab at a time.</sub>
 
 ### Chat
 
@@ -499,7 +514,7 @@ Conversations are addressed by id (from `chat spaces`) or by `--with <email>` �
 - **Revision exports cover every tab**: `docs diff` and `docs download --revision` export the whole Doc, so on a multi-tab Doc they include all tabs ([#110](https://github.com/JarvusInnovations/gws-axi/issues/110)).
 - **Drive writes**: `upload`, `mkdir`, `rename`, `move`, `trash`, `untrash`, `share`, and `unshare` are shipped; `create` / `copy` are still scaffolded as `NOT_IMPLEMENTED`. There is no permanent delete by design — `trash` is reversible for 30 days.
 - **Slides writes**: `skip` / `unskip` (hide slides in presentation mode) are shipped; `create` / `update` are still scaffolded as `NOT_IMPLEMENTED`.
-- **Sheets writes** (`update`, `append`, `clear`, `create`, `add-tab`): scaffolded as `NOT_IMPLEMENTED`; `read` (with inline-markdown links + cell notes) and `comments` are shipped.
+- **Sheets writes** set values and the top-row freeze only: no formatting, widths, validation, notes, tab rename/reorder/delete, or row/column insertion yet. Sheets exposes no revision id, so the undo is the `written[]` block plus the editor's version history.
 - **Testing-mode tokens** still expire every 7 days *if* you haven't published your OAuth app yet. Run `gws-axi auth publish` for the walkthrough — it covers the single-developer Production flow and removes the expiry once you've re-auth'd each account.
 
 ## Design docs

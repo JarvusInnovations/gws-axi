@@ -25,7 +25,10 @@ export interface FlagSpec {
 }
 
 export interface ParsedArgs {
+  /** The last value given for each value flag. */
   values: Record<string, string>;
+  /** Every value given for each value flag, in order — for repeatable flags. */
+  lists: Record<string, string[]>;
   booleans: Set<string>;
   positionals: string[];
 }
@@ -34,6 +37,7 @@ export function parseArgs(args: string[], spec: FlagSpec, command: string): Pars
   const valueFlags = new Set(spec.value ?? []);
   const booleanFlags = new Set(spec.boolean ?? []);
   const values: Record<string, string> = {};
+  const lists: Record<string, string[]> = {};
   const booleans = new Set<string>();
   const positionals: string[] = [];
 
@@ -56,6 +60,7 @@ export function parseArgs(args: string[], spec: FlagSpec, command: string): Pars
         ]);
       }
       values[arg] = next;
+      (lists[arg] ??= []).push(next);
       i++;
       continue;
     }
@@ -71,7 +76,7 @@ export function parseArgs(args: string[], spec: FlagSpec, command: string): Pars
     ]);
   }
 
-  return { values, booleans, positionals };
+  return { values, lists, booleans, positionals };
 }
 
 /**
