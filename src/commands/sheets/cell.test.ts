@@ -32,6 +32,11 @@ describe("parseFormulaRefs", () => {
   it("skips string literals and function names, keeps names", () => {
     expect(refs('=IF(A1="B5",LOG10(Rate),TRUE)')).toEqual(["A1", "name:Rate"]);
   });
+  it("reads open-ended ranges without inventing a name", () => {
+    expect(refs("=SUM(B2:B)")).toEqual(["B2:B"]);
+    expect(refs("=ARRAYFORMULA(A2:A*B2:B)")).toEqual(["A2:A", "B2:B"]);
+    expect(refs("=SUM(A3:3)+Costs!C2:C")).toEqual(["A3:3", "Costs!C2:C"]);
+  });
   it("marks INDIRECT and OFFSET as dynamic", () => {
     expect(refs('=INDIRECT("B"&A1)+OFFSET(C1,1,0)')).toEqual([
       'dyn:INDIRECT("B"&A1)',

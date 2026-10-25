@@ -5,6 +5,7 @@ import { field, joinBlocks, renderHelp, renderList, renderObject } from "../../o
 import { type FlagSpec, parseArgs } from "../../util/flags.js";
 import {
   type CellLike,
+  type FormulaRef,
   type GridRect,
   type SpreadsheetMeta,
   type TabInfo,
@@ -15,6 +16,8 @@ import {
   findTab,
   gridCells,
   parseA1,
+  parseFormulaRefs,
+  displayTitle,
   quoteTitle,
   rectA1,
   requireTab,
@@ -24,6 +27,8 @@ import {
   toRect,
 } from "./shared.js";
 import { fetchGrid } from "./write.js";
+
+export { parseFormulaRefs, type FormulaRef } from "./shared.js";
 
 /**
  * `sheets cell` (specs/commands/sheets-cell.md): one cell — what was entered,
@@ -60,7 +65,6 @@ export const CELL_FLAGS: FlagSpec = { value: ["--tab", "--depth"], boolean: [] }
 const USAGE = "gws-axi sheets cell <spreadsheetId> <A1> [--tab <name|gid>] [--depth <n>]";
 /** Cells shown per referenced range. */
 const REF_CAP = 20;
-const DYNAMIC = new Set(["INDIRECT", "OFFSET"]);
 
 export interface CellFlags {
   spreadsheetId: string;
@@ -107,154 +111,6 @@ export function parseCellFlags(args: string[]): CellFlags {
     tab: parsed.values["--tab"],
     depth,
   };
-}
-
-// ---------------------------------------------------------------------------
-// Formula references
-
-export interface FormulaRef {
-  /** The reference as written (`Cost!B2:B500`, `Rate`, `INDIRECT(...)`). */
-  text: string;
-  tab?: string;
-  /** Unqualified A1 for a cell/range/column/row reference. */
-  a1?: string;
-  /** A name that is not an A1 reference — a named range, if one resolves. */
-  name?: string;
-  /** Computed at evaluation time; no static target. */
-  dynamic?: boolean;
-}
-
-const QUALIFIER = /([A-Za-z0-9_.]+)!/y;
-const FUNCTION = /([A-Za-z_][A-Za-z0-9_.]*)\s*\(/y;
-const CELL_OR_RANGE =
-  /(\$?[A-Za-z]{1,3}\$?[0-9]+(?::\$?[A-Za-z]{1,3}\$?[0-9]+)?|\$?[A-Za-z]{1,3}:\$?[A-Za-z]{1,3}|\$?[0-9]+:\$?[0-9]+)(?![A-Za-z0-9_(!])/y;
-const WORD = /[A-Za-z_][A-Za-z0-9_.]*/y;
-const NUMBER = /[0-9]+(?:\.[0-9]*)?(?:[eE][+-]?[0-9]+)?/y;
-
-function stick(re: RegExp, s: string, at: number): RegExpExecArray | null {
-  re.lastIndex = at;
-  return re.exec(s);
-}
-
-/** The text of a balanced `(...)` starting at `open`. */
-function balanced(s: string, open: number): string {
-  let depth = 0;
-  for (let i = open; i < s.length; i++) {
-    if (s[i] === '"') {
-      i++;
-      while (i < s.length && !(s[i] === '"' && s[i + 1] !== '"')) i += s[i] === '"' ? 2 : 1;
-      continue;
-    }
-    if (s[i] === "(") depth++;
-    if (s[i] === ")" && --depth === 0) return s.slice(open, i + 1);
-  }
-  return s.slice(open);
-}
-
-/**
- * The references in a formula, in order, deduplicated: A1 cells and ranges
- * (absolute, tab-qualified, whole columns/rows), names, and INDIRECT/OFFSET as
- * dynamic. String literals are skipped; a function name is never a reference.
- */
-export function parseFormulaRefs(formula: string): FormulaRef[] {
-  const s = formula.startsWith("=") ? formula.slice(1) : formula;
-  const out: FormulaRef[] = [];
-  const seen = new Set<string>();
-  const push = (ref: FormulaRef) => {
-    const key = `${ref.tab ?? ""}!${ref.a1 ?? ref.name ?? ref.text}`.toUpperCase();
-    if (seen.has(key)) return;
-    seen.add(key);
-    out.push(ref);
-  };
-  const readRef = (at: number, tab?: string): number => {
-    const m = stick(CELL_OR_RANGE, s, at);
-    if (m) {
-      const a1 = m[1].replace(/\$/g, "").toUpperCase();
-      push({ text: m[0], tab, a1 });
-      return at + m[0].length;
-    }
-    const w = stick(WORD, s, at);
-    if (w) {
-      push({ text: w[0], tab, name: w[0] });
-      return at + w[0].length;
-    }
-    return at;
-  };
-
-  let i = 0;
-  while (i < s.length) {
-    const ch = s[i];
-    if (ch === '"') {
-      i++;
-      while (i < s.length) {
-        if (s[i] === '"' && s[i + 1] === '"') i += 2;
-        else if (s[i] === '"') break;
-        else i++;
-      }
-      i++;
-      continue;
-    }
-    if (ch === "'") {
-      let j = i + 1;
-      let name = "";
-      while (j < s.length) {
-        if (s[j] === "'" && s[j + 1] === "'") {
-          name += "'";
-          j += 2;
-        } else if (s[j] === "'") break;
-        else name += s[j++];
-      }
-      if (s[j + 1] === "!") {
-        i = readRef(j + 2, name);
-        continue;
-      }
-      i = j + 1;
-      continue;
-    }
-    if (/[A-Za-z_$]/.test(ch)) {
-      const q = stick(QUALIFIER, s, i);
-      if (q && !/^[0-9]/.test(q[1])) {
-        i = readRef(i + q[0].length, q[1]);
-        continue;
-      }
-      const fn = stick(FUNCTION, s, i);
-      if (fn) {
-        if (DYNAMIC.has(fn[1].toUpperCase())) {
-          const open = i + fn[0].length - 1;
-          push({ text: `${fn[1]}${balanced(s, open)}`, dynamic: true });
-        }
-        i += fn[0].length;
-        continue;
-      }
-      const ref = stick(CELL_OR_RANGE, s, i);
-      if (ref) {
-        push({ text: ref[0], a1: ref[1].replace(/\$/g, "").toUpperCase() });
-        i += ref[0].length;
-        continue;
-      }
-      const w = stick(WORD, s, i);
-      if (w) {
-        if (!/^(TRUE|FALSE)$/i.test(w[0])) push({ text: w[0], name: w[0] });
-        i += w[0].length;
-        continue;
-      }
-      i++;
-      continue;
-    }
-    if (/[0-9]/.test(ch)) {
-      const ref = stick(CELL_OR_RANGE, s, i);
-      if (ref) {
-        push({ text: ref[0], a1: ref[1].replace(/\$/g, "") });
-        i += ref[0].length;
-        continue;
-      }
-      const n = stick(NUMBER, s, i);
-      i += n ? n[0].length : 1;
-      continue;
-    }
-    i++;
-  }
-  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -331,7 +187,7 @@ export function resolveRef(ref: FormulaRef, home: TabInfo, meta: SpreadsheetMeta
     return { ref, tab, rect, label: ref.text };
   }
   const tab = ref.tab !== undefined ? findTab(meta.tabs, ref.tab) : home;
-  const qual = ref.tab !== undefined ? `${quoteTitle(ref.tab)}!` : "";
+  const qual = ref.tab !== undefined ? `${displayTitle(ref.tab)}!` : "";
   const parsed = parseA1(ref.a1);
   if (!parsed || !tab) return { ref, label: `${qual}${ref.a1}` };
   return { ref, tab, rect: toRect(parsed, tab), label: `${qual}${ref.a1}` };
@@ -392,7 +248,8 @@ async function expandRefs(
     const sheet = sheets.find((sh) => (sh.properties?.sheetId ?? 0) === tab.gid);
     const data = sheet?.data?.[k];
     const found = gridCells(data ? [data] : []);
-    const qual = tab.gid === home.gid && r.ref.tab === undefined ? "" : `${quoteTitle(tab.title)}!`;
+    const qual =
+      tab.gid === home.gid && r.ref.tab === undefined ? "" : `${displayTitle(tab.title)}!`;
     const rect = clip({ tab, rect: r.rect });
     const kind = r.ref.a1 ? parseA1(r.ref.a1)?.kind : "range";
     // Whole columns/rows stop at the tab's data, not its allocation.
@@ -461,7 +318,7 @@ export async function sheetsCellCommand(account: string, args: string[]): Promis
   const formula = cell?.userEnteredValue?.formulaValue ?? undefined;
   const err = cell?.effectiveValue?.errorValue;
 
-  const detail: Record<string, unknown> = { ref: `${q}!${flags.cell}` };
+  const detail: Record<string, unknown> = { ref: `${displayTitle(tab.title)}!${flags.cell}` };
   if (formula) detail.formula = formula;
   detail.value = cell?.formattedValue ?? "";
   if (err) {

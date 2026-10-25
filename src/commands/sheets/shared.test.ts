@@ -8,6 +8,9 @@ import {
   parseA1,
   rectA1,
   requireTab,
+  displayTitle,
+  duplicateTitle,
+  quoteTitle,
   shellArg,
   toRect,
   translateWriteError,
@@ -23,9 +26,16 @@ describe("parseA1", () => {
     expect(parseA1("3:3")).toEqual({ kind: "rows", r0: 2, r1: 3 });
   });
   it("refuses what is not A1", () => {
-    for (const bad of ["", "B", "B0", "ZZZZ1", "A1:B", "Rate", "A1:B2:C3"]) {
+    for (const bad of ["", "B", "B0", "ZZZZ1", "A1:", "Rate", "A1:B2:C3", "B:2"]) {
       expect(parseA1(bad)).toBeUndefined();
     }
+  });
+  it("parses open-ended ranges from their start cell", () => {
+    expect(parseA1("B2:B")).toEqual({ kind: "cols", r0: 1, c0: 1, c1: 2 });
+    expect(parseA1("A3:3")).toEqual({ kind: "rows", r0: 2, r1: 3, c0: 0 });
+    const grid = { rows: 1000, cols: 26 };
+    expect(rectA1(toRect(parseA1("B2:C")!, grid))).toBe("B2:C1000");
+    expect(rectA1(toRect(parseA1("C3:3")!, grid))).toBe("C3:Z3");
   });
   it("closes open axes with the allocation and prints ranges back", () => {
     const grid = { rows: 1000, cols: 26 };
@@ -36,6 +46,17 @@ describe("parseA1", () => {
 });
 
 describe("quoting", () => {
+  it("always quotes a title sent upstream — Q4 alone is a cell on the first sheet", () => {
+    expect(quoteTitle("Q4")).toBe("'Q4'");
+    expect(quoteTitle("Costs")).toBe("'Costs'");
+    expect(quoteTitle("it's")).toBe("'it''s'");
+  });
+  it("displays a title bare only when it cannot read as a cell", () => {
+    expect(displayTitle("Costs")).toBe("Costs");
+    expect(displayTitle("Q4")).toBe("'Q4'");
+    expect(displayTitle("FY24")).toBe("'FY24'");
+    expect(displayTitle("My Tab")).toBe("'My Tab'");
+  });
   it("quotes shell args only when needed", () => {
     expect(shellArg("Costs")).toBe("Costs");
     expect(shellArg("Q4 Costs")).toBe("'Q4 Costs'");
@@ -128,6 +149,19 @@ describe("fixLines", () => {
     expect(formulaMentions("=SUM(B2:B9)", "B5")).toBe(true);
     expect(formulaMentions('=IF(A1="B5",1,0)', "B5")).toBe(false);
   });
+  it("matches whole and open-ended columns and rows", () => {
+    expect(formulaMentions("=SUM(B:B)", "B5")).toBe(true);
+    expect(formulaMentions("=SUM(B2:B)", "B5")).toBe(true);
+    expect(formulaMentions("=SUM(B6:B)", "B5")).toBe(false);
+    expect(formulaMentions("=ARRAYFORMULA(A2:A*B2:B)", "B5")).toBe(true);
+    expect(formulaMentions("=SUM(5:5)", "B5")).toBe(true);
+    expect(formulaMentions("=SUM(A5:5)", "B5")).toBe(true);
+  });
+  it("ignores a reference qualified with another tab, honors this tab's", () => {
+    expect(formulaMentions("=Other!B5", "B5", "Costs")).toBe(false);
+    expect(formulaMentions("='Costs'!B5", "B5", "Costs")).toBe(true);
+    expect(formulaMentions("=costs!B5", "B5", "Costs")).toBe(true);
+  });
 });
 
 describe("requireTab", () => {
@@ -164,6 +198,17 @@ describe("requireTab", () => {
   it("is TAB_NOT_FOUND for a missing or chart tab", () => {
     expect(code(() => requireTab(meta, "Nope", () => ""))).toBe("TAB_NOT_FOUND");
     expect(() => requireTab(meta, "Chart1", () => "")).toThrow(/not a grid tab/);
+  });
+});
+
+describe("duplicateTitle", () => {
+  it("translates the duplicate-name 400, and nothing else", () => {
+    const dup = {
+      message:
+        'Invalid requests[0].addSheet: A sheet with the name "q4" already exists. Please enter another name.',
+    };
+    expect(duplicateTitle(dup, "q4")?.code).toBe("VALIDATION_ERROR");
+    expect(duplicateTitle({ message: "Unable to parse range" }, "q4")).toBeUndefined();
   });
 });
 

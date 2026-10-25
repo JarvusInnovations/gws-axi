@@ -96,6 +96,15 @@ export function parseA1(a1: string): A1Ref | undefined {
       c1: Math.max(ka, kb) + 1,
     };
   }
+  // Open-ended: `B2:B` (from row 2 down) and `A3:3` (from column A across).
+  if (ca && COL.exec(b)) {
+    const [ka, kb] = [columnIndex(ca[1]), columnIndex(COL.exec(b)![1])];
+    return { kind: "cols", r0: Number(ca[2]) - 1, c0: Math.min(ka, kb), c1: Math.max(ka, kb) + 1 };
+  }
+  if (ca && ROW.exec(b)) {
+    const [ra, rb] = [Number(ca[2]) - 1, Number(ROW.exec(b)![1]) - 1];
+    return { kind: "rows", c0: columnIndex(ca[1]), r0: Math.min(ra, rb), r1: Math.max(ra, rb) + 1 };
+  }
   const cola = COL.exec(a);
   const colb = COL.exec(b);
   if (cola && colb) {
@@ -113,11 +122,13 @@ export function parseA1(a1: string): A1Ref | undefined {
 
 /** Close a reference's open axis with the tab's allocation. */
 export function toRect(ref: A1Ref, grid: { rows: number; cols: number }): GridRect {
+  const r0 = ref.r0 ?? 0;
+  const c0 = ref.c0 ?? 0;
   return {
-    r0: ref.r0 ?? 0,
-    r1: ref.r1 ?? Math.max(grid.rows, 1),
-    c0: ref.c0 ?? 0,
-    c1: ref.c1 ?? Math.max(grid.cols, 1),
+    r0,
+    r1: ref.r1 ?? Math.max(grid.rows, r0 + 1),
+    c0,
+    c1: ref.c1 ?? Math.max(grid.cols, c0 + 1),
   };
 }
 
@@ -166,9 +177,21 @@ export function splitQualifiedRange(range: string): { tabTitle?: string; a1: str
   return { a1: range };
 }
 
-/** Quote a tab title for use in an A1 reference. */
+/**
+ * Quote a tab title for an A1 range sent upstream. Always quoted: a bare title
+ * that is also A1 notation (`Q4`, `FY24`, `AB12`) names a CELL on the first
+ * sheet when it stands alone as a range (observed: `values.get` of `Q4`
+ * returned `Sheet1!Q4`).
+ */
 export function quoteTitle(title: string): string {
-  return /^[A-Za-z0-9_]+$/.test(title) ? title : `'${title.replace(/'/g, "''")}'`;
+  return `'${title.replace(/'/g, "''")}'`;
+}
+
+/** A tab title as a reader would write it in front of `!`: quoted only when needed. */
+export function displayTitle(title: string): string {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(title) && !/^[A-Za-z]{1,3}[0-9]+$/.test(title)
+    ? title
+    : `'${title.replace(/'/g, "''")}'`;
 }
 
 /** Quote one argument for a POSIX shell, only when it needs it. */
@@ -227,10 +250,12 @@ export interface SpreadsheetMeta {
   /** Titles of tabs that are not grids (chart sheets, data-source sheets). */
   otherTitles: string[];
   namedRanges: sheets_v4.Schema$NamedRange[];
+  /** The spreadsheet's locale (`en_US`, `de_DE`), which decides how typed text parses. */
+  locale?: string;
 }
 
 export const META_FIELDS =
-  "spreadsheetId,properties.title,sheets(properties(sheetId,title,index,sheetType,gridProperties(rowCount,columnCount,frozenRowCount)))";
+  "spreadsheetId,properties(title,locale),sheets(properties(sheetId,title,index,sheetType,gridProperties(rowCount,columnCount,frozenRowCount)))";
 
 /** The SPREADSHEET_NOT_FOUND translation every sheets command shares. */
 export function spreadsheetNotFound(spreadsheetId: string, account: string): AxiError {
@@ -273,6 +298,7 @@ export async function fetchMeta(
     tabs: props.filter((p) => (p.sheetType ?? "GRID") === "GRID").map(toTabInfo),
     otherTitles: props.filter((p) => (p.sheetType ?? "GRID") !== "GRID").map((p) => p.title ?? ""),
     namedRanges: data.namedRanges ?? [],
+    locale: data.properties?.locale ?? undefined,
   };
 }
 
@@ -478,23 +504,24 @@ export function compareA1(a: string, b: string): number {
   return (pa.r0 ?? 0) - (pb.r0 ?? 0) || (pa.c0 ?? 0) - (pb.c0 ?? 0);
 }
 
-/** The cells a formula's text names directly (`B5`, `$B$5`; ranges by their corners). */
-export function formulaMentions(formula: string, cell: string): boolean {
+/**
+ * Does a formula on `homeTab` read `cell` (of the same tab)? Uses the formula
+ * tokenizer, so ranges, whole and open-ended columns/rows count, string
+ * literals don't, and a ref qualified with another tab is not this cell.
+ */
+export function formulaMentions(formula: string, cell: string, homeTab?: string): boolean {
   const target = parseA1(cell);
   if (!target) return false;
-  const text = formula.replace(/"(?:[^"]|"")*"/g, '""');
-  const refs = text.match(/\$?[A-Za-z]{1,3}\$?[0-9]+(?::\$?[A-Za-z]{1,3}\$?[0-9]+)?/g) ?? [];
-  for (const ref of refs) {
-    const r = parseA1(ref);
-    if (!r) continue;
-    if (
-      (target.r0 ?? 0) >= (r.r0 ?? 0) &&
-      (target.r0 ?? 0) < (r.r1 ?? 0) &&
-      (target.c0 ?? 0) >= (r.c0 ?? 0) &&
-      (target.c0 ?? 0) < (r.c1 ?? 0)
-    ) {
-      return true;
-    }
+  const tr = target.r0 ?? 0;
+  const tc = target.c0 ?? 0;
+  const huge = { rows: Number.MAX_SAFE_INTEGER, cols: Number.MAX_SAFE_INTEGER };
+  for (const ref of parseFormulaRefs(formula)) {
+    if (!ref.a1) continue;
+    if (ref.tab !== undefined && ref.tab.toLowerCase() !== (homeTab ?? "").toLowerCase()) continue;
+    const parsed = parseA1(ref.a1);
+    if (!parsed) continue;
+    const r = toRect(parsed, huge);
+    if (tr >= r.r0 && tr < r.r1 && tc >= r.c0 && tc < r.c1) return true;
   }
   return false;
 }
@@ -523,7 +550,7 @@ export function fixLines(
     const why = `${errorText(err.error)}${err.message ? `, ${err.message}` : ""}`;
     let dep = "";
     if (err.written === false && formula && ctx.writtenCells) {
-      const cause = ctx.writtenCells.find((c) => formulaMentions(formula, c));
+      const cause = ctx.writtenCells.find((c) => formulaMentions(formula, c, ctx.tabTitle));
       if (cause) dep = ` — reads ${cause}, which this write changed`;
     }
     const fix = formula
@@ -548,7 +575,168 @@ export function errorCountLine(n: number, after: "write" | "read"): string {
 }
 
 // ---------------------------------------------------------------------------
+// Formula references
+
+export interface FormulaRef {
+  /** The reference as written (`Cost!B2:B500`, `Rate`, `INDIRECT(...)`). */
+  text: string;
+  tab?: string;
+  /** Unqualified A1 for a cell/range/column/row reference. */
+  a1?: string;
+  /** A name that is not an A1 reference — a named range, if one resolves. */
+  name?: string;
+  /** Computed at evaluation time; no static target. */
+  dynamic?: boolean;
+}
+
+const DYNAMIC = new Set(["INDIRECT", "OFFSET"]);
+const QUALIFIER = /([A-Za-z0-9_.]+)!/y;
+const FUNCTION = /([A-Za-z_][A-Za-z0-9_.]*)\s*\(/y;
+const CELL_OR_RANGE =
+  /(\$?[A-Za-z]{1,3}\$?[0-9]+:\$?[A-Za-z]{1,3}\$?[0-9]+|\$?[A-Za-z]{1,3}\$?[0-9]+:\$?[A-Za-z]{1,3}|\$?[A-Za-z]{1,3}\$?[0-9]+:\$?[0-9]+|\$?[A-Za-z]{1,3}\$?[0-9]+|\$?[A-Za-z]{1,3}:\$?[A-Za-z]{1,3}|\$?[0-9]+:\$?[0-9]+)(?![A-Za-z0-9_(!:])/y;
+const WORD = /[A-Za-z_][A-Za-z0-9_.]*/y;
+const NUMBER = /[0-9]+(?:\.[0-9]*)?(?:[eE][+-]?[0-9]+)?/y;
+
+function stick(re: RegExp, s: string, at: number): RegExpExecArray | null {
+  re.lastIndex = at;
+  return re.exec(s);
+}
+
+/** The text of a balanced `(...)` starting at `open`. */
+function balanced(s: string, open: number): string {
+  let depth = 0;
+  for (let i = open; i < s.length; i++) {
+    if (s[i] === '"') {
+      i++;
+      while (i < s.length && !(s[i] === '"' && s[i + 1] !== '"')) i += s[i] === '"' ? 2 : 1;
+      continue;
+    }
+    if (s[i] === "(") depth++;
+    if (s[i] === ")" && --depth === 0) return s.slice(open, i + 1);
+  }
+  return s.slice(open);
+}
+
+/**
+ * The references in a formula, in order, deduplicated: A1 cells and ranges
+ * (absolute, tab-qualified, whole columns/rows), names, and INDIRECT/OFFSET as
+ * dynamic. String literals are skipped; a function name is never a reference.
+ */
+export function parseFormulaRefs(formula: string): FormulaRef[] {
+  const s = formula.startsWith("=") ? formula.slice(1) : formula;
+  const out: FormulaRef[] = [];
+  const seen = new Set<string>();
+  const push = (ref: FormulaRef) => {
+    const key = `${ref.tab ?? ""}!${ref.a1 ?? ref.name ?? ref.text}`.toUpperCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(ref);
+  };
+  const readRef = (at: number, tab?: string): number => {
+    const m = stick(CELL_OR_RANGE, s, at);
+    if (m) {
+      const a1 = m[1].replace(/\$/g, "").toUpperCase();
+      push({ text: m[0], tab, a1 });
+      return at + m[0].length;
+    }
+    const w = stick(WORD, s, at);
+    if (w) {
+      push({ text: w[0], tab, name: w[0] });
+      return at + w[0].length;
+    }
+    return at;
+  };
+
+  let i = 0;
+  while (i < s.length) {
+    const ch = s[i];
+    if (ch === '"') {
+      i++;
+      while (i < s.length) {
+        if (s[i] === '"' && s[i + 1] === '"') i += 2;
+        else if (s[i] === '"') break;
+        else i++;
+      }
+      i++;
+      continue;
+    }
+    if (ch === "'") {
+      let j = i + 1;
+      let name = "";
+      while (j < s.length) {
+        if (s[j] === "'" && s[j + 1] === "'") {
+          name += "'";
+          j += 2;
+        } else if (s[j] === "'") break;
+        else name += s[j++];
+      }
+      if (s[j + 1] === "!") {
+        i = readRef(j + 2, name);
+        continue;
+      }
+      i = j + 1;
+      continue;
+    }
+    if (/[A-Za-z_$]/.test(ch)) {
+      const q = stick(QUALIFIER, s, i);
+      if (q && !/^[0-9]/.test(q[1])) {
+        i = readRef(i + q[0].length, q[1]);
+        continue;
+      }
+      const fn = stick(FUNCTION, s, i);
+      if (fn) {
+        if (DYNAMIC.has(fn[1].toUpperCase())) {
+          const open = i + fn[0].length - 1;
+          push({ text: `${fn[1]}${balanced(s, open)}`, dynamic: true });
+        }
+        i += fn[0].length;
+        continue;
+      }
+      const ref = stick(CELL_OR_RANGE, s, i);
+      if (ref) {
+        push({ text: ref[0], a1: ref[1].replace(/\$/g, "").toUpperCase() });
+        i += ref[0].length;
+        continue;
+      }
+      const w = stick(WORD, s, i);
+      if (w) {
+        if (!/^(TRUE|FALSE)$/i.test(w[0])) push({ text: w[0], name: w[0] });
+        i += w[0].length;
+        continue;
+      }
+      i++;
+      continue;
+    }
+    if (/[0-9]/.test(ch)) {
+      const ref = stick(CELL_OR_RANGE, s, i);
+      if (ref) {
+        push({ text: ref[0], a1: ref[1].replace(/\$/g, "") });
+        i += ref[0].length;
+        continue;
+      }
+      const n = stick(NUMBER, s, i);
+      i += n ? n[0].length : 1;
+      continue;
+    }
+    i++;
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Upstream write errors
+
+/** The duplicate-name 400 (the tabs changed since the read), as a VALIDATION_ERROR. */
+export function duplicateTitle(err: unknown, title: string): AxiError | undefined {
+  const e = err as { message?: string; response?: { data?: { error?: { message?: string } } } };
+  const message = e?.response?.data?.error?.message ?? e?.message ?? "";
+  if (!/already exists/i.test(message)) return undefined;
+  return new AxiError(
+    `A sheet titled '${title}' already exists (titles are unique, ignoring case)`,
+    "VALIDATION_ERROR",
+    [`Run \`gws-axi sheets read <spreadsheetId>\` to list the tabs`, "Nothing was added"],
+  );
+}
 
 /**
  * Translate a values-call failure: a protected range (a 400 that names no
