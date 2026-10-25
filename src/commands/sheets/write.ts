@@ -447,7 +447,7 @@ export function refuseEmptyBlock(rows: Block): void {
 // Fetching cells
 
 /** The pre-read / read-back mask: entered value, display, error, number-format type. */
-const TARGET_FIELDS =
+export const TARGET_FIELDS =
   "sheets(data(startRow,startColumn,rowData(values(userEnteredValue,formattedValue,effectiveValue,effectiveFormat/numberFormat/type))))";
 /** The errors-only mask: an empty object per healthy cell, the error where there is one. */
 const ERROR_FIELDS =

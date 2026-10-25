@@ -6,6 +6,18 @@ import { ADD_TAB_FLAGS, ADD_TAB_HELP, sheetsAddTabCommand } from "./sheets/add-t
 import { CELL_FLAGS, CELL_HELP, sheetsCellCommand } from "./sheets/cell.js";
 import { CREATE_FLAGS, CREATE_HELP, sheetsCreateCommand } from "./sheets/create.js";
 import { NOTE_FLAGS, NOTE_HELP, sheetsNoteCommand } from "./sheets/note.js";
+import {
+  DELETE_COLS_HELP,
+  DELETE_DIM_FLAGS,
+  DELETE_ROWS_HELP,
+  INSERT_COLS_HELP,
+  INSERT_DIM_FLAGS,
+  INSERT_ROWS_HELP,
+  sheetsDeleteColsCommand,
+  sheetsDeleteRowsCommand,
+  sheetsInsertColsCommand,
+  sheetsInsertRowsCommand,
+} from "./sheets/dimensions.js";
 import { READ_HELP, sheetsReadCommand } from "./sheets/read.js";
 import {
   TABS_DELETE_FLAGS,
@@ -139,6 +151,34 @@ export const SUBCOMMANDS: SheetsSubcommand[] = [
     help: TABS_DELETE_HELP,
     handler: sheetsTabsDeleteCommand,
   },
+  {
+    name: "insert-rows",
+    mutation: true,
+    flags: INSERT_DIM_FLAGS,
+    help: INSERT_ROWS_HELP,
+    handler: sheetsInsertRowsCommand,
+  },
+  {
+    name: "insert-cols",
+    mutation: true,
+    flags: INSERT_DIM_FLAGS,
+    help: INSERT_COLS_HELP,
+    handler: sheetsInsertColsCommand,
+  },
+  {
+    name: "delete-rows",
+    mutation: true,
+    flags: DELETE_DIM_FLAGS,
+    help: DELETE_ROWS_HELP,
+    handler: sheetsDeleteRowsCommand,
+  },
+  {
+    name: "delete-cols",
+    mutation: true,
+    flags: DELETE_DIM_FLAGS,
+    help: DELETE_COLS_HELP,
+    handler: sheetsDeleteColsCommand,
+  },
 ];
 
 const SUB_BY_NAME: Record<string, SheetsSubcommand> = Object.fromEntries(
@@ -177,11 +217,15 @@ notes:
   Writes put values into one tab and touch nothing else (formats, widths,
   validation, other tabs). Each reads back what Sheets made of the values and
   reports any formula errors it left in the tab.
+  insert-rows/-cols and delete-rows/-cols are the exception: they shift the
+  cells after them, and say where everything went in old-row terms.
 ${renderAlternatives(SUBCOMMANDS)}subcommand help:
   gws-axi sheets read --help       for spreadsheetId + tab/range handling
   gws-axi sheets cell --help       for one cell: its formula and what it reads
   gws-axi sheets update --help     for writing a block, or single cells
   gws-axi sheets append --help     for adding rows (CSV, JSON, header-keyed)
+  gws-axi sheets insert-rows --help  for making room mid-tab (and insert-cols,
+                                   delete-rows, delete-cols to take rows out)
   gws-axi sheets comments --help   for review comments (Drive comments)
   gws-axi sheets note --help       for setting or clearing one cell's note
   gws-axi sheets tabs --help       for listing, moving, renaming, hiding, freezing, deleting tabs
@@ -191,6 +235,7 @@ examples:
   gws-axi sheets cell 1AbC... D2 --tab Costs
   gws-axi sheets update 1AbC... --tab Costs --range B2 costs.csv --account you@example.com
   gws-axi sheets append 1AbC... --tab Costs --content 'bolts,40' --account you@example.com
+  gws-axi sheets insert-rows 1AbC... 3:5 --tab Costs --account you@example.com
   gws-axi sheets create --title "Q4 Tracker" costs.csv --header --account you@example.com
   gws-axi sheets comments 1AbC...
   gws-axi sheets tabs update 1AbC... Archive --first --freeze-rows 1 --account you@example.com
