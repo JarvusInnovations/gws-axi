@@ -1,7 +1,14 @@
 import { checkFlags, type FlagSpec } from "../util/flags.js";
 import { AxiError } from "axi-sdk-js";
 import { resolveAccount, withAccountSource } from "../google/account.js";
+import { sheetsClient } from "../google/client.js";
 import { docsCommentsCommand } from "./docs/comments.js";
+import {
+  TAB_REQUIRED_CONTEXT,
+  type TabRequiredContext,
+  fetchRow1,
+  renderTabs,
+} from "./sheets/shared.js";
 import { ADD_TAB_FLAGS, ADD_TAB_HELP, sheetsAddTabCommand } from "./sheets/add-tab.js";
 import { CELL_FLAGS, CELL_HELP, sheetsCellCommand } from "./sheets/cell.js";
 import { CREATE_FLAGS, CREATE_HELP, sheetsCreateCommand } from "./sheets/create.js";
@@ -283,5 +290,30 @@ export async function sheetsCommand(args: string[]): Promise<string> {
     throw notImplemented("sheets", sub, resolution.account, def.instead);
   }
 
-  return withAccountSource(resolution, await def.handler(resolution.account, remaining));
+  try {
+    return withAccountSource(resolution, await def.handler(resolution.account, remaining));
+  } catch (err) {
+    throw await withRow1(err, resolution.account);
+  }
+}
+
+/**
+ * A TAB_REQUIRED error re-rendered with each tab's `row1`, so the agent picks a
+ * tab knowing what each holds (specs/commands/sheets-write.md § Choosing the
+ * tab). One fetch for all tabs; any failure returns the error unchanged.
+ */
+export async function withRow1(err: unknown, account: string): Promise<unknown> {
+  if (!(err instanceof AxiError) || err.code !== "TAB_REQUIRED") return err;
+  const ctx = (err as unknown as Record<symbol, TabRequiredContext | undefined>)[
+    TAB_REQUIRED_CONTEXT
+  ];
+  if (!ctx) return err;
+  try {
+    const api = await sheetsClient(account);
+    const got = await fetchRow1(api, ctx.meta.id, ctx.meta.tabs);
+    if (!("row1" in got)) return err;
+    return new AxiError(err.message, err.code, [renderTabs(ctx.meta.tabs, got.row1), ...ctx.rest]);
+  } catch {
+    return err;
+  }
 }
