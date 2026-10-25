@@ -7,6 +7,7 @@ import {
   TABS_DELETE_HELP,
   TABS_HELP,
   TABS_UPDATE_HELP,
+  ambiguousSelector,
   checkTabUpdate,
   collectSheetErrors,
   countPopulated,
@@ -16,6 +17,7 @@ import {
   renderSheetList,
   resolveTabPlacement,
   sheetKind,
+  sheetRef,
   sortQualified,
   toSheetRow,
   undoFlags,
@@ -408,15 +410,51 @@ describe("tabs delete helpers", () => {
       9,
     );
     expect([...errors.keys()]).toEqual(["Costs!B1", "'Q4 plan'!A1"]);
-    expect(errors.get("Costs!B1")).toEqual({ cell: "Costs!B1", error: "REF", message: "m" });
+    expect(errors.get("Costs!B1")).toEqual({
+      cell: "Costs!B1",
+      error: "REF",
+      message: "m",
+      title: "Costs",
+      a1: "B1",
+    });
+  });
+
+  it("carries a title containing '! apart from its cell, so nothing re-parses it", () => {
+    const title = "Q4'!x";
+    const errors = collectSheetErrors([
+      {
+        properties: { sheetId: 3, title },
+        data: [
+          {
+            startRow: 1,
+            rowData: [{ values: [{ effectiveValue: { errorValue: { type: "REF" } } }] }],
+          },
+        ],
+      },
+    ]);
+    const [e] = [...errors.values()];
+    expect(e).toMatchObject({ title, a1: "A2", cell: "'Q4''!x'!A2" });
+    const sheets = [grid(3, title, 1), grid(4, "First", 0)];
+    expect(
+      sortQualified([e, { ...e, title: "First", a1: "B9", cell: "First!B9" }], sheets).map(
+        (x) => x.cell,
+      ),
+    ).toEqual(["First!B9", "'Q4''!x'!A2"]);
+    const [line] = deleteFixLines([e], new Map([[e.cell, "=Gone!A1"]]), {
+      spreadsheetId: "1AbC",
+      account: "alice@example.com",
+    });
+    expect(line).toBe(
+      "Fix 'Q4''!x'!A2 (#REF!): gws-axi sheets update 1AbC --tab 'Q4'\\''!x' --cell A2='=Gone!A1' --account alice@example.com",
+    );
   });
 
   it("sorts errors by sheet order, then row-major", () => {
     const rows = [
-      { cell: "Notes!A1" },
-      { cell: "Costs!D10" },
-      { cell: "Costs!D2" },
-      { cell: "Costs!A3" },
+      { cell: "Notes!A1", title: "Notes", a1: "A1" },
+      { cell: "Costs!D10", title: "Costs", a1: "D10" },
+      { cell: "Costs!D2", title: "Costs", a1: "D2" },
+      { cell: "Costs!A3", title: "Costs", a1: "A3" },
     ];
     expect(sortQualified(rows, SHEETS).map((r) => r.cell)).toEqual([
       "Costs!D2",
@@ -429,8 +467,14 @@ describe("tabs delete helpers", () => {
   it("writes the write side's fix line with the cell tab-qualified", () => {
     const lines = deleteFixLines(
       [
-        { cell: "Costs!D2", error: "REF", message: "Unresolved sheet name 'Archive'." },
-        { cell: "'Q4 plan'!B3", error: "REF", message: "" },
+        {
+          cell: "Costs!D2",
+          title: "Costs",
+          a1: "D2",
+          error: "REF",
+          message: "Unresolved sheet name 'Archive'.",
+        },
+        { cell: "'Q4 plan'!B3", title: "Q4 plan", a1: "B3", error: "REF", message: "" },
       ],
       new Map([["Costs!D2", "=Archive!B2"]]),
       { spreadsheetId: "1AbC", account: "alice@example.com" },
@@ -439,6 +483,39 @@ describe("tabs delete helpers", () => {
       "Fix Costs!D2 (#REF!, Unresolved sheet name 'Archive'.): gws-axi sheets update 1AbC --tab Costs --cell D2='=Archive!B2' --account alice@example.com",
       "Fix 'Q4 plan'!B3 (#REF!): gws-axi sheets cell 1AbC B3 --tab 'Q4 plan'",
     ]);
+  });
+});
+
+describe("a title spelled as another sheet's gid", () => {
+  // A sheet titled "0" next to the sheet whose gid is 0.
+  const TRAP: SheetRow[] = [grid(0, "Costs", 0), grid(55, "0", 1, { hidden: true })];
+
+  it("is refused as a write selector or anchor, naming both sheets", () => {
+    const e = ambiguousSelector(TRAP, "0");
+    expect(e?.code).toBe("VALIDATION_ERROR");
+    expect(e?.suggestions[0]).toContain("pass its gid: 55");
+    expect(e?.suggestions[1]).toContain("pass its title: Costs");
+    expect(ambiguousSelector(TRAP, "55")).toBeUndefined();
+    expect(ambiguousSelector(TRAP, "Costs")).toBeUndefined();
+    expect(codeOf(() => resolveTabPlacement(TRAP, TRAP[1], { kind: "after", anchor: "0" }))).toBe(
+      "VALIDATION_ERROR",
+    );
+  });
+
+  it("makes generated commands name that sheet by title, others by gid", () => {
+    expect(sheetRef(TRAP, TRAP[0])).toBe("Costs");
+    expect(sheetRef(TRAP, TRAP[1])).toBe("55");
+    expect(sheetRef(SHEETS, COSTS)).toBe("0");
+  });
+
+  it("names the hidden sheet to show by a selector that resolves to it", () => {
+    const sheets: SheetRow[] = [grid(0, "Costs", 0, { hidden: true }), grid(55, "0", 1)];
+    expect.assertions(1);
+    try {
+      checkTabUpdate(sheets, sheets[1], { spreadsheetId: "1AbC", hidden: true });
+    } catch (err) {
+      expect((err as AxiError).suggestions[1]).toContain("tabs update 1AbC Costs --show");
+    }
   });
 });
 

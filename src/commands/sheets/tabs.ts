@@ -15,6 +15,7 @@ import type { TabSummary } from "../docs/tabs.js";
 import type { TabPlacement } from "./add-tab.js";
 import {
   type CellError,
+  type ReportedError,
   type ErrorDiff,
   type GridDataLike,
   type SpreadsheetMeta,
@@ -26,7 +27,6 @@ import {
   gridCells,
   quoteTitle,
   shellArg,
-  splitQualifiedRange,
   spreadsheetNotFound,
   toTabInfo,
   translateWriteError,
@@ -296,7 +296,39 @@ export function sheetNotFound(state: SheetState, selector: string, what = "Tab")
   );
 }
 
+/**
+ * A selector that is one sheet's title and a different sheet's gid. Title
+ * wins in `findSheet`, so a gid copied from tabs[] would act on the wrong
+ * sheet — a write refuses rather than guess.
+ */
+export function ambiguousSelector(
+  sheets: SheetRow[],
+  selector: string,
+  what = "Tab",
+): AxiError | undefined {
+  const byTitle = sheets.find((s) => s.title === selector);
+  const byGid = sheets.find((s) => String(s.gid) === selector);
+  if (!byTitle || !byGid || byTitle.gid === byGid.gid) return undefined;
+  return new AxiError(
+    `${what} '${selector}' is ambiguous: it is the title of one sheet (gid ${byTitle.gid}) and the gid of another ('${byGid.title}')`,
+    "VALIDATION_ERROR",
+    [
+      `For the sheet titled '${byTitle.title}', pass its gid: ${byTitle.gid}`,
+      `For the sheet with gid ${byGid.gid}, pass its title: ${shellArg(byGid.title)}`,
+      "Nothing was written",
+    ],
+  );
+}
+
+/** How a generated command names a sheet: its gid, unless some title spells that gid. */
+export function sheetRef(sheets: SheetRow[], sheet: SheetRow): string {
+  const gid = String(sheet.gid);
+  return sheets.some((s) => s.title === gid) ? shellArg(sheet.title) : gid;
+}
+
 function requireSheet(state: SheetState, selector: string, what = "Tab"): SheetRow {
+  const ambiguous = ambiguousSelector(state.sheets, selector, what);
+  if (ambiguous) throw ambiguous;
   const found = findSheet(state.sheets, selector);
   if (!found) throw sheetNotFound(state, selector, what);
   return found;
@@ -478,6 +510,8 @@ export function resolveTabPlacement(
     case "before":
     case "after": {
       const flag = `--${placement.kind}`;
+      const ambiguous = ambiguousSelector(sheets, placement.anchor, `${flag} tab`);
+      if (ambiguous) throw ambiguous;
       const anchor = findSheet(sheets, placement.anchor);
       if (!anchor) throw notFound(placement.anchor, `${flag} tab`);
       if (anchor.gid === moving.gid) {
@@ -606,7 +640,7 @@ function lastVisible(
     [
       `Hidden sheets: ${describeSheets(hidden)}`,
       hidden.length
-        ? `Run \`gws-axi sheets tabs update ${spreadsheetId} ${hidden[0].gid} --show${a}\` to show one first`
+        ? `Run \`gws-axi sheets tabs update ${spreadsheetId} ${sheetRef(sheets, hidden[0])} --show${a}\` to show one first`
         : `Add a tab first: \`gws-axi sheets add-tab ${spreadsheetId} --title <title>${a}\``,
       "Nothing was written",
     ],
@@ -730,7 +764,7 @@ export async function sheetsTabsUpdateCommand(account: string, args: string[]): 
     help.push(`Run \`gws-axi sheets read ${id} --tab ${shellArg(tab.title)}\` to read it`);
   }
   help.push(
-    `Run \`gws-axi sheets tabs update ${id} ${tab.gid} ${undoFlags(before, state.sheets, diff.changed).join(" ")}${acct(account)}\` to undo`,
+    `Run \`gws-axi sheets tabs update ${id} ${sheetRef(after.sheets, tab)} ${undoFlags(before, state.sheets, diff.changed).join(" ")}${acct(account)}\` to undo`,
   );
   return joinBlocks(
     renderObject({ account, action: "updated", changed: diff.changed }),
@@ -754,6 +788,12 @@ export function qualifiedCell(title: string, a1: string): string {
   return `${displayTitle(title)}!${a1}`;
 }
 
+/** A formula error with its tab title and A1 carried apart, never re-parsed from `cell`. */
+export interface SheetCellError extends CellError {
+  title: string;
+  a1: string;
+}
+
 /** Every formula error in the spreadsheet, keyed by tab-qualified cell, skipping one sheet. */
 export function collectSheetErrors(
   sheets: Array<{
@@ -761,14 +801,14 @@ export function collectSheetErrors(
     data?: GridDataLike[] | null;
   }>,
   skipGid?: number,
-): Map<string, CellError> {
-  const out = new Map<string, CellError>();
+): Map<string, SheetCellError> {
+  const out = new Map<string, SheetCellError>();
   for (const s of sheets) {
     if (skipGid !== undefined && s.properties?.sheetId === skipGid) continue;
     const title = s.properties?.title ?? "";
     for (const [a1, err] of collectErrors(s.data)) {
       const cell = qualifiedCell(title, a1);
-      out.set(cell, { ...err, cell });
+      out.set(cell, { ...err, cell, title, a1 });
     }
   }
   return out;
@@ -779,7 +819,7 @@ async function scanErrors(
   account: string,
   spreadsheetId: string,
   skipGid?: number,
-): Promise<Map<string, CellError>> {
+): Promise<Map<string, SheetCellError>> {
   try {
     const res = await api.spreadsheets.get({
       spreadsheetId,
@@ -792,33 +832,25 @@ async function scanErrors(
   }
 }
 
-/** The tab-qualified cell split back into its tab title and A1. */
-function splitCell(cell: string): { title: string; a1: string } {
-  const { tabTitle, a1 } = splitQualifiedRange(cell);
-  return { title: tabTitle ?? "", a1 };
-}
-
 /** Sheet order, then row-major within a sheet. */
-export function sortQualified<T extends { cell: string }>(errors: T[], sheets: SheetRow[]): T[] {
+export function sortQualified<T extends { title: string; a1: string }>(
+  errors: T[],
+  sheets: SheetRow[],
+): T[] {
   const order = new Map(sheets.map((s) => [s.title, s.index]));
-  return [...errors].sort((x, y) => {
-    const a = splitCell(x.cell);
-    const b = splitCell(y.cell);
-    return (order.get(a.title) ?? 0) - (order.get(b.title) ?? 0) || compareA1(a.a1, b.a1);
-  });
+  return [...errors].sort(
+    (x, y) => (order.get(x.title) ?? 0) - (order.get(y.title) ?? 0) || compareA1(x.a1, y.a1),
+  );
 }
 
 /** The formulas of the first few error cells, best-effort, for their fix lines. */
 async function errorFormulas(
   api: sheets_v4.Sheets,
   spreadsheetId: string,
-  errors: CellError[],
+  errors: SheetCellError[],
 ): Promise<Map<string, string>> {
   const out = new Map<string, string>();
-  const want = errors.slice(0, 5).map((e) => {
-    const { title, a1 } = splitCell(e.cell);
-    return `${quoteTitle(title)}!${a1}`;
-  });
+  const want = errors.slice(0, 5).map((e) => `${quoteTitle(e.title)}!${e.a1}`);
   if (want.length === 0) return out;
   try {
     const res = await api.spreadsheets.get({
@@ -842,16 +874,16 @@ async function errorFormulas(
 
 /** One fix line per error (up to 5), in the write side's words, with the cell tab-qualified. */
 export function deleteFixLines(
-  errors: CellError[],
+  errors: SheetCellError[],
   formulas: Map<string, string>,
   ctx: { spreadsheetId: string; account: string },
 ): string[] {
   return errors.slice(0, 5).map((err) => {
-    const { title, a1 } = splitCell(err.cell);
+    const { title, a1 } = err;
     const local = new Map<string, string>();
     const f = formulas.get(err.cell);
     if (f) local.set(a1, f);
-    const [line] = fixLines([{ ...err, cell: a1 }], local, {
+    const [line] = fixLines([{ cell: a1, error: err.error, message: err.message }], local, {
       spreadsheetId: ctx.spreadsheetId,
       tabTitle: title,
       account: ctx.account,
@@ -900,9 +932,13 @@ export async function sheetsTabsDeleteCommand(account: string, args: string[]): 
     throw lastVisible(state.sheets, target, "deleted", id, account);
   }
 
-  // What goes: the populated-cell count, before the delete.
-  let cells: number | undefined;
-  if (target.kind === "grid") {
+  // What goes: the populated-cell count, before the delete — bounded like the scan.
+  let cells: number | string | undefined;
+  const tabCells = (target.rows ?? 0) * (target.cols ?? 0);
+  const countable = tabCells <= ERROR_SCAN_BOUND;
+  if (target.kind === "grid" && !countable) {
+    cells = `not counted (tab is ${target.rows}×${target.cols})`;
+  } else if (target.kind === "grid") {
     try {
       const res = await api.spreadsheets.values.get({
         spreadsheetId: id,
@@ -944,12 +980,14 @@ export async function sheetsTabsDeleteCommand(account: string, args: string[]): 
   }
 
   const after = await fetchSheets(api, account, id);
-  let errors: ErrorDiff | undefined;
+  let errors: (ErrorDiff & { errors: Array<ReportedError & SheetCellError> }) | undefined;
   let formulas = new Map<string, string>();
   if (before) {
     try {
-      errors = diffErrors(before, await scanErrors(api, account, id), new Set());
-      errors.errors = sortQualified(errors.errors, after.sheets);
+      const diff = diffErrors(before, await scanErrors(api, account, id), new Set());
+      // diffErrors spreads the after-map's entries, so title and a1 ride along.
+      const qualified = diff.errors as Array<ReportedError & SheetCellError>;
+      errors = { ...diff, errors: sortQualified(qualified, after.sheets) };
       formulas = await errorFormulas(api, id, errors.errors);
     } catch {
       // The delete happened; a failed read-back must not report it as failed.
@@ -989,6 +1027,11 @@ export async function sheetsTabsDeleteCommand(account: string, args: string[]): 
     const n = errors.errors.length;
     help.push(`${n} formula error${n === 1 ? "" : "s"} after this delete — see errors[]`);
     help.push(...deleteFixLines(errors.errors, formulas, { spreadsheetId: id, account }));
+  }
+  if (target.kind === "grid" && !countable) {
+    help.push(
+      `The populated cells were not counted (the tab is over ${ERROR_SCAN_BOUND.toLocaleString("en-US")} cells); \`gws-axi drive revisions ${id}\` holds the version before this delete`,
+    );
   }
   if (!scan) {
     help.push(
