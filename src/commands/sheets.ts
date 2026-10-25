@@ -19,7 +19,7 @@ import {
   sheetsInsertRowsCommand,
 } from "./sheets/dimensions.js";
 import { QUERY_FLAGS, QUERY_HELP, sheetsQueryCommand } from "./sheets/query.js";
-import { READ_HELP, sheetsReadCommand } from "./sheets/read.js";
+import { READ_FLAGS, READ_HELP, sheetsReadCommand } from "./sheets/read.js";
 import {
   TABS_DELETE_FLAGS,
   TABS_DELETE_HELP,
@@ -84,7 +84,7 @@ const sheetsCommentsCommand = (account: string, args: string[]): Promise<string>
   });
 
 export const SUBCOMMANDS: SheetsSubcommand[] = [
-  { name: "read", mutation: false, flags: "self", help: READ_HELP, handler: sheetsReadCommand },
+  { name: "read", mutation: false, flags: READ_FLAGS, help: READ_HELP, handler: sheetsReadCommand },
   {
     name: "query",
     mutation: false,

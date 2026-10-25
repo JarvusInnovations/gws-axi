@@ -2,6 +2,13 @@ import { AxiError } from "axi-sdk-js";
 import type { sheets_v4 } from "googleapis";
 import { sheetsClient, translateGoogleError } from "../../google/client.js";
 import {
+  type ExportOutcome,
+  type ExportRequest,
+  parseExportRequest,
+  writeExport,
+} from "../../util/export.js";
+import { type FlagSpec, parseArgs } from "../../util/flags.js";
+import {
   field,
   joinBlocks,
   renderHelp,
@@ -23,6 +30,7 @@ import {
   splitQualifiedRange,
   toTabInfo,
 } from "./shared.js";
+import { formatCsv } from "./values.js";
 
 // The A1 helpers moved to shared.ts with the write surface; re-exported so
 // existing importers keep working.
@@ -31,7 +39,7 @@ export { columnIndex, columnLetter, parseRangeOrigin, type RangeOrigin } from ".
 export const READ_HELP = `usage: gws-axi sheets read <spreadsheetId> [flags]
 args[1]:
   <spreadsheetId>      The spreadsheet ID (the portion of the URL after /d/)
-flags[8]:
+flags[10]:
   --tab <name|gid>     Tab to render (by title or numeric sheetId). Omit for a
                        single-tab file; required to pick one in a multi-tab file
   --range <A1>         Restrict to an A1 range within the tab (e.g. A1:D50). A
@@ -44,12 +52,17 @@ flags[8]:
   --max-rows <n>       Override the 50-row render cap (ignored with --full)
   --formulas           Show each formula cell's formula (=B2*C2) in the grid in
                        place of its displayed value
+  --json-out[=<path>]  Also write the whole tab (or --range), uncapped, as JSON
+                       {tab, origin, columns, rows} (default path: a 0600 file
+                       in the OS temp dir). The preview stays capped
+  --csv-out[=<path>]   Same as CSV, header row first when there is one
   --account <email>    Account override when 2+ are configured
 examples:
   gws-axi sheets read 1AbC...
   gws-axi sheets read 1AbC... --tab Costs
   gws-axi sheets read 1AbC... --tab Costs --range A1:D50
   gws-axi sheets read 1AbC... --tab Costs --header-row
+  gws-axi sheets read 1AbC... --tab Costs --csv-out=./costs.csv
 output:
   A \`spreadsheet{id,title,tab?,tab_count?}\` header, a \`sheets[N]{gid,title,
   index,rows,cols}\` tabs listing (always shown), and — when a tab is selected —
@@ -83,84 +96,59 @@ interface ParsedFlags {
   full: boolean;
   maxRows: number;
   formulas: boolean;
+  exportReq: ExportRequest | undefined;
 }
 
-const KNOWN_FLAGS = new Set([
-  "--tab",
-  "--range",
-  "--header-row",
-  "--raw",
-  "--full",
-  "--max-rows",
-  "--formulas",
-]);
+export const READ_FLAGS: FlagSpec = {
+  value: ["--tab", "--range", "--max-rows"],
+  boolean: ["--header-row", "--raw", "--full", "--formulas"],
+  optional: ["--json-out", "--csv-out"],
+};
 
 function parseFlags(args: string[]): ParsedFlags {
-  let spreadsheetId: string | undefined;
-  let tab: string | undefined;
-  let range: string | undefined;
-  let headerRow = false;
-  let raw = false;
-  let full = false;
-  let formulas = false;
-  let maxRows = DEFAULT_MAX_ROWS;
-
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (!arg.startsWith("--")) {
-      if (spreadsheetId === undefined) spreadsheetId = arg;
-      continue;
-    }
-    switch (arg) {
-      case "--tab":
-        tab = args[++i];
-        break;
-      case "--range":
-        range = args[++i];
-        break;
-      case "--header-row":
-        headerRow = true;
-        break;
-      case "--raw":
-        raw = true;
-        break;
-      case "--full":
-        full = true;
-        break;
-      case "--formulas":
-        formulas = true;
-        break;
-      case "--max-rows": {
-        const raw = args[++i];
-        const n = Number(raw);
-        if (!Number.isInteger(n) || n <= 0) {
-          throw new AxiError(
-            `--max-rows must be a positive integer (got '${raw}')`,
-            "VALIDATION_ERROR",
-            ["Usage: gws-axi sheets read <spreadsheetId> --max-rows <n>"],
-          );
-        }
-        maxRows = n;
-        break;
-      }
-      default:
-        throw new AxiError(`unknown flag ${arg} for \`sheets read\``, "VALIDATION_ERROR", [
-          `valid flags: ${[...KNOWN_FLAGS].join(", ")} (globals --account, --help always allowed)`,
-        ]);
-    }
-  }
-
+  const parsed = parseArgs(args, READ_FLAGS, "sheets read");
+  const [spreadsheetId, ...extra] = parsed.positionals;
   if (!spreadsheetId) {
     throw new AxiError("Missing spreadsheetId argument", "VALIDATION_ERROR", [
       "Usage: gws-axi sheets read <spreadsheetId> [--tab <name|gid>] [--range <A1>]",
     ]);
   }
+  if (extra.length) {
+    throw new AxiError(`Unexpected argument: ${extra.join(" ")}`, "VALIDATION_ERROR", [
+      "Usage: gws-axi sheets read <spreadsheetId> [--tab <name|gid>] [--range <A1>]",
+    ]);
+  }
+  let maxRows = DEFAULT_MAX_ROWS;
+  const rawMax = parsed.values["--max-rows"];
+  if (rawMax !== undefined) {
+    const n = Number(rawMax);
+    if (!Number.isInteger(n) || n <= 0) {
+      throw new AxiError(
+        `--max-rows must be a positive integer (got '${rawMax}')`,
+        "VALIDATION_ERROR",
+        ["Usage: gws-axi sheets read <spreadsheetId> --max-rows <n>"],
+      );
+    }
+    maxRows = n;
+  }
+  const headerRow = parsed.booleans.has("--header-row");
+  const raw = parsed.booleans.has("--raw");
   if (headerRow && raw) {
     throw new AxiError("--header-row and --raw are mutually exclusive", "VALIDATION_ERROR", [
       "Use --header-row to force header promotion, or --raw to force the column-letter grid",
     ]);
   }
-  return { spreadsheetId, tab, range, headerRow, raw, full, maxRows, formulas };
+  return {
+    spreadsheetId,
+    tab: parsed.values["--tab"],
+    range: parsed.values["--range"],
+    headerRow,
+    raw,
+    full: parsed.booleans.has("--full"),
+    maxRows,
+    formulas: parsed.booleans.has("--formulas"),
+    exportReq: parseExportRequest(parsed),
+  };
 }
 
 /**
@@ -405,6 +393,92 @@ export function extractGrid(
 
 // ---------------------------------------------------------------------------
 
+/**
+ * The fetched window as plain display strings — no markdown links, the formula
+ * in place of the value under --formulas — for an export file. Trailing
+ * fully-empty rows are trimmed as `extractGrid` trims them.
+ */
+export function plainGrid(rows: GridRowLike[], opts: { formulas?: boolean } = {}): string[][] {
+  const values = rows.map((row) =>
+    (row.values ?? []).map(
+      (c) =>
+        (opts.formulas ? c.userEnteredValue?.formulaValue : undefined) ?? c.formattedValue ?? "",
+    ),
+  );
+  while (values.length > 0 && values[values.length - 1].every((c) => c === "")) values.pop();
+  return values;
+}
+
+export interface ReadExport {
+  /** Header names when the header was promoted, else the column letters. */
+  columns: string[];
+  /** Data rows (the header row excluded when promoted), padded to `columns`. */
+  rows: string[][];
+  /** Every fetched row, header first when there is one — the CSV. */
+  csvRows: string[][];
+  /** The A1 cell of `rows[0][0]`. */
+  origin: string;
+}
+
+/** What `--json-out` / `--csv-out` write for a read (specs/commands/sheets-read.md § Flags). */
+export function readExport(
+  values: string[][],
+  origin: RangeOrigin,
+  headerRow: boolean,
+): ReadExport {
+  const width = values.reduce((w, r) => Math.max(w, r.length), 0);
+  const padded = values.map((r) => [...r, ...Array<string>(width - r.length).fill("")]);
+  const letters = Array.from({ length: width }, (_, j) => columnLetter(origin.col0 + j));
+  if (!headerRow) {
+    return {
+      columns: letters,
+      rows: padded,
+      csvRows: padded,
+      origin: `${letters[0] ?? columnLetter(origin.col0)}${origin.row1}`,
+    };
+  }
+  const used = new Set<string>();
+  const columns = letters.map((letter, j) => {
+    let name = (padded[0]?.[j] ?? "").trim() || letter;
+    if (used.has(name)) name = `${name} (${letter})`;
+    used.add(name);
+    return name;
+  });
+  return {
+    columns,
+    rows: padded.slice(1),
+    csvRows: padded,
+    origin: `${letters[0] ?? columnLetter(origin.col0)}${origin.row1 + 1}`,
+  };
+}
+
+function writeReadExport(
+  req: ExportRequest,
+  tab: string,
+  payload: ReadExport,
+): { outcome: ExportOutcome; columns: string } {
+  const data =
+    req.format === "csv"
+      ? formatCsv(payload.csvRows)
+      : `${JSON.stringify({ tab, origin: payload.origin, columns: payload.columns, rows: payload.rows })}\n`;
+  return {
+    outcome: writeExport(req, "read", data, {
+      rows: payload.rows.length,
+      cols: payload.columns.length,
+    }),
+    columns: payload.columns.map((c) => `${c}:string`).join(", "),
+  };
+}
+
+/** The `wrote:`/`columns:` block, or `export_error` (and exit 1) when the write failed. */
+function exportBlock(result: { outcome: ExportOutcome; columns: string }): string {
+  if (!result.outcome.ok) {
+    process.exitCode = 1;
+    return renderObject({ export_error: result.outcome.error });
+  }
+  return renderObject({ wrote: result.outcome.wrote, columns: result.columns });
+}
+
 /** Rows of the formulas[] block before `formulas_total` and the --formulas hint. */
 const FORMULAS_CAP = 20;
 /** Rows of the errors[] block before `errors_total`. */
@@ -537,7 +611,8 @@ export async function sheetsReadCommand(account: string, args: string[]): Promis
   // bounded to the render cap rather than pulling the whole sheet only to cap
   // it. `+2` gives headroom so --header-row still detects rows beyond the cap.
   // An explicit --range is honored verbatim; --full pulls the whole tab.
-  const boundedDefault = !flags.full && !rangeA1;
+  // An export takes the whole tab (or the whole --range) whatever the cap.
+  const boundedDefault = !flags.full && !rangeA1 && !flags.exportReq;
   const lastCol = target.cols > 0 ? columnLetter(target.cols - 1) : undefined;
   let windowRange: string;
   if (rangeA1) {
@@ -571,6 +646,11 @@ export async function sheetsReadCommand(account: string, args: string[]): Promis
   if (values.length === 0) {
     blocks.push(renderObject({ spreadsheet: header }));
     blocks.push(renderList("sheets", gridSheets, tabsSchema));
+    if (flags.exportReq) {
+      const written = writeReadExport(flags.exportReq, target.title, readExport([], origin, false));
+      blocks.push(exportBlock(written));
+      suggestions.push(written.outcome.helpLine);
+    }
     blocks.push(renderObject({ cells: `no data in ${rangeA1 ?? target.title}` }));
     suggestions.push(
       `Run \`gws-axi drive revisions ${flags.spreadsheetId}\` to see this spreadsheet's version history`,
@@ -618,8 +698,17 @@ export async function sheetsReadCommand(account: string, args: string[]): Promis
     if (extracted.errors.length > ERRORS_CAP) header.errors_total = extracted.errors.length;
   }
 
+  const written = flags.exportReq
+    ? writeReadExport(
+        flags.exportReq,
+        target.title,
+        readExport(plainGrid(rowData, { formulas: flags.formulas }), origin, headerMode.headerRow),
+      )
+    : undefined;
+
   blocks.push(renderObject({ spreadsheet: header }));
   blocks.push(renderList("sheets", gridSheets, tabsSchema));
+  if (written) blocks.push(exportBlock(written));
   blocks.push(renderList(grid.listName, grid.rows, grid.schema));
   if (extracted.notes.length > 0) {
     blocks.push(renderList("notes", extracted.notes, [field("cell"), field("note")]));
@@ -659,10 +748,13 @@ export async function sheetsReadCommand(account: string, args: string[]): Promis
       `Run \`gws-axi sheets read ${flags.spreadsheetId} --tab ${tabArg} --formulas\` to see every formula in the grid (formulas[] shows the first ${FORMULAS_CAP} of ${extracted.formulas.length})`,
     );
   }
-  if (grid.truncated) {
+  if (written) {
+    suggestions.push(written.outcome.helpLine);
+  } else if (grid.truncated) {
     suggestions.push(
       `Run \`gws-axi sheets read ${flags.spreadsheetId} --tab ${shellArg(target.title)} --full\` to render all ${grid.totalRows} rows, or add \`--range <A1>\` to scope`,
     );
+    suggestions.push("Save the whole tab: --csv-out or --json-out");
   }
   if (grid.listName === "rows") {
     suggestions.push(
