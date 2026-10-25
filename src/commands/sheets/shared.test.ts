@@ -3,6 +3,11 @@ import {
   cellArg,
   collectErrors,
   legendLine,
+  fetchRow1,
+  renderTabs,
+  requireTab as requireTabForRow1,
+  row1Text,
+  TAB_REQUIRED_CONTEXT,
   diffErrors,
   fixLines,
   formulaMentions,
@@ -247,5 +252,78 @@ describe("legendLine", () => {
     const entries = ["A", "B", "C"].map((letter, i) => ({ letter, header: `h${i}` }));
     expect(legendLine(entries)).toBe("Columns in row 1: A=h0, B=h1, C=h2");
     expect(legendLine(entries, 2)).toBe("Columns in row 1: A=h0, B=h1, … 1 more");
+  });
+});
+
+describe("row1", () => {
+  const tab = (gid: number, title: string) => ({
+    gid,
+    title,
+    index: gid,
+    rows: 10,
+    cols: 4,
+    frozenRows: 0,
+  });
+
+  it("joins non-empty cells and caps at 120 characters", () => {
+    expect(row1Text(["Item", "", null, " Qty ", undefined, "Status"])).toBe("Item, Qty, Status");
+    const long = row1Text(Array.from({ length: 40 }, (_, i) => `column${i}`));
+    expect(long.length).toBe(120);
+    expect(long.endsWith("…")).toBe(true);
+  });
+
+  it("fetches every tab's row 1 in one call, quoted, and maps by sheetId", async () => {
+    const get = async (req: { ranges: string[] }) => {
+      expect(req.ranges).toEqual(["'Costs'!1:1", "'Q4'!1:1"]);
+      return {
+        data: {
+          sheets: [
+            {
+              properties: { sheetId: 0 },
+              data: [
+                { rowData: [{ values: [{ formattedValue: "Item" }, { formattedValue: "Qty" }] }] },
+              ],
+            },
+            { properties: { sheetId: 7 }, data: [{ rowData: [] }] },
+          ],
+        },
+      };
+    };
+    const api = { spreadsheets: { get } } as never;
+    const got = await fetchRow1(api, "1AbC", [tab(0, "Costs"), tab(7, "Q4")]);
+    expect("row1" in got && [...got.row1]).toEqual([
+      [0, "Item, Qty"],
+      [7, ""],
+    ]);
+  });
+
+  it("reports a failed fetch instead of throwing", async () => {
+    const api = { spreadsheets: { get: async () => Promise.reject(new Error("boom")) } } as never;
+    expect(await fetchRow1(api, "1AbC", [tab(0, "Costs")])).toEqual({ unavailable: "boom" });
+  });
+
+  it("renders a row1 column only when given", () => {
+    expect(renderTabs([tab(0, "Costs")])).toContain("sheets[1]{gid,title,index,rows,cols}:");
+    expect(renderTabs([tab(0, "Costs")], new Map([[0, "Item, Qty"]]))).toContain(
+      "sheets[1]{gid,title,index,rows,cols,row1}:",
+    );
+  });
+
+  it("attaches the spreadsheet to a TAB_REQUIRED error", () => {
+    const meta = {
+      id: "1AbC",
+      title: "T",
+      tabs: [tab(0, "A"), tab(1, "B")],
+      otherTitles: [],
+      namedRanges: [],
+    };
+    try {
+      requireTabForRow1(meta, undefined, (t) => `retry --tab ${t}`);
+      throw new Error("expected a throw");
+    } catch (err) {
+      const ctx = (err as Record<symbol, { meta: unknown; rest: string[] }>)[TAB_REQUIRED_CONTEXT];
+      expect(ctx.meta).toBe(meta);
+      expect(ctx.rest[0]).toContain("retry --tab A");
+    }
   });
 });

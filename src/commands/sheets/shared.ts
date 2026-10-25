@@ -286,8 +286,68 @@ export const TABS_SCHEMA: FieldDef[] = [
   field("cols"),
 ];
 
-export function renderTabs(tabs: TabInfo[]): string {
-  return renderList("sheets", tabs, TABS_SCHEMA);
+export function renderTabs(tabs: TabInfo[], row1?: Map<number, string>): string {
+  if (!row1) return renderList("sheets", tabs, TABS_SCHEMA);
+  return renderList(
+    "sheets",
+    tabs.map((t) => ({ ...t, row1: row1.get(t.gid) ?? "" })),
+    [...TABS_SCHEMA, field("row1")],
+  );
+}
+
+// ---------------------------------------------------------------------------
+// row1 (specs/commands/sheets-read.md § sheets[N]): each tab's first-row text,
+// for the listings an agent chooses a tab from.
+
+/** Tabs that get `row1` (one `ranges` entry each, on one request). */
+export const ROW1_TAB_CAP = 100;
+const ROW1_CHARS = 120;
+
+/** Non-empty cells joined with `, `, capped at 120 characters. */
+export function row1Text(cells: Array<string | null | undefined>): string {
+  const text = cells
+    .map((c) => (c ?? "").trim())
+    .filter(Boolean)
+    .join(", ");
+  return text.length > ROW1_CHARS ? `${text.slice(0, ROW1_CHARS - 1)}…` : text;
+}
+
+/** Row 1 of up to ROW1_TAB_CAP tabs in one call, by gid. Best-effort. */
+export async function fetchRow1(
+  api: sheets_v4.Sheets,
+  spreadsheetId: string,
+  tabs: TabInfo[],
+): Promise<{ row1: Map<number, string> } | { unavailable: string }> {
+  const chosen = tabs.slice(0, ROW1_TAB_CAP);
+  if (chosen.length === 0) return { row1: new Map() };
+  try {
+    const res = await api.spreadsheets.get({
+      spreadsheetId,
+      ranges: chosen.map((t) => `${quoteTitle(t.title)}!1:1`),
+      includeGridData: true,
+      fields: "sheets(properties(sheetId),data(rowData(values(formattedValue))))",
+    });
+    const row1 = new Map<number, string>();
+    for (const sheet of res.data.sheets ?? []) {
+      const gid = sheet.properties?.sheetId ?? 0;
+      const values = sheet.data?.[0]?.rowData?.[0]?.values ?? [];
+      row1.set(gid, row1Text(values.map((v) => v.formattedValue)));
+    }
+    return { row1 };
+  } catch (err) {
+    return { unavailable: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * The spreadsheet a TAB_REQUIRED error came from, so the `sheets` dispatcher
+ * can re-render its listing with `row1` (requireTab itself stays synchronous).
+ */
+export const TAB_REQUIRED_CONTEXT = Symbol("tabRequiredContext");
+export interface TabRequiredContext {
+  meta: SpreadsheetMeta;
+  /** The suggestions after the listing (the retry line, the "nothing written" note). */
+  rest: string[];
 }
 
 export interface SpreadsheetMeta {
@@ -390,19 +450,21 @@ export function requireTab(
     return tab;
   }
   if (meta.tabs.length === 1) return meta.tabs[0];
-  throw new AxiError(
+  const rest = [
+    `Run \`${retry(meta.tabs[0]?.title ?? "<name>")}\` (or another title / gid above)`,
+    ...(opts.read
+      ? []
+      : [
+          "Nothing was written. There is no all-tabs write; `gws-axi drive upload --update --replace-all-tabs` replaces the whole file",
+        ]),
+  ];
+  const err = new AxiError(
     `Spreadsheet '${meta.id}' has ${meta.tabs.length} tabs — pass --tab <name|gid> to choose one`,
     "TAB_REQUIRED",
-    [
-      renderTabs(meta.tabs),
-      `Run \`${retry(meta.tabs[0]?.title ?? "<name>")}\` (or another title / gid above)`,
-      ...(opts.read
-        ? []
-        : [
-            "Nothing was written. There is no all-tabs write; `gws-axi drive upload --update --replace-all-tabs` replaces the whole file",
-          ]),
-    ],
+    [renderTabs(meta.tabs), ...rest],
   );
+  (err as unknown as Record<symbol, TabRequiredContext>)[TAB_REQUIRED_CONTEXT] = { meta, rest };
+  throw err;
 }
 
 /** `https://docs.google.com/spreadsheets/d/<id>/edit#gid=<gid>` — opens on the tab. */

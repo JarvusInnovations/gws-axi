@@ -202,7 +202,8 @@ freeze survives it.
   given, must agree (`VALIDATION_ERROR` otherwise).
 - Omitted on a single-tab spreadsheet → that tab.
 - Omitted on a multi-tab spreadsheet → `TAB_REQUIRED`, carrying the `sheets[N]{gid,title,…}`
-  listing so the next call can name one. Nothing is written. **There is no all-tabs write**;
+  listing — with its `row1` column ([sheets-read.md](sheets-read.md) § `sheets[N]`) — so the
+  next call can name one. Nothing is written. **There is no all-tabs write**;
   that is `drive upload --update --replace-all-tabs`, by name.
 - `--tab` naming no tab → `TAB_NOT_FOUND`, with the listing.
 

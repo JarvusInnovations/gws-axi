@@ -19,6 +19,8 @@ import {
 import {
   type CellError,
   type LegendEntry,
+  fetchRow1,
+  renderTabs,
   type RangeOrigin,
   renderLegend,
   type TabInfo,
@@ -603,8 +605,11 @@ export async function sheetsReadCommand(account: string, args: string[]): Promis
   const suggestions: string[] = [];
 
   if (!target) {
+    // The agent is choosing a tab: show what each holds (row1, one call for all tabs).
+    const got = await fetchRow1(api, flags.spreadsheetId, gridSheets);
+    if ("unavailable" in got) header.row1 = `unavailable (${got.unavailable})`;
     blocks.push(renderObject({ spreadsheet: header }));
-    blocks.push(renderList("sheets", gridSheets, tabsSchema));
+    blocks.push(renderTabs(gridSheets, "row1" in got ? got.row1 : undefined));
     for (const t of gridSheets.slice(0, 4)) {
       suggestions.push(
         `Run \`gws-axi sheets read ${flags.spreadsheetId} --tab ${shellArg(t.title)}\` to read the '${t.title}' tab`,
