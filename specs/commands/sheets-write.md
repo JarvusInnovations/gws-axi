@@ -95,6 +95,14 @@ Whether row 1 is frozen does not matter here; `--header` is how to make it so.
 The read's `rows[N]{…}` shape invites this: an agent that read `rows[N]{Name,Status,Owner}`
 appends `{"Name": …}` without knowing which letter `Owner` is.
 
+Keyed rows are placed by the header, not by upstream's table detection: they are written
+from **column A of the row after the last row with data in the header's columns** (row 1's
+first through last non-empty cell), through `update`'s path — `values.update`, grid growth
+included — rather than `values.append`. `values.append` starts the rows at the first column of
+the last block of data it detects, which need not be column A (§ `append`); that would put
+every value under the wrong header. A keyed append therefore fills no gap and inserts no row:
+the rows below the last one are empty in those columns by construction.
+
 ### Single cells (`update --cell`)
 
 `--cell <A1>=<value>`, repeatable, writes scattered cells in one call: `--cell B5=4800 --cell
@@ -203,7 +211,12 @@ asked for. `append`, `create` and `add-tab` read back the same way.
    written** (`range: Costs!A12:C13`) from the API's `updatedRange`, so the caller sees where
    they landed. A blank row inside the data is **not** filled: the rows land after the last
    row that has data, below the gap (observed). `values.append` grows the tab's rows — and
-   its columns, for a wider block — itself, so `append` sends no growth request.
+   its columns, for a wider block — itself, so `append` sends no growth request. The rows
+   start at the **first column of the last block of data** upstream detects — column A on an
+   ordinary table, but a tab whose lowest data starts further right takes them there
+   (observed: `A1:B1` above `C5:D5` → the row landed at `C6`). The `range` echo shows it.
+   Header-keyed rows do not take this path (§ Header-keyed rows): they are aligned to row 1
+   from column A, and a landing column other than A would put them under the wrong headers.
 3. `append` is **not idempotent**: re-running adds the rows again. The response says so
    ([drive mkdir](drive-mkdir.md) sets the pattern). Rows are appended as a block; a
    partial append is not possible through this API.
@@ -433,6 +446,7 @@ what makes a collision visible after the fact.
 | A `spreadsheets.get` right after `values.update` returns computed formula results and `effectiveValue.errorValue` for broken ones (no "Loading…" state for ordinary formulas) | **Observed 2026-10-24** for `=1+1`, `=SUM(A5:B5)`, `=A2/0` (`DIVIDE_BY_ZERO`, "Function DIVIDE parameter 2 cannot be zero.") and `=Cost!B2` with no `Cost` tab (`REF`, "Unresolved sheet name 'Cost'."). `IMPORTRANGE`-class formulas not tested; a `LOADING` error type is reported as it comes |
 | A fields mask of `effectiveValue/errorValue` alone returns a compact response for a healthy tab (no per-cell payload for cells with no error) | **Amended 2026-10-24**: not compact — each populated cell returns `{"effectiveValue":{}}`. 585 KB / ~230 ms on a populated 1000×26 tab; 4.5 MB / ~610 ms at 200,000 cells. Bound kept (§ Formula errors) |
 | `values.batchUpdate` with one single-cell range per entry writes them all, or none on a bad range | **Observed 2026-10-24**: a good `H1` beside a bad `Nope!A1` → 400 `Invalid data[1]: Unable to parse range: Nope!A1`, and `H1` stayed empty. A range naming no tab is the same "Unable to parse range" 400 as a malformed one |
+| `values.append` starts the rows at the detected table's first column | **Observed 2026-10-24**: data at `A1:B1` and `C5:D5` → a one-cell row landed at `C6`. Narrowing the range to the header's columns (`A:B`) made it land at `A2` and insert rows above `C5`, shifting that data down — so plain rows keep the whole tab as the range, and header-keyed rows are written by `values.update` under the header instead (observed through the command: a keyed row on a tab whose lowest block started in column B landed at `B9`, misaligned, before this change). A leading `null` does not move the start (`[null, …]` → `A9:C9`) |
 | Drive `files.create` with the spreadsheet MIME creates a spreadsheet whose first tab is `Sheet1` | **Observed 2026-10-24**: `Sheet1`, gid `0`, 1000×26, created directly in the `parents` folder |
 
 Each row flips to **Observed <date>** as the plan's live checks run; a contradicted row changes
