@@ -1,5 +1,6 @@
 ---
-status: in-progress
+status: done
+pr: 137
 depends: []
 specs:
   - specs/commands/sheets-write.md
@@ -115,72 +116,72 @@ Range commands first, structure commands on top of them; one branch, one PR.
 
 ## Validation
 
-- [ ] `bun run build`, `lint`, `format:check`, `test` pass.
-- [ ] Unit: CSV reader on quoted commas, doubled quotes, embedded newlines, CRLF, ragged rows,
+- [x] `bun run build`, `lint`, `format:check`, `test` pass.
+- [x] Unit: CSV reader on quoted commas, doubled quotes, embedded newlines, CRLF, ragged rows,
       unterminated quote; JSON grid on typed cells, `null`, 1-D input, nested objects.
-- [ ] Unit: `diffBlock` — string/number/bool/formula vs each stored kind under both modes;
+- [x] Unit: `diffBlock` — string/number/bool/formula vs each stored kind under both modes;
       the "unsure → changed" cases; `reportWrite` on before≠input, now≠input, error cells,
       and the omitted "empty before, now = input" case; `parseCellArgs` on `=`-bearing values,
       duplicates, tab-qualified cells; `mapKeyedRows` on missing and unknown keys.
-- [ ] Unit: range fit — anchor cell, bounding range too small, `B:B`, `3:3`; grid-growth
+- [x] Unit: range fit — anchor cell, bounding range too small, `B:B`, `3:3`; grid-growth
       arithmetic; placement index for `--first`/`--last`/`--before`/`--after`; conflicting
       placement flags and duplicate `--tab` titles refused.
-- [ ] Every "To verify live" row in the spec's upstream table is **Observed** (or the spec was
+- [x] Every "To verify live" row in the spec's upstream table is **Observed** (or the spec was
       amended), with a date.
-- [ ] Live: `update` at an anchor writes the block and nothing else — the tab's other cells,
+- [x] Live: `update` at an anchor writes the block and nothing else — the tab's other cells,
       number formats, a column width and a data-validation rule are identical before/after
       (`includeGridData` diff).
-- [ ] Live: re-running the same `update` is `action: unchanged` with no values call; a
+- [x] Live: re-running the same `update` is `action: unchanged` with no values call; a
       changed cell reports `changed: 1` and a `written[]` row with the previous value.
-- [ ] Live: writing `=B2*C2` reports it in `formulas[]` with `result: $9,600`; writing
+- [x] Live: writing `=B2*C2` reports it in `formulas[]` with `result: $9,600`; writing
       `=Cost!B2` on a tab with no `Cost` reports it in `errors[]` with Sheets' message, a
       `Fix D2 …` help line carrying that formula, and `action: updated`, exit 0; writing `1/2`
       reports `now: 1/2 (date <year>-01-02)` and the hazard help line (amended: Sheets keeps
       displaying `1/2` under an `m/d` date format, so the spec annotates the date).
-- [ ] Live: writing text into a cell an arithmetic formula reads (`=B2+B3+B4`, `=B3*C3`)
+- [x] Live: writing text into a cell an arithmetic formula reads (`=B2+B3+B4`, `=B3*C3`)
       reports that formula in `errors[]` with `written: no` and names the written cell in its
       fix line (amended: `SUM` ignores text, so it cannot error this way; a `SUM` over an
       erroring cell propagates and is reported too); `clear` of a cell a division reads reports
       the `#DIV/0!` (amended: a cleared cell reads as empty/0 — clearing never yields `#REF!`);
       re-writing correctly reports `errors_fixed`; a pre-existing unrelated error shows only as
       `errors_elsewhere`.
-- [ ] Live: the errors-only mask on a healthy 1000×26 tab — response size and latency
+- [x] Live: the errors-only mask on a healthy 1000×26 tab — response size and latency
       recorded in Notes; the 200k bound kept or amended from the measurement.
-- [ ] Live: `--cell B5=4800 --cell C9=3 --cell D2='=B2*C2'` writes all three in one
+- [x] Live: `--cell B5=4800 --cell C9=3 --cell D2='=B2*C2'` writes all three in one
       `values.batchUpdate` with one pre-read and one read-back; a bad cell ref writes nothing.
-- [ ] Live: `create … --header` freezes row 1; `sheets read` then auto-promotes
+- [x] Live: `create … --header` freezes row 1; `sheets read` then auto-promotes
       (`header_source: frozen-row`); re-running `update --range A1 … --header` sends no freeze;
       a tab frozen at 2 rows reports `frozen (2 rows, unchanged)`.
-- [ ] Live: header-keyed `append --json '[{"Name":"x","Status":"done"}]'` lands the values
+- [x] Live: header-keyed `append --json '[{"Name":"x","Status":"done"}]'` lands the values
       under those header cells and leaves the unnamed columns empty; an unknown key is
       `COLUMN_NOT_FOUND` listing the headers.
-- [ ] Live: `sheets read` on the tab lists `formulas[N]{cell,formula}` with the formulas as
+- [x] Live: `sheets read` on the tab lists `formulas[N]{cell,formula}` with the formulas as
       entered, `--formulas` renders them in the grid, and a broken formula appears in
       `errors[]` with the count as the first `help[]` line and a `sheets cell` line.
-- [ ] Live: `sheets cell` on `=B2*C2` where `C2` is text shows the `#VALUE!` message and
+- [x] Live: `sheets cell` on `=B2*C2` where `C2` is text shows the `#VALUE!` message and
       `refs[]` with `C2,text,n/a`; on `=SUM(Cost!B2:B500)` shows 20 ref rows, `ref_cells_total`
       and a cross-tab ref; `--depth 2` expands a referenced formula; an `INDIRECT` ref is
       `kind: dynamic`.
-- [ ] Live: a block wider than the tab grows the grid and reports `grid:`; the same block
+- [x] Live: a block wider than the tab grows the grid and reports `grid:`; the same block
       without growth is what upstream refuses (amended: upstream refuses a range or anchor
       outside the allocation, and grows a block spilling from an anchor inside it itself).
-- [ ] Live: `append` lands after the last data row and `range:` matches where the rows
+- [x] Live: `append` lands after the last data row and `range:` matches where the rows
       appear; a tab with a blank row inside its data is checked and the outcome recorded.
-- [ ] Live: `--json` with `null` leaves a cell untouched; a CSV empty field clears it; `--raw`
+- [x] Live: `--json` with `null` leaves a cell untouched; a CSV empty field clears it; `--raw`
       stores `=1+1` as text while the default stores a formula whose read-back is `2`.
-- [ ] Live: `clear --range` empties values and keeps a bold format; `clear` without
+- [x] Live: `clear --range` empties values and keeps a bold format; `clear` without
       `--range`/`--all` is refused; `clear` on an empty range is `unchanged`.
-- [ ] Live: multi-tab spreadsheet without `--tab` → `TAB_REQUIRED` and nothing written.
-- [ ] Live: `create --title --parent --tab A --tab B` with a CSV seed → file in the folder,
+- [x] Live: multi-tab spreadsheet without `--tab` → `TAB_REQUIRED` and nothing written.
+- [x] Live: `create --title --parent --tab A --tab B` with a CSV seed → file in the folder,
       tabs `A`,`B` in order, values in `A` at `A1`, listing in the response.
-- [ ] Live: `add-tab --after A --title C` lands between `A` and `B`; re-running is
+- [x] Live: `add-tab --after A --title C` lands between `A` and `B`; re-running is
       `action: exists` with `C`'s gid and no change to the spreadsheet.
-- [ ] Live (or unit on the request sequence, if no live failure is practical — say which in
+- [x] Live (or unit on the request sequence, if no live failure is practical — say which in
       Notes): a seed write that fails deletes the new tab and the error says so.
-- [ ] `gws-axi sheets --help` has no `alternatives[]` block; no `sheets` subcommand throws
+- [x] `gws-axi sheets --help` has no `alternatives[]` block; no `sheets` subcommand throws
       `NOT_IMPLEMENTED`; every write's `--help` matches its flag declaration.
-- [ ] `drive upload x.csv --convert` shows the `sheets update` line.
-- [ ] Implementation branch follows the branch-update rule (rebased, never back-merged);
+- [x] `drive upload x.csv --convert` shows the `sheets update` line.
+- [x] Implementation branch follows the branch-update rule (rebased, never back-merged);
       the closeout commit is last.
 
 ## Risks / unknowns
@@ -202,8 +203,71 @@ Range commands first, structure commands on top of them; one branch, one PR.
 
 ## Notes
 
-(At closeout.)
+- **Probes before code** (2026-10-24, scratch spreadsheets in the owner's safe-to-delete
+  folder): every upstream row is Observed or Amended in the spec. Contradictions, each a
+  `docs(specs):` commit before the code: `values.update` grows the grid itself for a block
+  spilling from an anchor inside it but refuses a range/anchor outside (growth step kept);
+  a protected range is a 400 "protected cell or object", not a 403, naming no range; the
+  errors-only mask is not compact; `1/2` stays displayed as `1/2` under an `m/d` date
+  format (hence the `(date …)` annotation in `written[]`); the error enum is
+  `DIVIDE_BY_ZERO`.
+- **Errors-only mask, measured**: every populated cell returns `{"effectiveValue":{}}`
+  (~22 bytes); empty rows collapse to `{}`. Fully populated 1000×26: 585 KB, ~230 ms.
+  Fully populated 8000×25 (200,000 cells): 4.5 MB, ~610 ms. **The 200k bound is kept** —
+  about 1.2 s of scan per write at the bound. `effectiveValue/errorValue` and
+  `effectiveValue.errorValue` masks measured identical.
+- **`values.append` placement**: rows start at the first column of the *last* block of
+  data (data at `A1:B1` and `C5:D5` → `C6`); a blank row inside the data is not filled.
+  Narrowing the range to the header's columns inserts rows mid-tab and shifts data down,
+  so header-keyed rows were moved off `values.append` onto `writePlan` at column A after the
+  last row with data in the header's columns (spec amended; a keyed row sent through append
+  landed misaligned in a live check before the change). Plain rows keep `values.append`.
+- **Three validation lines were amended** in their own plan commit before checking, to the
+  observed behavior: `SUM` ignores text (text in its range can't make it error — a `SUM`
+  over an *erroring* cell propagates, which was checked); clearing never yields `#REF!` (a
+  cleared cell reads as empty/0 — checked with a `#DIV/0!` divisor instead); `1/2` display.
+- The seed-failure validation was checked **live**: an `add-tab` seed with a >50,000-character
+  cell was refused upstream and the tab was deleted again. The rollback-delete-also-fails
+  path (`WRITE_INCOMPLETE`) and `create`'s `WRITE_INCOMPLETE` are unit-tested only.
+- `PROTECTED_RANGE` was observed through a raw API probe (an editor account writing a range
+  protected to the owner) and is unit-tested on that exact shape; it was not triggered
+  through the command.
+- The error scan is a separate `spreadsheets.get` sent in parallel with the target
+  pre-read/read-back — a request carries one fields mask, and the target's mask over the
+  whole tab would fetch every value.
+- Dispatcher entries declare real `FlagSpec`s instead of `flags: "self"`, so
+  `flag-declarations.test.ts` checks each write's `--help` against its declaration.
+  `parseArgs` gained `lists` for repeatable flags (`--cell`, `create --tab`).
+- A blank CSV line is an empty row (writes nothing), not a one-field row that would clear
+  column A. `--header` with `--cell`, and on `create`/`add-tab` with no block, is refused.
+- **Review round (PR #137)**, each fix behind a `docs(specs):` amendment observed live on
+  2026-10-24: (1) a bare title that is also A1 notation is a cell on the first sheet
+  (`values.get` of `Q4` → `Sheet1!Q4`), so `quoteTitle` always quotes — re-checked live:
+  `append`, the whole-tab error scan and `read --full` on a `Q4` tab all land in that tab;
+  (2) grid growth is `appendDimension`, relative to the read — an absolute `rowCount` from a
+  stale snapshot deleted rows in a probe; re-checked live by growing a tab between the
+  metadata read and `writePlan`: all ten concurrently appended rows survived and the tab grew
+  to 17×3; (3) `append` uses one error-scan scope on both sides; (4) `storesSame` honors
+  `TEXT` cells (`5` into a `TEXT` cell stored the string) and `properties.locale` (`de_DE`:
+  `5.5` → a date, `5,5` → 5.5, `WAHR` → text); (5) open-ended refs (`B2:B`, `A3:3`) in
+  `parseA1`/the tokenizer, and `formulaMentions` via the tokenizer, tab-aware; (6) titles are
+  unique case-insensitively, chart sheets included — re-checked live: `add-tab q4` beside
+  `Q4` → `exists`, a chart sheet's title → `VALIDATION_ERROR`, `create --tab Costs --tab costs`
+  → `VALIDATION_ERROR` with no file created; (7) add-tab's post-add read is inside the
+  rollback; (8) create translates its tab-naming errors, rollBack invents no code; (9)
+  Infinity refused; (10) `sheets cell` caps 20 cells per reference (spec amended);
+  (11) `sheets read` fix lines already carried `--account` (the read passes `account` to
+  `fixLines`; seen in the live read output) — no change needed. `errors_total` added past the
+  cap on writes.
+- `storesSame` will report `changed` for most non-canonical strings against numeric cells
+  (the plan's risk); in live use `unchanged` fired for plain numbers, text and formulas.
 
 ## Follow-ups
 
-(At closeout.)
+- Issue: a local 50,000-character-per-cell check before `add-tab`/`create`/`update` would
+  refuse an oversized cell before a tab is added or a file created, instead of relying on
+  the rollback. Small; not filed.
+- Issue: the >200k-cell `error_scan: written range only` path has not been exercised live
+  through the command (only measured via the API).
+- Out-of-scope items stay as the spec lists them (formatting, notes, `sheets tabs`,
+  row/column insertion, multi-block batches, header-keyed `update`). None filed here.
