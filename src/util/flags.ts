@@ -18,6 +18,13 @@ export interface FlagSpec {
   value?: string[];
   /** Flags that are present or absent, e.g. `--full`. */
   boolean?: string[];
+  /**
+   * Flags that may carry a value with `=` and only with `=`: `--csv-out` or
+   * `--csv-out=./q4.csv` (specs/api/conventions.md § Export files). Presence is
+   * recorded in `booleans`, the value (when given) in `values`. A following
+   * token is never consumed.
+   */
+  optional?: string[];
   /** A targeted correction for a flag that doesn't exist but is a likely guess. */
   hints?: Record<string, string>;
   /** The command takes no `--account` (e.g. `doctor`), so errors don't offer it. */
@@ -39,6 +46,7 @@ const FLAG_SHAPED = /^--[A-Za-z][A-Za-z0-9-]*$/;
 export function parseArgs(args: string[], spec: FlagSpec, command: string): ParsedArgs {
   const valueFlags = new Set(spec.value ?? []);
   const booleanFlags = new Set(spec.boolean ?? []);
+  const optionalFlags = new Set(spec.optional ?? []);
   const values: Record<string, string> = {};
   const lists: Record<string, string[]> = {};
   const booleans = new Set<string>();
@@ -51,9 +59,37 @@ export function parseArgs(args: string[], spec: FlagSpec, command: string): Pars
       positionals.push(arg);
       continue;
     }
-    if (booleanFlags.has(arg)) {
+    if (booleanFlags.has(arg) || optionalFlags.has(arg)) {
       booleans.add(arg);
       continue;
+    }
+    const eq = arg.indexOf("=");
+    if (eq > 2) {
+      const name = arg.slice(0, eq);
+      if (optionalFlags.has(name)) {
+        const value = arg.slice(eq + 1);
+        if (value === "") {
+          throw new AxiError(`${name}= needs a path after the =`, "VALIDATION_ERROR", [
+            `Pass ${name} alone for an auto-generated path, or ${name}=<path>`,
+            `Run \`gws-axi ${command} --help\` for usage`,
+          ]);
+        }
+        booleans.add(name);
+        values[name] = value;
+        (lists[name] ??= []).push(value);
+        continue;
+      }
+      // `--range=B2`: only optional-value flags take `=`, so the two forms are
+      // never confused (specs/api/conventions.md § Export files).
+      if (valueFlags.has(name) || booleanFlags.has(name)) {
+        throw new AxiError(
+          valueFlags.has(name)
+            ? `${name} takes its value as the next argument, not with =: ${name} ${arg.slice(eq + 1)}`
+            : `${name} takes no value`,
+          "VALIDATION_ERROR",
+          [`Run \`gws-axi ${command} --help\` for usage`],
+        );
+      }
     }
     if (valueFlags.has(arg)) {
       const next = args[i + 1];
@@ -68,7 +104,13 @@ export function parseArgs(args: string[], spec: FlagSpec, command: string): Pars
       i++;
       continue;
     }
-    const valid = [...valueFlags, ...booleanFlags].filter((f) => f !== "--account").sort();
+    const valid = [
+      ...valueFlags,
+      ...booleanFlags,
+      ...[...optionalFlags].map((f) => `${f}[=<path>]`),
+    ]
+      .filter((f) => f !== "--account")
+      .sort();
     const hint = spec.hints?.[arg];
     const always = spec.noAccount ? "(--help always allowed)" : "--account (--help always allowed)";
     throw new AxiError(`Unknown flag ${arg} for \`${command}\``, "VALIDATION_ERROR", [

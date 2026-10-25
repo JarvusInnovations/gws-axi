@@ -98,3 +98,54 @@ describe("parseChoice / parseChoices", () => {
     expect(errorFrom(() => parseChoices("--fields", "dm,nope", kinds)).message).toContain("nope");
   });
 });
+
+describe("parseArgs optional-value flags", () => {
+  const OUT = { value: ["--range"], boolean: ["--full"], optional: ["--csv-out", "--json-out"] };
+
+  it("records a bare optional flag as present with no value", () => {
+    const parsed = parseArgs(["1AbC", "--csv-out"], OUT, "sheets query");
+    expect(parsed.booleans.has("--csv-out")).toBe(true);
+    expect(parsed.values["--csv-out"]).toBeUndefined();
+  });
+
+  it("takes the value after =", () => {
+    const parsed = parseArgs(["--csv-out=./x.csv"], OUT, "sheets query");
+    expect(parsed.booleans.has("--csv-out")).toBe(true);
+    expect(parsed.values["--csv-out"]).toBe("./x.csv");
+  });
+
+  it("keeps an = inside the path", () => {
+    expect(parseArgs(["--json-out=a=b.json"], OUT, "x").values["--json-out"]).toBe("a=b.json");
+  });
+
+  it("never consumes a following path-looking token", () => {
+    const parsed = parseArgs(["--csv-out", "./x.csv"], OUT, "sheets query");
+    expect(parsed.values["--csv-out"]).toBeUndefined();
+    expect(parsed.positionals).toEqual(["./x.csv"]);
+  });
+
+  it("refuses = on a value flag, so the two forms are not confused", () => {
+    const err = errorFrom(() => parseArgs(["--range=B2"], OUT, "sheets read"));
+    expect(err.code).toBe("VALIDATION_ERROR");
+    expect(err.message).toContain("--range B2");
+  });
+
+  it("refuses = on a boolean flag", () => {
+    expect(errorFrom(() => parseArgs(["--full=yes"], OUT, "sheets read")).message).toContain(
+      "--full takes no value",
+    );
+  });
+
+  it("refuses an empty value after =", () => {
+    expect(errorFrom(() => parseArgs(["--csv-out="], OUT, "x")).code).toBe("VALIDATION_ERROR");
+  });
+
+  it("lists optional flags with their [=<path>] form among the valid flags", () => {
+    const err = errorFrom(() => parseArgs(["--cvs-out"], OUT, "sheets query"));
+    expect(err.suggestions.join(" ")).toContain("--csv-out[=<path>]");
+  });
+
+  it("still refuses an unknown --name=value", () => {
+    expect(errorFrom(() => parseArgs(["--nope=1"], OUT, "x")).message).toContain("Unknown flag");
+  });
+});
