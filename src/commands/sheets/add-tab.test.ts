@@ -63,7 +63,7 @@ describe("add-tab rollback", () => {
       async () => {
         deleted = true;
       },
-      { spreadsheetId: "1AbC", gid: 9, title: "C" },
+      { spreadsheetId: "1AbC", gid: 9, title: "C", account: "alice@example.com" },
       cause,
     );
     expect(deleted).toBe(true);
@@ -75,7 +75,7 @@ describe("add-tab rollback", () => {
       async () => {
         throw new Error("boom");
       },
-      { spreadsheetId: "1AbC", gid: 9, title: "C" },
+      { spreadsheetId: "1AbC", gid: 9, title: "C", account: "alice@example.com" },
       cause,
     );
     expect(e.code).toBe("WRITE_INCOMPLETE");
@@ -86,6 +86,11 @@ describe("add-tab rollback", () => {
 describe("create flags", () => {
   it("collects repeated --tab titles in order", () => {
     expect(parseCreateFlags(["--title", "T", "--tab", "A", "--tab", "B"]).tabs).toEqual(["A", "B"]);
+  });
+  it("compares tab titles ignoring case, as upstream does", () => {
+    expect(
+      codeOf(() => parseCreateFlags(["--title", "T", "--tab", "Costs", "--tab", "costs"])),
+    ).toBe("VALIDATION_ERROR");
   });
   it("refuses duplicate tab titles, a missing --title and --header with no block", () => {
     expect(codeOf(() => parseCreateFlags(["--title", "T", "--tab", "A", "--tab", "A"]))).toBe(

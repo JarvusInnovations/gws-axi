@@ -1,5 +1,5 @@
 import { AxiError } from "axi-sdk-js";
-import { sheetsClient } from "../../google/client.js";
+import { sheetsClient, translateGoogleError } from "../../google/client.js";
 import { joinBlocks, renderHelp, renderObject } from "../../output/index.js";
 import { type FlagSpec, parseArgs } from "../../util/flags.js";
 import { checkOneSource, takeStdin } from "../../util/source.js";
@@ -11,6 +11,7 @@ import {
   findTab,
   renderTabs,
   shellArg,
+  duplicateTitle,
   tabNotFound,
   translateWriteError,
 } from "./shared.js";
@@ -162,7 +163,17 @@ export async function sheetsAddTabCommand(account: string, args: string[]): Prom
   let meta = await fetchMeta(api, account, flags.spreadsheetId);
   const id = meta.id;
 
-  const existing = meta.tabs.find((t) => t.title === flags.title);
+  // Titles are unique case-insensitively, across every sheet (observed).
+  const same = (t: string) => t.toLowerCase() === flags.title.toLowerCase();
+  const chart = meta.otherTitles.find(same);
+  if (chart !== undefined) {
+    throw new AxiError(
+      `'${chart}' is a chart sheet, and tab titles are unique (ignoring case) — there is no grid to write into`,
+      "VALIDATION_ERROR",
+      ["Pick another --title", "Nothing was added"],
+    );
+  }
+  const existing = meta.tabs.find((t) => same(t.title));
   if (existing) {
     const tabArg = shellArg(existing.title);
     return joinBlocks(
@@ -185,19 +196,23 @@ export async function sheetsAddTabCommand(account: string, args: string[]): Prom
     });
     gid = res.data.replies?.[0]?.addSheet?.properties?.sheetId as number;
   } catch (err) {
-    throw translateWriteError(err, {
-      account,
-      operation: "sheets.spreadsheets.batchUpdate(addSheet)",
-      spreadsheetId: id,
-      range: flags.title,
-    });
+    throw (
+      duplicateTitle(err, flags.title) ??
+      translateWriteError(err, {
+        account,
+        operation: "sheets.spreadsheets.batchUpdate(addSheet)",
+        spreadsheetId: id,
+        range: flags.title,
+      })
+    );
   }
 
   let seed: { plan: WritePlan; outcome: WriteOutcome } | undefined;
   if (rows) {
-    meta = await fetchMeta(api, account, id);
-    const tab = meta.tabs.find((t) => t.gid === gid) as TabInfo;
     try {
+      // Inside the try: a failure anywhere after addSheet must roll the tab back.
+      meta = await fetchMeta(api, account, id);
+      const tab = meta.tabs.find((t) => t.gid === gid) as TabInfo;
       seed = await seedTab({ api, account, meta, tab }, rows, {
         raw: flags.raw,
         header: flags.header,
@@ -210,7 +225,7 @@ export async function sheetsAddTabCommand(account: string, args: string[]): Prom
             requestBody: { requests: [{ deleteSheet: { sheetId: gid } }] },
           });
         },
-        { spreadsheetId: id, gid, title: flags.title },
+        { spreadsheetId: id, gid, title: flags.title, account },
         err,
       );
     }
@@ -248,26 +263,29 @@ export async function sheetsAddTabCommand(account: string, args: string[]): Prom
  */
 export async function rollBack(
   deleteTab: () => Promise<void>,
-  tab: { spreadsheetId: string; gid: number; title: string },
+  tab: { spreadsheetId: string; gid: number; title: string; account: string },
   cause: unknown,
 ): Promise<AxiError> {
   const { spreadsheetId, gid, title } = tab;
-  const why = cause instanceof AxiError ? cause : undefined;
+  const why =
+    cause instanceof AxiError
+      ? cause
+      : translateGoogleError(cause, { account: tab.account, operation: "sheets seed write" });
   try {
     await deleteTab();
   } catch {
     return new AxiError(
-      `The tab '${title}' (gid ${gid}) was added, but writing its values failed${why ? ` (${why.code}: ${why.message})` : ""} and the tab could not be deleted again`,
+      `The tab '${title}' (gid ${gid}) was added, but writing its values failed (${why.code}: ${why.message}) and the tab could not be deleted again`,
       "WRITE_INCOMPLETE",
       [
-        ...(why?.suggestions ?? []),
+        ...why.suggestions,
         `Remove the empty tab '${title}' (gid ${gid}) by hand in the editor, or write into it with \`gws-axi sheets update ${spreadsheetId} --tab ${shellArg(title)} --range A1 …\``,
       ],
     );
   }
   return new AxiError(
-    `${why?.message ?? String(cause)} — the new tab '${title}' was deleted again; the spreadsheet is as it was`,
-    why?.code ?? "WRITE_FAILED",
-    why?.suggestions ?? [],
+    `${why.message} — the new tab '${title}' was deleted again; the spreadsheet is as it was`,
+    why.code,
+    why.suggestions,
   );
 }

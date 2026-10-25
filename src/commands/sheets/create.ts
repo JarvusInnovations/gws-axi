@@ -3,7 +3,15 @@ import { driveClient, sheetsClient, translateGoogleError } from "../../google/cl
 import { joinBlocks, renderHelp, renderObject } from "../../output/index.js";
 import { type FlagSpec, parseArgs } from "../../util/flags.js";
 import { checkOneSource, takeStdin } from "../../util/source.js";
-import { type SpreadsheetMeta, type TabInfo, fetchMeta, renderTabs, shellArg } from "./shared.js";
+import {
+  type SpreadsheetMeta,
+  type TabInfo,
+  fetchMeta,
+  renderTabs,
+  shellArg,
+  duplicateTitle,
+  translateWriteError,
+} from "./shared.js";
 import type { Block } from "./values.js";
 import {
   type BlockFlags,
@@ -80,16 +88,17 @@ export interface CreateFlags extends BlockFlags {
 
 /** Refuse a repeated title in a list of new tabs, before any call. */
 export function checkDistinctTitles(titles: string[]): void {
+  // Upstream compares titles ignoring case (observed), so the list does too.
   const seen = new Set<string>();
   for (const t of titles) {
-    if (seen.has(t)) {
+    if (seen.has(t.toLowerCase())) {
       throw new AxiError(
-        `--tab '${t}' is given twice — tab titles are unique`,
+        `--tab '${t}' is given twice — tab titles are unique, ignoring case`,
         "VALIDATION_ERROR",
         ["Give each tab title once", "Nothing was created"],
       );
     }
-    seen.add(t);
+    seen.add(t.toLowerCase());
   }
 }
 
@@ -182,7 +191,7 @@ export function seedHelp(
 }
 
 function incomplete(id: string, step: string, err: unknown): AxiError {
-  const cause = err instanceof AxiError ? `${err.code}: ${err.message}` : String(err);
+  const cause = err instanceof AxiError ? `${err.code}: ${err.message}` : (err as Error)?.message;
   return new AxiError(
     `The spreadsheet ${id} was created, but ${step} failed — ${cause}`,
     "WRITE_INCOMPLETE",
@@ -252,7 +261,17 @@ export async function sheetsCreateCommand(account: string, args: string[]): Prom
       meta = await fetchMeta(api, account, id);
     }
   } catch (err) {
-    throw incomplete(id, "naming its tabs", err);
+    const translated =
+      err instanceof AxiError
+        ? err
+        : (duplicateTitle(err, flags.tabs.join(", ")) ??
+          translateWriteError(err, {
+            account,
+            operation: "sheets.spreadsheets.batchUpdate(addSheet)",
+            spreadsheetId: id,
+            range: flags.tabs.join(", "),
+          }));
+    throw incomplete(id, "naming its tabs", translated);
   }
   const firstTab = meta.tabs[0];
   try {
