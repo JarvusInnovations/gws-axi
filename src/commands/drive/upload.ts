@@ -29,6 +29,8 @@ const TAB_CONTAINERS: Record<
     singular: string;
     plural: string;
     readCommand: string;
+    /** The command that writes one tab / sheet without touching the others. */
+    tabSafe: (fileId: string) => string;
     list: (account: string, fileId: string) => Promise<TabSummary[]>;
   }
 > = {
@@ -37,6 +39,8 @@ const TAB_CONTAINERS: Record<
     singular: "tab",
     plural: "tabs",
     readCommand: "docs read",
+    tabSafe: (id) =>
+      `To change one tab, write Markdown into it: \`gws-axi docs write ${id} <file.md> --tab <tabId>\` — the other tabs stay as they are`,
     list: listDocumentTabs,
   },
   [GOOGLE_SHEET_MIME]: {
@@ -44,6 +48,8 @@ const TAB_CONTAINERS: Record<
     singular: "sheet",
     plural: "sheets",
     readCommand: "sheets read",
+    tabSafe: (id) =>
+      `To change one sheet, write its values: \`gws-axi sheets update ${id} --tab <name> --range A1 <file.csv>\` — the other sheets, and every format, stay as they are`,
     list: listSpreadsheetSheets,
   },
 };
@@ -87,7 +93,9 @@ notes:
   --update replaces a Doc or Sheet WHOLESALE: it cannot target one tab of a
   multi-tab doc or one sheet of a multi-sheet spreadsheet, and the import
   leaves a single tab / sheet behind. Such targets are refused unless you
-  pass --replace-all-tabs.
+  pass --replace-all-tabs. To change one tab, \`gws-axi docs write --tab\`
+  writes Markdown into it; to change one sheet, \`gws-axi sheets update --tab\`
+  writes values into it (\`sheets create\` / \`sheets append\` for new ones).
 output:
   An \`action: created\` (or \`updated\`) line plus a \`file{...}\` object with
   id, name, mime_type, size_bytes, parents, revision_id (the revision this upload
@@ -368,7 +376,7 @@ export async function driveUploadCommand(account: string, args: string[]): Promi
             `${containerKind.plural[0].toUpperCase()}${containerKind.plural.slice(1)} that would be lost: ${titles}`,
             `Run \`gws-axi ${containerKind.readCommand} ${flags.update}\` to inspect them first`,
             `Pass --replace-all-tabs to proceed and collapse it to one ${containerKind.singular}`,
-            `Per-${containerKind.singular} writes aren't supported — Drive uploads replace a ${containerKind.noun} wholesale`,
+            containerKind.tabSafe(flags.update),
           ],
         );
       }
@@ -495,6 +503,16 @@ export async function driveUploadCommand(account: string, args: string[]): Promi
         `This Doc was built by Google's importer. \`gws-axi docs create\` / \`docs write\` write Markdown through gws-axi's own converter — the one \`docs read\` round-trips, with no gap above the first heading, and able to target one tab`,
       );
     }
+  } else if (
+    file.mimeType === GOOGLE_SHEET_MIME &&
+    targetMime &&
+    (sourceMime === "text/csv" || sourceMime === "text/tab-separated-values")
+  ) {
+    // The verb names the path (specs/commands/sheets-write.md): parity with the .md line.
+    suggestions.push(
+      `This Sheet was built by Google's importer. \`gws-axi sheets create\` / \`sheets update --tab\` write the values themselves — one tab at a time, formats untouched, with each formula's result read back`,
+    );
+    suggestions.push(`Run \`gws-axi sheets read ${id}\` to read it`);
   } else if ((file.mimeType ?? "").startsWith("application/vnd.google-apps.")) {
     suggestions.push(
       `Native Google file — run \`gws-axi docs download ${id} --as <mime>\` to export it`,
