@@ -1,5 +1,6 @@
 ---
-status: in-progress
+status: done
+pr: 140
 depends: []
 specs:
   - specs/commands/sheets-note.md
@@ -36,11 +37,11 @@ also touch `src/commands/sheets.ts`, README § Sheets and CLAUDE.md. Keep additi
 
 ## Validation
 
-- [ ] `bun run build`, `lint`, `format:check`, `test` pass.
-- [ ] Unit: flag rules (neither/both, empty `--text`, a range); the compare for set/clear/
+- [x] `bun run build`, `lint`, `format:check`, `test` pass.
+- [x] Unit: flag rules (neither/both, empty `--text`, a range); the compare for set/clear/
       unchanged.
-- [ ] Every "To verify live" row Observed (or amended) with a date.
-- [ ] Live: set a note → `sheets read` lists it in `notes[]` and `sheets cell` shows it;
+- [x] Every "To verify live" row Observed (or amended) with a date.
+- [x] Live: set a note → `sheets read` lists it in `notes[]` and `sheets cell` shows it;
       re-running is `unchanged`; `--text` with new text reports `before`; `--clear` clears and
       the undo line restores; the cell's value and number format are unchanged after.
 
@@ -51,8 +52,24 @@ also touch `src/commands/sheets.ts`, README § Sheets and CLAUDE.md. Keep additi
 
 ## Notes
 
-(At closeout.)
+- **Clear form**: both `note: ""` and the unset-with-mask form clear, and both leave no `note`
+  key on read-back. The command sends the unset form. The risk above is closed on API evidence;
+  how the editor shows a cleared note was not inspected.
+- **No length cap**: 50,000 to 2,000,000 characters all stored and read back whole, so there is
+  no local limit.
+- **Spec amendment**: a cell outside the tab's grid is `RANGE_INVALID`, checked locally from
+  the tab's size before the cell read (after the tab metadata, which supplies the size).
+- **Undo quoting**: a help line can't hold a newline, so a multi-line note's undo uses `$'…'`.
+  Running the printed line restored a two-line note exactly.
+- **Review round**: a note starting with `--` (`--- draft ---`) couldn't be set, and its undo
+  line was a broken command. Fixed in the shared `parseArgs`: after a value flag only a
+  flag-shaped token is a missing value (spec: `specs/api/conventions.md` § Unknown flags).
+  Live-checked: `--- draft ---` set, cleared and restored by its undo line; `--text --txet` is
+  still refused. Also added a handler test against a mocked client (request shape, nothing sent
+  on `unchanged`, grid bounds) and capped the undo line at 2,000 characters of previous note.
+- `PROTECTED_RANGE` needed no new code: the note write's 400 carries the same "protected cell
+  or object" phrase `translateWriteError` already matches.
 
 ## Follow-ups
 
-(At closeout.)
+None.
