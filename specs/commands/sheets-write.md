@@ -32,7 +32,7 @@ names the path, as it does for Docs.
 ## Invocation
 
 ```
-gws-axi sheets update  <spreadsheetId> (--range <A1> (<file> | - | --content <values>) | --cell <A1>=<value>... | --json --key <header> (<file> | - | --content <objects>) [--append-missing]) [--tab <name|gid>] [--json | --tsv] [--raw] [--header]
+gws-axi sheets update  <spreadsheetId> (--range <A1> (<file> | - | --content <values>) | --cell <A1>=<value>... | --json [--key <header>] (<file> | - | --content <objects>) [--append-missing]) [--tab <name|gid>] [--json | --tsv] [--raw] [--header]
 gws-axi sheets append  <spreadsheetId> (<file> | - | --content <values>) [--tab <name|gid>] [--json | --tsv] [--raw]
 gws-axi sheets clear   <spreadsheetId> (--range <A1> | --all) [--tab <name|gid>]
 gws-axi sheets create  --title <title> [<file> | - | --content <values>] [--tab <title>] [--parent <folderId>] [--json | --tsv] [--raw] [--header]
@@ -103,26 +103,36 @@ gws-axi sheets update <id> --tab Tasks --json --key Name --content '[{"Name":"Sh
 ```
 
 - `--key <header>` names the **label column**: the header cell whose column identifies a
-  row. Default: the header in column A. It must be a header cell (`COLUMN_NOT_FOUND`
-  otherwise).
-- Every object must carry the key (`VALIDATION_ERROR` naming the object's position
-  otherwise). The row whose key-column cell **displays** the object's key value (trimmed,
+  row. Default: the header in column A — a block of objects with neither `--range` nor
+  `--cell` is a keyed update, so `--key` is only needed for another column. It must be a
+  header cell (`COLUMN_NOT_FOUND` otherwise; an empty A1 under the default says to pass
+  `--key`).
+- Every object must carry the key, non-empty (`VALIDATION_ERROR` naming the object's
+  position otherwise). The key value is compared as text — a JSON number as its plain
+  decimal, a boolean as `TRUE`/`FALSE` — against what the cell **displays**, so a column
+  formatted `0001` matches `"0001"`, not `1`. The row whose key-column cell **displays** the object's key value (trimmed,
   case-sensitive, below the header row) is the target; the object's other keys name the
   cells to write in that row; headers the object does not name are untouched, as are the
   key cell itself and every other row.
 - No row matches → `ROW_NOT_FOUND` naming the key value and nothing is written — the whole
   block is checked before any call — unless `--append-missing`, in which case unmatched
-  objects are appended as new rows through the keyed `append` path after the matched ones
-  are written, and the response says which were which. Two or more rows match →
+  objects are appended as new rows, placed by the keyed `append` rule below (column A of
+  the row after the last row with data in the header's columns), and the response says
+  which were which. They ride the same `values.batchUpdate` as the matched cells, after
+  them — one pre-read, one write, one read-back and one error diff for the whole block —
+  rather than a second write with a second report. A block that writes no cell at all
+  (every object names only its key, and every one matched) is a `VALIDATION_ERROR`. Two or more rows match →
   `ROW_AMBIGUOUS` naming the row numbers; address one of them with `--range` instead.
 - The same key twice in the block is a `VALIDATION_ERROR`.
 - The write is the `--cell` path: every named cell goes in one `values.batchUpdate`, with
   the pre-read, `unchanged`, read-back, `formulas[]`, `written[]` and the error diff a
   scattered-cell write gets. `--range`, a grid block, `--header` and `--cell` cannot be
   combined with `--key` (`VALIDATION_ERROR`).
-- The response adds `rows[N]{key,row,cells,action}` — which row each object matched, how
-  many cells it wrote, and `updated` or (with `--append-missing`) `appended` — so the match
-  is visible.
+- The response adds `rows[N]{key,row,cells,action}` after the summary — which row each
+  object matched, how many cells it names besides its key (`null`s excluded), and
+  `updated`, `unchanged` (the row already held every value) or (with `--append-missing`)
+  `appended` — so the match is visible. The header's `action` is `updated` when any cell
+  was written, `unchanged` when none was.
 
 This is the Sheets analog of [docs edit-cell](docs-edit-cell.md): a tracker humans also
 edit gets one row touched, by its label, with its formats and the other rows left alone.
@@ -466,7 +476,7 @@ sees one vocabulary.
 
 | Code | When |
 | --- | --- |
-| `VALIDATION_ERROR` | Source rules broken; both/neither of `--range`/`--all` on `clear`; `--tab` disagreeing with a qualified range; block larger than the range; empty block on `update`/`append`; `--cell` with any other source or `--range`, the same cell twice, or a `--cell` with no `=`; `--header` on an `update` whose range does not start at row 1; `--json` objects on `update` without `--key`; `--key` with `--range`, `--cell`, `--header` or a grid block; an object without its key; the same key twice; malformed CSV (unterminated quote, with the line), malformed or non-2-D JSON; conflicting placement flags; duplicate `--tab` titles on `create`; `--json` with `--tsv` |
+| `VALIDATION_ERROR` | Source rules broken; both/neither of `--range`/`--all` on `clear`; `--tab` disagreeing with a qualified range; block larger than the range; empty block on `update`/`append`; `--cell` with any other source or `--range`, the same cell twice, or a `--cell` with no `=`; `--header` on an `update` whose range does not start at row 1; `--json` objects on `update` with `--range`; `--key` or `--append-missing` with `--range`, `--cell`, `--header`, without `--json`, or with a grid block; an object without its key, or with an empty one; the same key twice; a keyed block that writes no cell; malformed CSV (unterminated quote, with the line), malformed or non-2-D JSON; conflicting placement flags; duplicate `--tab` titles on `create`; `--json` with `--tsv` |
 | `LOCAL_FILE_NOT_FOUND`, `LOCAL_PATH_NOT_FILE` | As `drive upload` |
 | `SPREADSHEET_NOT_FOUND` | Absent, no access, or not a native spreadsheet — as `sheets read`, including the `drive upload --convert` redirect for an uploaded `.xlsx` |
 | `TAB_REQUIRED` | Multi-tab spreadsheet, no tab named; carries the listing |
