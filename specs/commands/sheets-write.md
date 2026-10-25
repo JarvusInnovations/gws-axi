@@ -23,14 +23,20 @@ No new scope: the `spreadsheets` grant `sheets read` already requires authorizes
 `spreadsheets.values.*`, `spreadsheets.create` and `spreadsheets.batchUpdate`; `drive` covers
 `--parent` on `create`. Accounts that re-authed for `sheets read` need nothing further.
 
+**Two ways in from CSV.** `drive upload x.csv --convert` hands the file to Google's importer and
+returns a Drive file; `sheets create --title T x.csv` writes the rows itself through
+`values.update` and returns the tab's `gid`, its listing, and the read-back below. Use `drive
+upload` to park a file; use `sheets create` when the next step is to edit or read it — the verb
+names the path, as it does for Docs.
+
 ## Invocation
 
 ```
-gws-axi sheets update  <spreadsheetId> --range <A1> (<file> | - | --content <values>) [--tab <name|gid>] [--json | --tsv] [--raw]
+gws-axi sheets update  <spreadsheetId> (--range <A1> (<file> | - | --content <values>) | --cell <A1>=<value>...) [--tab <name|gid>] [--json | --tsv] [--raw] [--header]
 gws-axi sheets append  <spreadsheetId> (<file> | - | --content <values>) [--tab <name|gid>] [--json | --tsv] [--raw]
 gws-axi sheets clear   <spreadsheetId> (--range <A1> | --all) [--tab <name|gid>]
-gws-axi sheets create  --title <title> [<file> | - | --content <values>] [--tab <title>] [--parent <folderId>] [--json | --tsv] [--raw]
-gws-axi sheets add-tab <spreadsheetId> --title <title> [<file> | - | --content <values>] [--first | --last | --before <tab> | --after <tab>] [--json | --tsv] [--raw]
+gws-axi sheets create  --title <title> [<file> | - | --content <values>] [--tab <title>] [--parent <folderId>] [--json | --tsv] [--raw] [--header]
+gws-axi sheets add-tab <spreadsheetId> --title <title> [<file> | - | --content <values>] [--first | --last | --before <tab> | --after <tab>] [--json | --tsv] [--raw] [--header]
 ```
 
 Every command takes `--account <email>`, REQUIRED when 2+ accounts are authenticated
@@ -52,7 +58,8 @@ The block is a grid of rows. Two encodings, chosen by flag, never by sniffing:
   there. There is no way to skip a cell in CSV.
 - **JSON (`--json`)** — a 2-D array of rows. Strings, numbers and booleans are written as
   typed values; **`null` leaves that cell untouched**; `""` clears it. A one-dimensional array
-  is a `VALIDATION_ERROR` naming the shape (a single row is `[[…]]`). Anything else that is not
+  is a `VALIDATION_ERROR` naming the shape (a single row is `[[…]]`). For `append` only, an
+  array of **objects** keyed by header title is also a block — see Header-keyed rows. Anything else that is not
   a string, number, boolean or null (an object, a nested array) is a `VALIDATION_ERROR` naming
   the cell.
 
@@ -74,6 +81,50 @@ boolean, `42` a number. `--raw` stores every string **verbatim** — `=SUM(...)`
 only mode that writes a formula. The hazard — a value that looks like a date or number and was
 meant as text (`1/2`, a zip code with a leading zero) — is disclosed by a standing `help[]`
 line naming `--raw`, and the typed-JSON encoding sidesteps it for numbers.
+
+### Header-keyed rows (`append`)
+
+With `--json`, `append` accepts `[{"Name": "…", "Status": "…"}, …]`: each object is one row,
+each key a column named by the tab's **header row** — row 1 of the tab, the row `sheets read`
+promotes to `rows[N]{…}`. Keys are matched to header cells exactly (trimmed, case-sensitive); a
+key that names no header cell is `COLUMN_NOT_FOUND` listing the headers, before any write. A
+header cell that no object names gets `null` — the column is left untouched in the appended
+row. The tab's row 1 must have at least one non-empty cell (`HEADER_REQUIRED` otherwise).
+Whether row 1 is frozen does not matter here; `--header` is how to make it so.
+
+The read's `rows[N]{…}` shape invites this: an agent that read `rows[N]{Name,Status,Owner}`
+appends `{"Name": …}` without knowing which letter `Owner` is.
+
+### Single cells (`update --cell`)
+
+`--cell <A1>=<value>`, repeatable, writes scattered cells in one call: `--cell B5=4800 --cell
+C9=3 --cell D2='=B2*C2'`. Everything before the first `=` is the cell (optionally tab-qualified;
+all must name the same tab), everything after it is the value — so a formula keeps its own
+`=`. `--cell` is the whole block: it cannot be combined with `--range`, a file, `-` or
+`--content` (`VALIDATION_ERROR`). The same cell twice is a `VALIDATION_ERROR`. Values are
+strings in the chosen input mode; `--json` does not apply.
+
+All cells go in one `values.batchUpdate`; the pre-read and the read-back fetch every named
+cell in one `spreadsheets.get` with one `ranges` entry per cell. The response is the one
+`update` gives, with `range` listing the cells (`Sheet1!B5,C9,D2`) and `shape` omitted.
+
+### The header row (`--header`)
+
+`--header` declares the block's first row a header: after the values are written, the tab's
+**top row is frozen** (`updateSheetProperties` with `gridProperties.frozenRowCount: 1`, fields
+mask `gridProperties.frozenRowCount`) — the exact property `sheets read` detects to promote
+row 1 to column names, so a `--header` write and a read round-trip through `rows[N]{…}`. On
+`update` the range must start at row 1 (`VALIDATION_ERROR` otherwise: "the header is row 1;
+write it with `--range A1`"). Re-running is idempotent: a row already frozen is reported
+`header: frozen` with no request sent; a tab frozen at 2+ rows is left alone and the response
+says so (`header: frozen (2 rows, unchanged)`), since lowering it would un-freeze rows the
+caller did not name.
+
+Freezing is the only thing `--header` does. It sets no bold, fill or border: a frozen row is
+Sheets' own notion of a header and the one the read understands, and formatting is
+something these commands do not touch unless a flag names it. Changing a header's *text* is
+an ordinary write to row 1 (`update --range C1 --content Owner`, or `--cell C1=Owner`); the
+freeze survives it.
 
 ### Choosing the tab
 
@@ -124,10 +175,17 @@ The response says `grid: grown to <rows>×<cols>` when it happened.
    costs a harmless re-write; a false "unchanged" would leave the sheet wrong.
 3. **Nothing changed** → `action: unchanged`, no write, exit 0.
 4. **Write**: grow the grid if needed, then one `spreadsheets.values.update` of the block at
-   the range with the chosen `valueInputOption`.
+   the range (`values.batchUpdate` for `--cell`) with the chosen `valueInputOption`; then
+   the freeze when `--header` asks for it.
+5. **Read back**: one `spreadsheets.get` on the written range with `formattedValue`,
+   `userEnteredValue` and `effectiveValue` — what Sheets made of the input. This is where a
+   formula shows its result or its error, and where `1/2` shows up as a date. One extra
+   call so the caller does not need a `sheets read` to learn whether the write did what it
+   meant to ([AXI §4](https://axi.md): the follow-up call is the expensive token cost).
 
 Formatting, data validation, notes, and the other cells of the tab are never touched; the
-only requests sent are the values call and, when needed, the grid growth.
+only requests sent are the values call, the grid growth when needed, and the freeze when
+asked for. `append`, `create` and `add-tab` read back the same way.
 
 ### `append`
 
@@ -195,12 +253,13 @@ shape: 3x3
 cells: 9
 changed: 4
 input: user-entered
-overwritten[3]{cell,before,after}:
-  B2,"$4,200",4800
-  C3,pending,done
-  D4,,2026-10-24
+written[4]{cell,before,input,now}:
+  B2,"$4,200",4800,"$4,800"
+  C3,pending,done,done
+  D2,,=B2*C2,"$9,600"
+  D4,,1/2,1/2/2026
 help[3]:
-  Run `gws-axi sheets read 1AbC… --tab Costs --range B2:D4` to read the range back
+  Run `gws-axi sheets read 1AbC… --tab Costs --range B2:D4 --formulas` to see the range with its formulas
   Run `gws-axi drive revisions 1AbC…` for the version history; the pre-write version is the newest revision before this one
   Values were parsed as typed (USER_ENTERED): dates, numbers, currencies and =formulas take effect. Pass --raw to store strings verbatim
 ```
@@ -212,14 +271,23 @@ help[3]:
 - `shape`, `cells` — the block's rows×columns and the number of cells it carried (`null`
   cells excluded). `changed` — cells whose value differs after the write (`update` only).
 - `grid: grown to <rows>×<cols>` — only when the tab was enlarged.
-- `overwritten[N]{cell,before,after}` — every cell that **had a value** and received a
-  different one, with `before` as the entered text (`FORMULA` render, so a formula shows as
-  its formula) and `after` as the input text. Capped at 50 rows with the usual truncation
-  marker; past the cap the header carries `overwritten_total` and `help[]` points at
-  `drive revisions`. Cells that were empty are not listed — the block itself is the record
-  of what went in. `clear` lists the cleared cells the same way with `after` empty. This is
-  the undo line: the previous values are in the response, not behind a re-query
+- `written[N]{cell,before,input,now}` — the cells worth a second look after the write:
+  every cell that **had a value** and received a different one (`before` is its previous
+  entered text — a formula shows as its formula), and every cell whose **displayed value
+  differs from the input** (`now` is the read-back `formattedValue`: a formula's result, a
+  parsed date, a currency). A cell that was empty and now displays exactly what was typed
+  is not listed — the block is the record of it. Capped at 50 rows; past the cap the header
+  carries `written_total`. `clear` lists the cleared cells with `input` and `now` empty. This
+  is the undo line *and* the verification: the previous values and what Sheets made of the
+  new ones are in the response, not behind a re-query
   ([provenance-by-default](../principles.md#provenance-by-default) applied to a write).
+- `errors[N]{cell,error,message}` — every written cell whose read-back is an error value
+  (`#REF!`, `#NAME?`, `#DIV/0!`, …) with Sheets' own message (`effectiveValue.errorValue`).
+  Shown only when there are any; the header then carries `errors: N` and the first `help[]`
+  line names the first one. The write still succeeded — the formula is stored — so this is
+  `action: updated` with a loud result, not a failure.
+- `header: frozen` — with `--header`; `frozen (N rows, unchanged)` when the tab already had a
+  taller freeze.
 - `create` and `add-tab` end with the `sheets[N]{gid,title,index,rows,cols}` listing from
   `sheets read`, so the structure is confirmed without a read.
 
@@ -229,8 +297,12 @@ help[3]:
   `create`/`add-tab`, `sheets read <id> --tab <tab>`.
 - Undo: `drive revisions <id>` — Sheets exposes no revision id to the API, so the suggestion
   names the version history rather than a specific revision.
+- When `errors[]` is non-empty, first: "N written cell(s) show a formula error — see errors[]".
 - The input-mode line (above), on every `USER_ENTERED` write; under `--raw`, the converse
-  (`=…` was stored as text).
+  (`=…` was stored as text). When any `written[]` row has `now` differing from `input` without
+  being a formula, the line names one (`D4: 1/2 became 1/2/2026; --raw stores it as text`).
+- When the block has 2+ columns, was written at row 1, and `--header` was not given: one line
+  showing the `--header` form, so the agent learns that the read promotes a frozen row.
 - `append`: "re-running appends the same rows again".
 - `update` with a block smaller than a given range: "N cells of the range were left as they
   were; `sheets clear` empties them".
@@ -241,12 +313,14 @@ help[3]:
 
 | Code | When |
 | --- | --- |
-| `VALIDATION_ERROR` | Source rules broken; both/neither of `--range`/`--all` on `clear`; `--tab` disagreeing with a qualified range; block larger than the range; empty block on `update`/`append`; malformed CSV (unterminated quote, with the line), malformed or non-2-D JSON; conflicting placement flags; duplicate `--tab` titles on `create`; `--json` with `--tsv` |
+| `VALIDATION_ERROR` | Source rules broken; both/neither of `--range`/`--all` on `clear`; `--tab` disagreeing with a qualified range; block larger than the range; empty block on `update`/`append`; `--cell` with any other source or `--range`, the same cell twice, or a `--cell` with no `=`; `--header` on an `update` whose range does not start at row 1; `--json` objects outside `append`; malformed CSV (unterminated quote, with the line), malformed or non-2-D JSON; conflicting placement flags; duplicate `--tab` titles on `create`; `--json` with `--tsv` |
 | `LOCAL_FILE_NOT_FOUND`, `LOCAL_PATH_NOT_FILE` | As `drive upload` |
 | `SPREADSHEET_NOT_FOUND` | Absent, no access, or not a native spreadsheet — as `sheets read`, including the `drive upload --convert` redirect for an uploaded `.xlsx` |
 | `TAB_REQUIRED` | Multi-tab spreadsheet, no tab named; carries the listing |
 | `TAB_NOT_FOUND` | `--tab`, a qualified range, or a placement anchor names no grid tab; carries the listing |
-| `RANGE_INVALID` | Upstream rejected the A1 reference (translated from the 400) |
+| `RANGE_INVALID` | Upstream rejected the A1 reference (translated from the 400), or a `--cell` whose A1 part does not parse |
+| `COLUMN_NOT_FOUND` | Header-keyed `append`: an object key names no cell in the tab's row 1; lists the header cells |
+| `HEADER_REQUIRED` | Header-keyed `append` on a tab whose row 1 is empty |
 | `PROTECTED_RANGE` | Upstream refused the write because the range is protected for this account; names the range and that an editor of the sheet must unprotect it or write it |
 | `FILE_NOT_FOUND` | `--parent` folder absent or inaccessible (`create`) |
 | `WRITE_INCOMPLETE` | `add-tab`: the tab was added but the value write failed and the tab could not be deleted again; names the tab so it can be removed by hand. `create`: the spreadsheet exists but the tabs or values did not all apply; names the id |
@@ -268,6 +342,9 @@ what makes a collision visible after the fact.
 | `values.clear` keeps formatting, notes and validation | Documented ("only values are cleared"). **To verify live** |
 | `addSheet` with a duplicate title is refused (400) and adds nothing | Documented. **To verify live** — the `exists` path is computed from the pre-read, not from the 400 |
 | A protected range refuses `values.update` with a 403 naming the protection | Documented. **To verify live** for the message `PROTECTED_RANGE` is classified from |
+| `updateSheetProperties` with `gridProperties.frozenRowCount` and that fields mask freezes the top rows and changes nothing else | Documented. **To verify live**, including that `sheets read` then auto-promotes |
+| A `spreadsheets.get` right after `values.update` returns computed formula results and `effectiveValue.errorValue` for broken ones (no "Loading…" state for ordinary formulas) | Expected from the API's synchronous recalculation. **To verify live**; `IMPORTRANGE`-class formulas may lag and are disclosed if so |
+| `values.batchUpdate` with one single-cell range per entry writes them all, or none on a bad range | Documented (atomic per request). **To verify live** |
 | Drive `files.create` with the spreadsheet MIME creates a spreadsheet whose first tab is `Sheet1` | **Observed** (the `drive upload --convert` path produces the same) |
 
 Each row flips to **Observed <date>** as the plan's live checks run; a contradicted row changes
@@ -282,17 +359,17 @@ and the `MULTI_TAB_TARGET` suggestions name `sheets update --tab` as the tab-saf
 
 ## Out of scope (v1)
 
-- **Header-keyed rows** — appending `{"Name": …, "Status": …}` objects mapped onto a header
-  row. The read's `rows[N]{…}` shape invites it; a follow-up once the positional block is in.
-- **Formatting, widths, validation, merges, freezes** — none of these commands sets any.
+- **Formatting, widths, validation, merges** — none of these commands sets any. The one
+  structural property they set is the top-row freeze, by `--header`.
 - **Cell notes** — `sheets read` surfaces them; writing one is a `batchUpdate`
   `updateCells` with a `note` field, deferred.
 - **Deleting, renaming, reordering tabs** — a `sheets tabs` group modeled on `docs tabs`.
 - **Inserting or deleting rows/columns in place** (shifting data) — `append` is the only
   structural write; `insertDimension`/`deleteDimension` are deferred.
-- **Batch writes to several ranges in one call** (`values.batchUpdate`) — one range per
-  invocation.
-- **Formulas on read** — `--formula` on `sheets read` (its own follow-up).
+- **Batch writes of several rectangular blocks** — `--cell` batches single cells; a block
+  per range in one call is not offered.
+- **Header-keyed `update`** — objects map onto appended rows only; a keyed update of an
+  existing row (by a label column, as `docs edit-cell` does) is a follow-up.
 
 ## Principles
 
@@ -324,8 +401,11 @@ and the `MULTI_TAB_TARGET` suggestions name `sheets update --tab` as the tab-saf
   > reset a column's format on its way through, would re-create the hazard at cell scale —
   > and against a sheet humans also format by hand, that is the hazard that matters.
 
-- **The previous value rides with the write.** Any command that replaces a cell's value
-  reports what was there. There is no revision id to point at, so the response is the undo.
+- **The previous value and the resulting value ride with the write.** Any command that
+  replaces a cell's value reports what was there, and any command that writes a value
+  reports what Sheets displays for it when that differs from what was sent. There is no
+  revision id to point at, so the response is the undo; and `USER_ENTERED` is an
+  interpretation, so the response is also the proof.
 
   > **Why:** Sheets' version history is the only rollback, and it is reachable only in the
   > editor. An agent that overwrote the wrong range needs the old values *in hand*, in the

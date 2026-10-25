@@ -3,6 +3,7 @@ status: planned
 depends: []
 specs:
   - specs/commands/sheets-write.md
+  - specs/commands/sheets-read.md
   - specs/commands/drive-upload.md
 ---
 
@@ -11,20 +12,26 @@ specs:
 ## Scope
 
 The five scaffolded `sheets` write stubs become real: the value-block grammar (CSV/TSV/JSON,
-input mode), the three range commands (`update`, `append`, `clear`) with the pre-read
-comparison, the `overwritten[]` undo block and grid growth, and the two structure commands
-(`create`, `add-tab`) that seed a new surface through the same write path. The `drive upload`
+header-keyed objects, input mode), the three range commands (`update` with `--range` or
+`--cell`, `append`, `clear`) with the pre-read comparison, the post-write read-back
+(`written[]`, `errors[]`), grid growth and the `--header` freeze, and the two structure
+commands (`create`, `add-tab`) that seed a new surface through the same write path. On the
+read side, `sheets read` gains `formulas[]` / `--formulas` and `errors[]` from the same
+`includeGridData` call it already makes. The `drive upload`
 CSV signposts turn around to point here, and `sheets --help` loses its `alternatives[]` block.
 
-**Out of scope** (issues, not plans): header-keyed rows for `append`; formatting, widths,
-validation, merges; cell notes; a `sheets tabs` group for rename/reorder/delete; row/column
-insertion that shifts data; multi-range batches; `--formula` on `sheets read`.
+**Out of scope** (issues, not plans): formatting, widths, validation, merges beyond the
+`--header` freeze; cell notes; a `sheets tabs` group for rename/reorder/delete; row/column
+insertion that shifts data; multi-block batches; header-keyed `update`.
 
 ## Implements
 
 - `specs/commands/sheets-write.md` — the whole spec: § The value block, § Input mode,
   § Choosing the tab, § The range, § Behavior (all five), § Output, § Errors, § Upstream
   behavior relied on, § Dispatcher.
+- `specs/commands/sheets-read.md` — § Flags (`--formulas`), § Data Requirements (the wider
+  fields mask), § Formulas, § Error values, the fidelity disclosure and the two new `help[]`
+  lines.
 - `specs/commands/drive-upload.md` — the `.csv`/`.tsv` help line and the Out-of-scope
   pointer to `sheets update` / `sheets append`.
 
@@ -39,8 +46,10 @@ Range commands first, structure commands on top of them; one branch, one PR.
 2. **Value block** (`src/commands/sheets/values.ts`): `parseCsv(text, sep)` — a small RFC 4180
    reader (quotes, doubled quotes, embedded newlines, CRLF; an unterminated quote is a
    `VALIDATION_ERROR` naming the line), no new dependency; `parseJsonGrid(text)` — 2-D array
-   check with per-cell type validation, `null` passthrough; `blockShape(rows)`. Pure,
-   unit-tested.
+   check with per-cell type validation, `null` passthrough, or (for `append`) an array of
+   objects plus `mapKeyedRows(objects, headerCells)` → grid with `null` gaps and
+   `COLUMN_NOT_FOUND`; `parseCellArgs(["B5=4800", …])` for `--cell`; `blockShape(rows)`.
+   Pure, unit-tested.
 3. **Source reading**: lift `readSource` and the one-source rule out of `docs/write.ts` into a
    shared helper (`src/util/source.ts`) and route `docs` through it too
    ([single-source-of-truth-helpers](../specs/principles.md#single-source-of-truth-helpers));
@@ -53,11 +62,16 @@ Range commands first, structure commands on top of them; one branch, one PR.
 5. **Pre-read** (`update`, `clear`): `spreadsheets.get` with `includeGridData`, the target
    range, and `fields=sheets(data(rowData(values(userEnteredValue,formattedValue))))`; the
    comparison from § Behavior as a pure `diffBlock(current, input, mode)` returning per-cell
-   `{cell, before, after, changed}`. Unit-tested on every kind × mode case the spec names.
+   `{cell, before, changed}`. Unit-tested on every kind × mode case the spec names. The same
+   fetch shape serves the **read-back** after the write (`formattedValue`, `effectiveValue`),
+   from which `written[]` (before ≠ input, or now ≠ input) and `errors[]` are built by a pure
+   `reportWrite(pre, input, post)`; `--cell` passes one `ranges` entry per cell to both.
 6. **Grid growth**: compare the block's extent against `gridProperties`; when larger, one
    `batchUpdate` `updateSheetProperties` (`gridProperties.rowCount/columnCount` with a fields
    mask) before the values call.
-7. **Range commands** (`src/commands/sheets/write.ts`): `update` → `values.update`; `append`
+7. **Range commands** (`src/commands/sheets/write.ts`): `update` → `values.update`
+   (`values.batchUpdate` with one `ValueRange` per `--cell`), then `updateSheetProperties`
+   `frozenRowCount: 1` for `--header` unless the pre-read already shows a freeze; `append`
    → `values.append` (`insertDataOption: INSERT_ROWS`, range = the quoted tab title), parse
    `updates.updatedRange` for the response; `clear` → `values.clear`. Output per § Output
    through `renderObject`/`renderList`; `overwritten[]` capped at 50 with `overwritten_total`.
@@ -73,7 +87,11 @@ Range commands first, structure commands on top of them; one branch, one PR.
    placement → `index` per the spec's arithmetic; `addSheet`; seed write; on seed failure
    `deleteSheet` then rethrow, `WRITE_INCOMPLETE` if the delete also fails. The listing
    renderer from `read.ts` closes the response.
-10. **Dispatcher** (`sheets.ts`): the five entries get `flags: "self"` and handlers, and lose
+10. **Read side** (`src/commands/sheets/read.ts`): widen the fields mask; `extractGrid` keeps
+    `formula` and `error` per cell; `formulas[]` (cap 20, `formulas_total`), `errors[]` (cap
+    50), `--formulas` swaps the rendered value; the two `help[]` lines. Unit tests on fixtures
+    with a formula cell, an error cell and both.
+11. **Dispatcher** (`sheets.ts`): the five entries get `flags: "self"` and handlers, and lose
     `instead`; `REPLACE_WHOLESALE` / `CREATE_VIA_UPLOAD` go away (the `renderAlternatives`
     call stays — it renders nothing when no stub remains). `drive upload`: the CSV/TSV line +
     the `MULTI_TAB_TARGET` suggestion. Help text, `flag-declarations` test, README § Sheets,
@@ -85,7 +103,9 @@ Range commands first, structure commands on top of them; one branch, one PR.
 - [ ] Unit: CSV reader on quoted commas, doubled quotes, embedded newlines, CRLF, ragged rows,
       unterminated quote; JSON grid on typed cells, `null`, 1-D input, nested objects.
 - [ ] Unit: `diffBlock` — string/number/bool/formula vs each stored kind under both modes;
-      the "unsure → changed" cases.
+      the "unsure → changed" cases; `reportWrite` on before≠input, now≠input, error cells,
+      and the omitted "empty before, now = input" case; `parseCellArgs` on `=`-bearing values,
+      duplicates, tab-qualified cells; `mapKeyedRows` on missing and unknown keys.
 - [ ] Unit: range fit — anchor cell, bounding range too small, `B:B`, `3:3`; grid-growth
       arithmetic; placement index for `--first`/`--last`/`--before`/`--after`; conflicting
       placement flags and duplicate `--tab` titles refused.
@@ -95,7 +115,21 @@ Range commands first, structure commands on top of them; one branch, one PR.
       number formats, a column width and a data-validation rule are identical before/after
       (`includeGridData` diff).
 - [ ] Live: re-running the same `update` is `action: unchanged` with no values call; a
-      changed cell reports `changed: 1` and the `overwritten[]` row with the previous value.
+      changed cell reports `changed: 1` and a `written[]` row with the previous value.
+- [ ] Live: writing `=B2*C2` reports the computed result in `written[].now`; writing
+      `=Cost!B2` on a tab with no `Cost` reports it in `errors[]` with Sheets' message and
+      `action: updated`; writing `1/2` reports `now: 1/2/<year>` and the hazard help line.
+- [ ] Live: `--cell B5=4800 --cell C9=3 --cell D2='=B2*C2'` writes all three in one
+      `values.batchUpdate` with one pre-read and one read-back; a bad cell ref writes nothing.
+- [ ] Live: `create … --header` freezes row 1; `sheets read` then auto-promotes
+      (`header_source: frozen-row`); re-running `update --range A1 … --header` sends no freeze;
+      a tab frozen at 2 rows reports `frozen (2 rows, unchanged)`.
+- [ ] Live: header-keyed `append --json '[{"Name":"x","Status":"done"}]'` lands the values
+      under those header cells and leaves the unnamed columns empty; an unknown key is
+      `COLUMN_NOT_FOUND` listing the headers.
+- [ ] Live: `sheets read` on the tab lists `formulas[N]{cell,formula}` with the formulas as
+      entered, `--formulas` renders them in the grid, and a broken formula appears in
+      `errors[]` with the count as the first `help[]` line.
 - [ ] Live: a block wider than the tab grows the grid and reports `grid:`; the same block
       without growth is what upstream refuses.
 - [ ] Live: `append` lands after the last data row and `range:` matches where the rows

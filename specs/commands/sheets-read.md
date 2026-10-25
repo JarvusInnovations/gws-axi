@@ -18,12 +18,15 @@ Operates only on native Google Sheets. Uploaded `.xlsx`/`.csv` files (Drive file
 - `--raw` — force the A1 column-letter grid, overriding header auto-detection. Mutually exclusive with `--header-row`.
 - `--full` — don't cap the number of rendered rows (default cap: 50). `--range` and `--full` compose.
 - `--max-rows <n>` — override the default 50-row render cap (ignored under `--full`).
+- `--formulas` — render each formula cell as its **formula** (`=B2*C2`) in place of its displayed
+  value. Non-formula cells are unchanged. The `formulas[]` block is then omitted (the grid
+  already shows them).
 - `--account <email>` — account override.
 
 ## Data Requirements
 
 - Sheets `spreadsheets.get` with `fields=spreadsheetId,properties.title,sheets(properties(sheetId,title,index,sheetType,gridProperties(rowCount,columnCount,frozenRowCount)))` — cheap metadata for the tabs listing (and `frozenRowCount` for header auto-detection); **no cell data**.
-- Sheets `spreadsheets.get` with `includeGridData=true`, `ranges=[<window>]`, and `fields=sheets(data(rowData(values(formattedValue,hyperlink,note,textFormatRuns(startIndex,format(link(uri)))))))` — the grid **plus** embedded links and cell notes in one call (rather than a plain `values.get`, which would return only display text and silently drop links/notes). Only issued once a specific tab is being rendered. Covered by the `spreadsheets` scope; no new scope.
+- Sheets `spreadsheets.get` with `includeGridData=true`, `ranges=[<window>]`, and `fields=sheets(data(rowData(values(formattedValue,userEnteredValue,effectiveValue,hyperlink,note,textFormatRuns(startIndex,format(link(uri)))))))` — the grid **plus** formulas (`userEnteredValue.formulaValue`), error values (`effectiveValue.errorValue`), embedded links and cell notes in one call (rather than a plain `values.get`, which would return only display text and silently drop links/notes). Only issued once a specific tab is being rendered. Covered by the `spreadsheets` scope; no new scope.
   - **Bounded default window**: with neither `--range` nor `--full`, the window is bounded to the render cap (`A1:<lastCol><maxRows+2>`, `lastCol` from the tab's `columnCount`) rather than the whole sheet — keeps the read context-sized and fast on tall sheets. `--full` fetches the whole tab; an explicit `--range` is honored verbatim. Trailing fully-empty rows padded by the bounded window are trimmed.
 
 ## Display Rules
@@ -59,6 +62,32 @@ When any links were resolved, the header carries `links_resolved: <n>` and a hel
 
 Cell notes (the Sheets per-cell notes, distinct from Drive **comments** — see help funnel) come back in a `notes[N]{cell,note}` block, each keyed by its A1 cell, shown only when present. The header carries `notes: <n>` when any exist.
 
+### Formulas
+
+A cell whose entered value is a formula is rendered by its **displayed value** in the grid, as
+every other cell is, and listed in a `formulas[N]{cell,formula}` block after the grid: the
+A1 cell and the formula text as entered (`=SUM(B2:B12)`). The header carries `formulas: <n>`
+(the count in the fetched window) whenever there is at least one. The block is capped at 20
+rows; past the cap the header carries `formulas_total` and `help[]` offers `--formulas`, which
+renders the formulas *in* the grid instead — the right view for checking a model, the wrong
+default for reading a report. The two views never mix: a cell shows its value or its formula,
+never both in one column.
+
+> **Why by default:** an agent that wrote `=B2*C2` and reads the tab back needs to know which
+> cells are computed and which are typed; a displayed `$9,600` says nothing about that. The
+> formula is the cell's provenance
+> ([principles.md#provenance-by-default](../principles.md#provenance-by-default)), and twenty
+> short rows are cheaper than the second call.
+
+### Error values
+
+A cell whose effective value is an error (`#REF!`, `#NAME?`, `#DIV/0!`, `#N/A`, `#VALUE!`,
+`#NUM!`, `#ERROR!`) renders its error text in the grid, as the editor shows it, and is listed in
+an `errors[N]{cell,error,message}` block with Sheets' own message (`errorValue.message`,
+e.g. "Unresolved sheet name 'Cost'"). The header carries `errors: <n>` and the **first**
+`help[]` line names the count, so an agent never takes `#REF!` for data. Capped at 50 rows
+with `errors_total` past the cap.
+
 ### Truncation
 
 Cell text is truncated per-cell to 200 chars (`…` marker), except link-bearing cells (above). Row count is capped at 50 (or `--max-rows`) unless `--full`; when capped, `cells_truncated` + `cells_rendered` ride in the header and a `--full`/`--range` suggestion lands in help ([principles.md#minimal-default-schemas](../principles.md#minimal-default-schemas)). Because the default fetch is bounded to the render window, a capped default read reports `cells_note` ("more exist beyond the cap") rather than a precise `cells_total_rows` — the exact total is only known (and shown) when the full scope was fetched (`--full` or an explicit `--range`), honoring [principles.md#surface-completeness-limits](../principles.md#surface-completeness-limits).
@@ -77,12 +106,14 @@ Built from the current result:
 - Review comments funnel → `sheets comments <id>` (Drive comments; see below).
 - Version history / provenance funnel → `drive revisions <id>` and `drive activity <id>` (Sheets' `spreadsheets.get` exposes no per-read revision id, so provenance is funnelled to Drive rather than inlined — see Follow-ups in the plan).
 - Formatted-values caveat line (see Errors/fidelity).
+- When `errors[]` is non-empty, **first**: "N cell(s) show formula errors — see errors[]".
+- When `formulas[]` was capped: `sheets read <id> --tab <t> --formulas` to see every formula in the grid.
 
 ## Errors & fidelity
 
 - Not found / no access / non-native file → `SPREADSHEET_NOT_FOUND` with access-check suggestions, including a redirect to `drive download` / `drive upload --convert` for the uploaded-`.xlsx` case. (A distinct `NON_NATIVE_SPREADSHEET` code is a follow-up.)
 - `--tab` not present → `TAB_NOT_FOUND` listing available tab titles + gids.
-- **Fidelity disclosure** ([principles.md#surface-completeness-limits](../principles.md#surface-completeness-limits)): cell values are the displayed strings (`formattedValue`) — **not** underlying formulas or unformatted numbers. A `help[]` line states this so an agent doesn't mistake a formatted cell for its formula. (A `--formula` render option is a documented follow-up.) Embedded links and cell notes are **not** dropped — links inline as markdown, notes in the `notes[]` block.
+- **Fidelity disclosure** ([principles.md#surface-completeness-limits](../principles.md#surface-completeness-limits)): cell values are the displayed strings (`formattedValue`) — not unformatted numbers (`$9,600` is the string, not `9600`). Formulas are not lost: every formula cell is listed in `formulas[]`, or rendered in place with `--formulas`. A `help[]` line states the displayed-strings rule. Embedded links and cell notes are **not** dropped — links inline as markdown, notes in the `notes[]` block.
 
 ## Principles
 
