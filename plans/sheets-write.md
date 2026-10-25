@@ -1,5 +1,5 @@
 ---
-status: planned
+status: in-progress
 depends: []
 specs:
   - specs/commands/sheets-write.md
@@ -135,11 +135,15 @@ Range commands first, structure commands on top of them; one branch, one PR.
 - [ ] Live: writing `=B2*C2` reports it in `formulas[]` with `result: $9,600`; writing
       `=Cost!B2` on a tab with no `Cost` reports it in `errors[]` with Sheets' message, a
       `Fix D2 …` help line carrying that formula, and `action: updated`, exit 0; writing `1/2`
-      reports `now: 1/2/<year>` and the hazard help line.
-- [ ] Live: writing text into a cell a `SUM` covers reports the `SUM` cell in `errors[]` with
-      `written: no` and names the written cell in its fix line; `clear` of a range a formula
-      references reports the `#REF!`; re-writing the formula correctly reports
-      `errors_fixed: 1`; a pre-existing unrelated error shows only as `errors_elsewhere`.
+      reports `now: 1/2 (date <year>-01-02)` and the hazard help line (amended: Sheets keeps
+      displaying `1/2` under an `m/d` date format, so the spec annotates the date).
+- [ ] Live: writing text into a cell an arithmetic formula reads (`=B2+B3+B4`, `=B3*C3`)
+      reports that formula in `errors[]` with `written: no` and names the written cell in its
+      fix line (amended: `SUM` ignores text, so it cannot error this way; a `SUM` over an
+      erroring cell propagates and is reported too); `clear` of a cell a division reads reports
+      the `#DIV/0!` (amended: a cleared cell reads as empty/0 — clearing never yields `#REF!`);
+      re-writing correctly reports `errors_fixed`; a pre-existing unrelated error shows only as
+      `errors_elsewhere`.
 - [ ] Live: the errors-only mask on a healthy 1000×26 tab — response size and latency
       recorded in Notes; the 200k bound kept or amended from the measurement.
 - [ ] Live: `--cell B5=4800 --cell C9=3 --cell D2='=B2*C2'` writes all three in one
@@ -158,7 +162,8 @@ Range commands first, structure commands on top of them; one branch, one PR.
       and a cross-tab ref; `--depth 2` expands a referenced formula; an `INDIRECT` ref is
       `kind: dynamic`.
 - [ ] Live: a block wider than the tab grows the grid and reports `grid:`; the same block
-      without growth is what upstream refuses.
+      without growth is what upstream refuses (amended: upstream refuses a range or anchor
+      outside the allocation, and grows a block spilling from an anchor inside it itself).
 - [ ] Live: `append` lands after the last data row and `range:` matches where the rows
       appear; a tab with a blank row inside its data is checked and the outcome recorded.
 - [ ] Live: `--json` with `null` leaves a cell untouched; a CSV empty field clears it; `--raw`
