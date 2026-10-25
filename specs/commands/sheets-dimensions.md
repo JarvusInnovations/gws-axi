@@ -35,13 +35,14 @@ gws-axi sheets delete-cols <spreadsheetId> <cols> [--tab <name|gid>]
 
 | Fact | Status |
 | --- | --- |
-| `insertDimension` with `range{sheetId,dimension,startIndex,endIndex}` inserts `end−start` empty rows/columns **before** `startIndex`; `inheritFromBefore: true` copies the formatting of the row/column before the range, and is refused (400) when `startIndex` is 0 | Documented. **To verify live** |
-| Formulas referencing rows/columns at or after an insertion point are shifted by Sheets; a range that spans the insertion point grows | Documented (as the editor does). **To verify live** |
-| `deleteDimension` removes the range; what follows moves up/left; formulas that referenced a deleted cell become `#REF!`; a range partly deleted shrinks | Documented. **To verify live** |
-| Deleting every row (or every column) of a sheet is refused (400) | Documented. **To verify live** for the message |
-| Deleting rows inside the frozen area reduces the frozen count; deleting all frozen rows is allowed | **To verify live** |
+| `insertDimension` with `range{sheetId,dimension,startIndex,endIndex}` inserts `end−start` empty rows/columns **before** `startIndex`; `inheritFromBefore: true` copies the formatting of the row/column before the range (background, borders, number format — values are not copied), and is refused (400 "range.startIndex must not be 0 if inheritFromBefore is true") when `startIndex` is 0 | **Observed 2026-10-25** |
+| Formulas referencing rows/columns at or after an insertion point are shifted by Sheets; a range that spans the insertion point grows (`SUM(B2:B9)` → `SUM(B2:B12)` after three rows at 3) | **Observed 2026-10-25** |
+| `deleteDimension` removes the range; what follows moves up/left; a range partly deleted shrinks (`SUM(B2:B12)` → `SUM(B2:B11)`). A formula that read a deleted cell becomes `#REF!` — and **its text is rewritten**: `=B7` is stored as `=#REF!`, so the original formula exists only in a read taken before the delete | **Observed 2026-10-25** (amended: the rewrite was not documented) |
+| Deleting every row (or every column) of a sheet is refused (400 "You can't delete all the rows on the sheet." / "… all the columns …") | **Observed 2026-10-25**; refused locally first |
+| A range starting past the allocation is refused: insert 400 "range.startIndex is larger than current grid size (N)", delete 400 "Cannot delete a row that doesn't exist". An insert starting **at** the allocation (one past the last row) is accepted and adds rows at the end. A delete that starts inside the allocation and runs past it is **accepted and silently clipped** — only the existing part is deleted | **Observed 2026-10-25** (amended: the silent clip is why a delete past the end is refused locally) |
+| Deleting rows/columns inside the frozen area reduces the frozen count; deleting all frozen rows is allowed (the count goes to 0). **Inserting** inside the frozen area *grows* the count (an insert at row 1 or 2 of a 3-row freeze → 4). Columns behave the same | **Observed 2026-10-25** (amended: the insert half) |
 | An insert that would exceed the 10,000,000-cell spreadsheet limit is refused (400) | Documented. Not exercised; translated generically |
-| A protected range overlapping the dimension is refused (400 "protected cell or object") | **Observed 2026-10-24** (`sheets-write.md`) for a values write; **to verify** for a dimension request |
+| A protected range overlapping the dimension is refused (400 "You are trying to edit a protected cell or object…") for both insert and delete, including a column insert/delete that crosses a protected row band; a dimension request that leaves the protected rows alone (insert above them, delete below them) succeeds and the protected range moves with its rows | **Observed 2026-10-25** (as an editor without rights to the range) |
 
 ## Behavior
 
@@ -51,7 +52,9 @@ gws-axi sheets delete-cols <spreadsheetId> <cols> [--tab <name|gid>]
    the dimension range is checked against the allocation (`VALIDATION_ERROR` when the start
    is past it; an insert may *extend* it, and does — see below). The whole-tab errors-only
    scan runs when the allocation is ≤ 200,000 cells, as every `sheets` write does
-   ([sheets-write.md § Formula errors](sheets-write.md#formula-errors-the-feedback-loop)).
+   ([sheets-write.md § Formula errors](sheets-write.md#formula-errors-the-feedback-loop));
+   a delete's scan also carries each cell's formula, because the delete rewrites a broken
+   reference to `#REF!` and the pre-read is the only place the original survives.
 2. **Write**: one `batchUpdate` with the one dimension request.
 3. **Read back**: the errors-only scan again; the diff is reported. For a delete, the
    populated cells of the deleted range were read **before** the write and are the undo.
@@ -67,7 +70,8 @@ gws-axi sheets delete-cols <spreadsheetId> <cols> [--tab <name|gid>]
   carries `grid: R×C` after.
 - A request that starts **past** the current allocation is a `VALIDATION_ERROR` pointing at
   `sheets update --range` (which grows the grid) — inserting at row 5000 of a 1000-row tab is
-  not "make room", it is a typo.
+  not "make room", it is a typo. Starting one past the last row (`insert-rows 1001` on a
+  1000-row tab) is allowed and adds rows at the end, as upstream does.
 - **Not idempotent**: re-running inserts again. The response says so.
 
 ### Delete
@@ -77,8 +81,16 @@ gws-axi sheets delete-cols <spreadsheetId> <cols> [--tab <name|gid>]
   `cells_total` past the cap — the undo record, as `written[]` is for a value write.
 - A delete covering the whole allocation (every row, or every column) is refused locally
   with `VALIDATION_ERROR`, pointing at `sheets clear --all` or `sheets tabs delete`.
+- A delete whose range runs past the allocation is refused locally with `VALIDATION_ERROR`
+  naming the last row/column: upstream would silently delete only the part that exists,
+  and `count` would then be wrong.
 - Deleting inside the frozen rows/columns is allowed; the response notes the new freeze
-  count when it changed.
+  count when it changed. (An insert inside the frozen area grows the count; it is reported
+  the same way.)
+- A `#REF!` the delete caused names its formula **as it was before the delete** (from the
+  pre-scan) in its fix line — the stored formula is now `=#REF!`, so offering it back would
+  write the error again. The fix line points at `sheets cell` / `sheets update --cell` for the
+  agent to re-address it.
 - **Not idempotent** in the usual sense: a second identical call deletes the rows that
   moved into the range. The response says so, naming the rows that now occupy the range.
 
@@ -121,7 +133,7 @@ errors[1]{cell,error,message,written}:
   D12,REF,…,no
 help[4]:
   1 formula error after this delete — see errors[]
-  Fix D12 (#REF!, …): gws-axi sheets update 1AbC… --tab Costs --cell D12='=SUM(D2:D11)' --account alice@example.com
+  Fix D12 (#REF!, …): it was =C4*1.1 before the delete, and row 4 is gone — re-point it with gws-axi sheets update 1AbC… --tab Costs --cell D12='=…' --account alice@example.com
   The deleted cells are above and in version history: `gws-axi drive revisions 1AbC…`; `gws-axi sheets insert-rows 1AbC… 3:5 --tab Costs` then `sheets update --range A3` restores them
   Rows 3:5 are now what was 6:8 — re-running would delete those
 ```
@@ -135,13 +147,14 @@ help[4]:
   shape; the block's `row` numbers are the **old** numbers. Omitted (`cells: 0`) when the
   range held nothing.
 - `errors[]`, `errors_fixed`, `errors_elsewhere`, `error_scan` — exactly as a value write.
-- `frozen_rows: N` / `frozen_cols: N` (delete) — only when the freeze count changed.
+- `frozen_rows: N` / `frozen_cols: N` — only when the freeze count changed (a delete inside
+  the frozen area shrinks it, an insert inside it grows it).
 
 ## Errors
 
 | Code | When |
 | --- | --- |
-| `VALIDATION_ERROR` | Missing id or range; a range that is not a row range (for `*-rows`) or column range (for `*-cols`); `--tab` disagreeing with a qualified range; start past the allocation (insert) or past the data (delete); a delete covering every row/column; `--no-inherit` on a delete |
+| `VALIDATION_ERROR` | Missing id or range; a range that is not a row range (for `*-rows`) or column range (for `*-cols`); `--tab` disagreeing with a qualified range; start past the allocation; a delete whose end is past the allocation; a delete covering every row/column; `--no-inherit` on a delete |
 | `SPREADSHEET_NOT_FOUND`, `TAB_REQUIRED`, `TAB_NOT_FOUND` | As `sheets update` |
 | `PROTECTED_RANGE` | Upstream refused because a protected range overlaps |
 
