@@ -103,6 +103,8 @@ Body: `file{id,name,mime_type,size_bytes,parents,revision_id,web_view_link}`
 - `drive get <id>` for full metadata; `drive permissions <id>` for sharing.
 - When converted: `docs read <id>` (for a Doc) / `docs download <id>` to fetch it back.
 - When a Markdown or text source was converted to a Doc: a line stating the Doc was built by **Google's importer**, and that `docs create` / `docs write` write Markdown through gws-axi's own converter — the one `docs read` round-trips and the one that can target a single tab ([markdown-to-doc](../behaviors/markdown-to-doc.md)). `drive upload --convert` stays Google's importer for every source type; it never switches engines by extension.
+- When a `.csv` / `.tsv` source was converted to a Spreadsheet: the parity line — the Sheet was built by **Google's importer**, and `sheets create` / `sheets update --tab` write the values themselves, one tab at a time, with the read-back ([sheets-write.md](sheets-write.md)).
+- `MULTI_TAB_TARGET` on a Spreadsheet names `sheets update <id> --tab <name> --range A1 <file>` as the tab-safe path in place of "per-sheet writes aren't supported"; on a Doc it names `docs write <id> --tab <id>`.
 - When **created** (not `--update`): a one-line note that re-running creates another copy (Drive allows duplicate names) and that `--update <id>` replaces this file's content instead — disclosing the non-idempotency of create-new.
 - When an update collapsed a multi-tab Doc under `--replace-all-tabs`: a line stating how many tabs were replaced by the single imported tab, and that the prior version is in `drive revisions <id>`.
 - Open in browser: the `webViewLink`.
