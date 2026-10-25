@@ -112,7 +112,7 @@ tabs[4]{gid,title,index,kind,hidden,frozen_rows,frozen_cols}:
   0,Costs,0,grid,no,1,0
   1374928,Notes,1,grid,no,0,0
   882013,Archive,2,grid,yes,0,0
-  1190021,Chart1,3,chart,no,,
+  1190021,Chart1,3,chart,no,"",""
 help[3]:
   Run `gws-axi sheets read 1AbC… --tab <title>` to read one
   Run `gws-axi sheets tabs update 1AbC… <tab> --first|--title "<title>"|--hide|--freeze-rows 1 --account <email>` to move, rename, hide or freeze a tab
@@ -120,9 +120,9 @@ help[3]:
 ```
 
 `kind` is `grid` or `chart` (upstream's `sheetType: OBJECT` — a sheet that holds one chart;
-data-source sheets, if ever seen, are `other`); `frozen_*` are
-empty for a non-grid sheet. The listing never collapses to the empty shape: a spreadsheet
-always has at least one sheet.
+data-source sheets, if ever seen, are `other`); `frozen_*` are empty (`""`, as TOON writes an
+empty string) for a non-grid sheet. The listing never collapses to the empty shape: a
+spreadsheet always has at least one sheet.
 
 ### `sheets tabs update`
 
