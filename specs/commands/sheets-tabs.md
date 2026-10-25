@@ -28,6 +28,16 @@ A tab is addressed by **title or numeric gid**, as every `sheets` command resolv
 sheets are addressable here (to move, hide, rename or delete them) though not in
 `sheets read`, which has no cells to show for them.
 
+A title spelled as digits can equal another sheet's gid (a sheet titled `0` beside the sheet
+whose gid is 0). Title-first resolution would then act on the titled sheet when the caller
+copied the other one's gid, so:
+
+- `tabs update` and `tabs delete` refuse a target or anchor that is one sheet's **title** and a
+  **different** sheet's **gid** with a `VALIDATION_ERROR` naming both and how to address each
+  (the first by its gid, the second by its title). Nothing is written.
+- Every command the group generates (undo line, `LAST_VISIBLE_TAB` suggestion) names a sheet
+  by its gid, unless some sheet's title equals that gid — then by its title.
+
 ## Upstream behavior relied on
 
 | Fact | Status |
@@ -90,7 +100,9 @@ One `spreadsheets.get`, then one `deleteSheet`.
   deleted tab and a mistyped title look the same, and the mistyped one is likelier.
 - A grid tab's **populated cells are counted before the delete** (`values.get` over the tab,
   fast — display text only) and reported as `cells`; the content is gone from the live
-  spreadsheet but remains in version history, and the response says so.
+  spreadsheet but remains in version history, and the response says so. A tab whose
+  allocation is over 200,000 cells is not fetched: `cells: not counted (tab is R×C)`, with a
+  `help[]` line saying so.
 - **Formula errors the delete causes elsewhere** are reported: an errors-only scan of the
   whole spreadsheet (every grid sheet; `ranges` unset) before and after, diffed as in
   [sheets-write.md § Formula errors](sheets-write.md#formula-errors-the-feedback-loop), when
@@ -167,9 +179,10 @@ errors[2]{cell,error,message,written}:
   Costs!D3,REF,Unresolved sheet name 'Archive',no
 tabs[3]{gid,title,index,kind,hidden,frozen_rows,frozen_cols}:
   …
-help[4]:
+help[5]:
   2 formula errors after this delete — see errors[]
   Fix Costs!D2 (#REF!, Unresolved sheet name 'Archive'): gws-axi sheets update 1AbC… --tab Costs --cell D2='=Archive!B2' --account alice@example.com
+  Fix Costs!D3 (#REF!, Unresolved sheet name 'Archive'): gws-axi sheets update 1AbC… --tab Costs --cell D3='=Archive!B3' --account alice@example.com
   The content is out of the live spreadsheet but stays in version history: `gws-axi drive revisions 1AbC…`
   Run `gws-axi sheets tabs 1AbC…` to list what remains
 ```
@@ -181,7 +194,7 @@ tabs. `cells` is omitted for a chart sheet.
 
 | Code | When |
 | --- | --- |
-| `VALIDATION_ERROR` | Missing id or tab; two placement flags; `--hide` with `--show`; empty or colliding `--title`; a freeze count that isn't a non-negative integer or is at/past the allocation; `--freeze-*` on a chart sheet; an anchor that is the tab itself; `update` with no property flags |
+| `VALIDATION_ERROR` | Missing id or tab; a target or anchor that is one sheet's title and another sheet's gid; two placement flags; `--hide` with `--show`; empty or colliding `--title`; a freeze count that isn't a non-negative integer or is at/past the allocation; `--freeze-*` on a chart sheet; an anchor that is the tab itself; `update` with no property flags |
 | `SPREADSHEET_NOT_FOUND` | As `sheets read` |
 | `TAB_NOT_FOUND` | The target or an anchor names no sheet; lists the available ones (grid and chart). Nothing is written |
 | `LAST_VISIBLE_TAB` | `--hide` on the only visible sheet, or `delete` of the only visible sheet while others are hidden (chart sheets count as visible) |
