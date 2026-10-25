@@ -304,6 +304,7 @@ export async function sheetsCellCommand(account: string, args: string[]): Promis
       meta,
       flags.cellTab ?? flags.tab,
       (t) => `gws-axi sheets cell ${meta.id} ${flags.cell} --tab ${shellArg(t)}`,
+      { read: true },
     );
   }
   const q = quoteTitle(tab.title);
