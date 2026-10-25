@@ -38,13 +38,13 @@ Read coverage is complete across all seven services; write coverage is rolling o
 | --- | --- | --- |
 | **Calendar** | ✅ events · get · calendars · search · freebusy | ✅ create · update · delete · respond |
 | **Gmail** | ✅ search · read · labels · download | ✅ triage · draft · labels · filters &nbsp;·&nbsp; ✋ `send` out of scope |
-| **Docs** | ✅ read · find · comments · download · revisions · diff · tabs | 🟡 create · write · append · replace-text · edit-cell · tabs update/delete &nbsp;·&nbsp; 🚧 insert-text · delete-range · style-*· insert-table · comment-* |
-| **Drive** | ✅ ls · get · search · permissions · download · revisions · activity | 🟡 upload · mkdir · rename · move · trash · untrash · share · unshare &nbsp;·&nbsp; 🚧 create · copy &nbsp;·&nbsp; ✋ permanent delete |
-| **Slides** | ✅ get · page · summarize · comments | 🟡 skip · unskip &nbsp;·&nbsp; 🚧 create · update |
+| **Docs** | ✅ read · find · comments · download · revisions · diff · tabs | ✅ create · write · append · replace-text · edit-cell · tabs update/delete &nbsp;·&nbsp; 🚧 insert-text · delete-range · style-text · style-paragraph · insert-table · comment writes |
+| **Drive** | ✅ ls · get · search · permissions · download · revisions · activity | ✅ upload · mkdir · rename · move · trash · untrash · share · unshare &nbsp;·&nbsp; 🚧 create · copy &nbsp;·&nbsp; ✋ permanent delete |
+| **Slides** | ✅ get · page · summarize · comments | ✅ skip · unskip &nbsp;·&nbsp; 🚧 create · update |
 | **Sheets** | ✅ read · comments | 🚧 update · append · clear · create · add-tab |
 | **Chat** | ✅ spaces · messages · search · members · download · wait · watch | ✅ send · react · unreact · mark-read · mark-unread |
 
-<sub>✅ shipped · 🟡 partial · 🚧 planned · ✋ out of scope by design</sub>
+<sub>✅ shipped · 🚧 planned · ✋ out of scope by design</sub>
 
 Auth (including the single-developer `auth publish` walkthrough that retires the 7-day Testing-token expiry, and sign-in from a phone or over SSH), `doctor` with live per-account API probes, and multi-account write protection are stable. Gmail **`send` is intentionally out of scope** — gws-axi drafts mail for human review but never sends it. Chat **does** send: it has no drafts, so there is nothing to stop at. Drive has no permanent delete — `trash` is reversible for 30 days.
 
@@ -192,7 +192,7 @@ export XDG_CONFIG_HOME=/srv/agent-home/config   # bounds which accounts exist at
 export GWS_AXI_ACCOUNT=you@example.com          # bounds which one is used
 ```
 
-These two are the only environment variables gws-axi reads.
+Apart from `SSH_CONNECTION`, which only changes the sign-in instructions, these two are the only environment variables gws-axi reads.
 
 ## Usage
 
@@ -258,8 +258,13 @@ gws-axi calendar create \
 
 gws-axi calendar create --summary "Focus block" --start 2026-04-22T09:00 --duration 2h --free
 
+gws-axi calendar create --summary "Planning" --start 2026-04-22T10:00 \
+  --attendees ana@example.com,raj@example.com --recurrence "RRULE:FREQ=WEEKLY;BYDAY=MO"
+
 gws-axi calendar update <event-id> \
   --summary "Team sync (rescheduled)" --start 2026-04-22T15:00
+
+gws-axi calendar update <event-id> --add-attendees eve@example.com   # or --remove-attendees / --replace-attendees
 
 gws-axi calendar delete <event-id>       # idempotent (404/410 → noop)
 
@@ -319,7 +324,7 @@ gws-axi gmail filter-delete <filter-id>
 
 Draft bodies are Markdown, sent as HTML; `--plain` sends the body as literal text with indentation kept. Each message in `gmail read` carries `sent` (local-offset time) beside the verbatim `Date` header. Bodies are decoded per declared `Content-Type` charset (UTF-8, latin-1, ascii, utf-16). HTML-only messages convert to markdown via turndown. Address headers parse with `addressparser` so display names with commas don't get split.
 
-**On `send`:** gws-axi has no `send` command by design — an agent can triage, label, and draft replies, but a human reviews and sends from Gmail. This is a guardrail against *accidental* sends, not a hard security boundary (the OAuth token is send-capable; there is no Gmail scope that grants drafting + label edits while withholding send). `gws-axi gmail send` returns a `NOT_SUPPORTED` error pointing at `draft`.
+**On `send`:** gws-axi has no `send` command by design — an agent can triage, label, and draft replies, but a human reviews and sends from Gmail. This is a guardrail against *accidental* sends, not a hard security boundary (the OAuth token is send-capable; there is no Gmail scope that grants drafting + label edits while withholding send). `gws-axi gmail send` returns a `NOT_SUPPORTED` error pointing at `draft`. The one exception is `filter-create --forward`, which forwards matching mail automatically, but only to an address you have already verified in Gmail's forwarding settings.
 
 **Scope note:** the filter commands need the `gmail.settings.basic` scope, which `gmail.modify` does not include. Accounts authenticated before filters shipped get `SCOPE_MISSING` (403) on filter commands until they re-auth once.
 
@@ -343,7 +348,7 @@ Every `docs read` carries the document's recent revisions and points at `docs re
 #### Writing Markdown
 
 ```bash
-gws-axi docs create --title "Sprint notes" ./notes.md --account you@example.com        # new Doc from Markdown
+gws-axi docs create --title "Sprint notes" ./notes.md --account you@example.com        # new Doc from Markdown (--parent <folderId> to file it)
 gws-axi docs write <documentId> ./tab.md --tab t.0 --account you@example.com           # replace ONE tab's content
 gws-axi docs write <documentId> ./notes.md --new-tab "Decisions" --account you@example.com   # add a tab and fill it
 gws-axi docs append <documentId> --content "## Update" --tab t.0 --account you@example.com   # add to the end of a tab
@@ -395,6 +400,7 @@ gws-axi drive search --query "name contains 'budget'"
 gws-axi drive permissions <fileId>                # who has access
 gws-axi drive revisions <fileId>                  # version history (any file type)
 gws-axi drive activity <itemId>                   # attributed change timeline (Drive Activity API)
+gws-axi drive activity <folderId> --folder --action permission_change,delete --since -30d   # a whole folder tree, filtered
 gws-axi drive download <fileId> --out ./file      # fetch bytes / export a native file
 ```
 
@@ -403,11 +409,11 @@ gws-axi drive download <fileId> --out ./file      # fetch bytes / export a nativ
 **Writes:**
 
 ```bash
-gws-axi drive mkdir "Reports" --account you@example.com         # create a folder
+gws-axi drive mkdir "Reports" --parent <folderId> --account you@example.com   # create a folder (--parent also works on upload)
 gws-axi drive rename <id> --name "New name" --account you@example.com
 gws-axi drive move <fileId> --to <folderId> --account you@example.com   # file it in another folder
 gws-axi drive trash <fileId> --account you@example.com           # to the trash (drive untrash restores; no permanent delete)
-gws-axi drive share <id> --with lead@school.org --role reader --account you@example.com   # emails them by default
+gws-axi drive share <id> --with lead@school.org --role reader --account you@example.com   # emails them by default; --no-notify, --group
 gws-axi drive unshare <id> --with lead@school.org --account you@example.com
 gws-axi drive upload ./report.pdf --account you@example.com     # upload a local file
 echo '# Notes' | gws-axi drive upload - --name notes.md --convert --account you@example.com   # stdin → native Doc
@@ -458,6 +464,7 @@ gws-axi chat messages --with bob@example.com      # the 1:1 direct message with 
 gws-axi chat messages <space> --since today       # --since/--until take dates and tokens (today, -7d, now)
 gws-axi chat messages <space> --fields attachments,reactions
 gws-axi chat search budget --since -7d            # across every conversation
+gws-axi chat search --space <space> --has-attachment   # or --has-link
 gws-axi chat search --mentions-me --unread
 gws-axi chat members <space>
 gws-axi chat download <space> <messageId>        # save a message's attachments
