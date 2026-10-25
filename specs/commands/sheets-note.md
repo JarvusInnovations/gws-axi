@@ -69,7 +69,9 @@ help[2]:
 - `cell`, `value` — the cell and what it displays, so the note is seen beside what it
   annotates.
 - `note{before,after}` — the previous and new text; `before` empty when there was none,
-  `after` empty on `cleared`. The undo line restores `before` (`--clear` when it was empty).
+  `after` empty on `cleared`. The undo line restores `before` (`--clear` when it was empty). When `before` is over 2,000
+  characters, the undo line is replaced by `The previous note (N characters) is in version history:
+  gws-axi drive revisions <id>`; `note.before` is still shown in full.
 
 ## Errors
 
@@ -77,7 +79,7 @@ help[2]:
 | --- | --- |
 | `VALIDATION_ERROR` | Missing id or cell; a range; neither or both of `--text`/`--clear`; empty `--text`; `--tab` disagreeing with a qualified cell |
 | `SPREADSHEET_NOT_FOUND`, `TAB_REQUIRED`, `TAB_NOT_FOUND` | As `sheets update` |
-| `RANGE_INVALID` | Not an A1 cell; a cell outside the tab's grid (checked locally from the tab's row and column counts, before any read) |
+| `RANGE_INVALID` | Not an A1 cell; a cell outside the tab's grid (checked locally from the tab's row and column counts, before the cell read) |
 | `PROTECTED_RANGE` | Upstream refused |
 
 ## Out of scope
