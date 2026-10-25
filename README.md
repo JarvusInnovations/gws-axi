@@ -442,7 +442,7 @@ gws-axi slides skip <presentationId> <slideId>... --account you@example.com   # 
 A spreadsheet's tabs are its sheets, so `sheets read` mirrors `docs read`: it lists the tabs, and renders one tab's grid into context. Embedded links resolve inline as markdown `[text](url)`; cell notes come back in a `notes[]` block, formulas in `formulas[]`, and formula errors in `errors[]` with a runnable fix line each.
 
 ```bash
-gws-axi sheets read <spreadsheetId>                       # single tab renders; multi-tab lists tabs to pick
+gws-axi sheets read <spreadsheetId>                       # single tab renders; multi-tab lists tabs to pick, each with its row 1
 gws-axi sheets read <spreadsheetId> --tab Costs           # by tab title (or numeric gid)
 gws-axi sheets read <spreadsheetId> --tab Costs --range A1:D50   # scope to an A1 range
 gws-axi sheets read <spreadsheetId> --header-row          # promote row 1 to column names (auto for a frozen top row; --raw to force letters)
