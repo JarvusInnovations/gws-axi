@@ -97,8 +97,12 @@ rows[12]{Item,sum Qty}:
   bolts,140
   nuts,80
   …
-help[3]:
-  Columns are letters in the query (A, B, …); run `gws-axi sheets read 1AbC… --tab Costs --range 1:1 --raw` to see what each letter holds
+headers[4]{letter,header}:
+  A,Item
+  B,Unit
+  C,Qty
+  D,Status
+help[2]:
   Save the full result: --csv-out or --json-out
   The same query inside the sheet: =QUERY(Costs!A:D, "select A, sum(C) where D = 'open' group by A", 1)
 ```
@@ -127,10 +131,34 @@ help[3]:
 - `wrote:` counts the rows of the JSON result (the CSV's own line count differs by its
   header line, and has none when every label is empty).
 
+### Header legend
+
+Every successful response carries `headers[N]{letter,header}` — the tab's **row 1**, one row
+per column whose row-1 cell has text, by its A1 letter. The query addresses columns by
+letter; the agent usually knows them by name (from `sheets read`'s `rows[N]{…}`), and the
+legend is the map between the two, in the response that needs it. It is fetched in parallel
+with the query (one `spreadsheets.get`, row 1, display text only) and costs no round trip.
+
+- Rendered after the result rows. Capped at 100 entries; past the cap the header carries
+  `headers_total`.
+- Omitted when row 1 has no text, or under `--headers 0` (the caller declared there is no
+  header). Row 1 is used even when `--headers` is greater than 1: it is the row a human reads
+  as the column's name.
+- Best-effort: a failed legend read never fails the query; the response says
+  `headers: unavailable (<reason>)` and keeps the `sheets read --range 1:1 --raw` help line.
+- **On `QUERY_ERROR`** the legend is the second suggestion, compact:
+  `Columns in row 1: A=Item, B=Qty, D=Status` (first 30, then `… N more`) — the usual
+  mistake is a wrong letter, and the fix is in the same response.
+- With the legend present, the letters help line (`run sheets read --range 1:1 --raw …`) is
+  dropped: it would send the agent for what is already above.
+
+The legend never changes the query: gws-axi still passes the text through verbatim
+(§ Principles). It tells the agent the letters; the agent writes them.
+
 ### help[] suggestions
 
-- The letters line (above), always — the query addresses columns by letter and the agent
-  usually read the tab by header names. It carries `--raw`: without it, a tab whose top row is
+- The letters line (`run sheets read --range 1:1 --raw`) only when the legend is absent;
+  with the legend present it is redundant (§ Header legend). It carries `--raw`: without it, a tab whose top row is
   frozen promotes row 1 to the header and `--range 1:1` renders no rows at all (observed).
 - The export line when no export flag was given; the `jq`/`head` line when one was.
 - The `=QUERY()` equivalent, always: the formula an agent would write to keep the result in

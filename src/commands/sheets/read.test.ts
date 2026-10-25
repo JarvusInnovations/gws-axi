@@ -325,3 +325,30 @@ describe("nonGridLine", () => {
     expect(nonGridLine(0, 1, "1AbC")).toMatch(/^1 other non-grid sheet\(s\) not listed/);
   });
 });
+
+describe("buildGrid — header legend", () => {
+  it("maps each named column's letter from the origin, skipping empty headers", () => {
+    const g = buildGrid(
+      [
+        ["Item", "", "Item"],
+        ["bolts", "x", "y"],
+      ],
+      { col0: 2, row1: 1 },
+      { headerRow: true, maxRows: 50, full: false },
+    );
+    expect(g.listName).toBe("rows");
+    expect(g.legend).toEqual([
+      { letter: "C", header: "Item" },
+      { letter: "E", header: "Item (E)" },
+    ]);
+  });
+
+  it("has no legend for the letter grid", () => {
+    const g = buildGrid(
+      [["a", "b"]],
+      { col0: 0, row1: 1 },
+      { headerRow: false, maxRows: 50, full: false },
+    );
+    expect(g.legend).toBeUndefined();
+  });
+});

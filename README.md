@@ -453,7 +453,7 @@ gws-axi sheets cell <spreadsheetId> D2 --tab Costs        # one cell: formula, v
 gws-axi sheets comments <spreadsheetId>                   # review comments (Drive comments)
 ```
 
-`sheets query` runs a query in the language `=QUERY()` uses (Google's Visualization Query Language: `select`, `where`, `group by`, `pivot`, `order by`, `limit`, `label`, `format`) against one tab, without writing a formula into the sheet. Columns are letters. The query goes to Google as written, and a bad one comes back as `QUERY_ERROR` with Google's own message. The result is a 50-row preview (`--limit`), with every column's id, label and type on a `columns:` line, and the matching `=QUERY()` formula in `help[]`.
+`sheets query` runs a query in the language `=QUERY()` uses (Google's Visualization Query Language: `select`, `where`, `group by`, `pivot`, `order by`, `limit`, `label`, `format`) against one tab, without writing a formula into the sheet. Columns are letters. The query goes to Google as written, and a bad one comes back as `QUERY_ERROR` with Google's own message. The result is a 50-row preview (`--limit`), with every column's id, label and type on a `columns:` line, and the matching `=QUERY()` formula in `help[]`. Every result also lists the tab's row 1 as `headers[N]{letter,header}`, so you can write the next query by letter without looking up which letter holds which column; a `QUERY_ERROR` carries the same map on one line. `sheets read` shows the same legend whenever it promotes a header row.
 
 ```bash
 gws-axi sheets query <id> "select A, sum(C) where D = 'open' group by A" --tab Costs

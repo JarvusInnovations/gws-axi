@@ -17,14 +17,23 @@ import {
   writeExport,
 } from "../../util/export.js";
 import { type FlagSpec, extraArgumentError, parseArgs } from "../../util/flags.js";
+import type { sheets_v4 } from "googleapis";
 import {
+  type LegendEntry,
+  LEGEND_CAP,
   columnLetter,
   displayTitle,
   fetchMeta,
+  gridCells,
+  legendLine,
+  quoteTitle,
+  renderLegend,
   requireTab,
   shellArg,
   spreadsheetNotFound,
+  type TabInfo,
 } from "./shared.js";
+import { fetchGrid } from "./write.js";
 
 /**
  * `sheets query <id> "<tq>"` — Google's Visualization Query Language against
@@ -241,7 +250,12 @@ export function markedQuery(query: string, message: string): string {
   return `query (» marks line ${line}, column ${col}): ${flat(lines.join("\n"))}`;
 }
 
-export function queryError(res: GvizResponse, query: string, account: string): AxiError {
+export function queryError(
+  res: GvizResponse,
+  query: string,
+  account: string,
+  legend?: LegendEntry[],
+): AxiError {
   const issue = res.errors?.[0];
   const reason = issue?.reason ?? "unknown";
   const text = issueText(issue);
@@ -256,6 +270,7 @@ export function queryError(res: GvizResponse, query: string, account: string): A
     "QUERY_ERROR",
     [
       markedQuery(query, text),
+      ...(legend?.length ? [legendLine(legend)] : []),
       "Columns are letters (A, B, …), strings take single quotes ('open'), dates are date 'YYYY-MM-DD'",
       `Query language reference: ${REFERENCE}`,
     ],
@@ -263,6 +278,35 @@ export function queryError(res: GvizResponse, query: string, account: string): A
 }
 
 // ---------------------------------------------------------------------------
+
+/**
+ * Row 1 of the tab as a letter → header legend (§ Header legend). Best-effort:
+ * a failed read returns the reason instead of failing the query.
+ */
+export async function fetchHeaderLegend(
+  api: sheets_v4.Sheets,
+  account: string,
+  spreadsheetId: string,
+  tab: TabInfo,
+): Promise<{ entries: LegendEntry[] } | { unavailable: string }> {
+  try {
+    const data = await fetchGrid(
+      api,
+      account,
+      spreadsheetId,
+      [`${quoteTitle(tab.title)}!1:1`],
+      "sheets(data(startRow,startColumn,rowData(values(formattedValue))))",
+    );
+    const entries: LegendEntry[] = [];
+    for (const [, { row0, col0, cell }] of gridCells(data)) {
+      const header = (cell.formattedValue ?? "").trim();
+      if (row0 === 0 && header) entries.push({ letter: columnLetter(col0), header });
+    }
+    return { entries };
+  } catch (err) {
+    return { unavailable: err instanceof Error ? err.message : String(err) };
+  }
+}
 
 export async function sheetsQueryCommand(account: string, args: string[]): Promise<string> {
   const { flags, exportReq } = parseFlags(args);
@@ -278,6 +322,8 @@ export async function sheetsQueryCommand(account: string, args: string[]): Promi
   const headers = flags.headers ?? (tab.frozenRows === 1 ? 1 : undefined);
 
   const req: GvizRequest = { spreadsheetId: meta.id, gid: tab.gid, query: flags.query, headers };
+  // The legend is row 1, unless the caller declared there is no header row.
+  const legendP = flags.headers === 0 ? undefined : fetchHeaderLegend(api, account, meta.id, tab);
   let res: GvizResponse;
   try {
     res = await runGvizQuery(account, req);
@@ -287,7 +333,9 @@ export async function sheetsQueryCommand(account: string, args: string[]): Promi
     }
     throw err;
   }
-  if (res.status === "error") throw queryError(res, flags.query, account);
+  const legendRes = legendP ? await legendP : undefined;
+  const legend = legendRes && "entries" in legendRes ? legendRes.entries : undefined;
+  if (res.status === "error") throw queryError(res, flags.query, account, legend);
 
   const cols = res.table?.cols ?? [];
   const rows = res.table?.rows ?? [];
@@ -333,6 +381,9 @@ export async function sheetsQueryCommand(account: string, args: string[]): Promi
   if (rows.length > 0) head.rows = rowsLine(shown, rows.length, truncated);
   head.columns = columnsLine(cols);
   if (outcome?.ok) head.wrote = outcome.wrote;
+  if (legendRes && "unavailable" in legendRes)
+    head.headers = `unavailable (${legendRes.unavailable})`;
+  if (legend && legend.length > LEGEND_CAP) head.headers_total = legend.length;
   blocks.push(renderObject(head));
   if (outcome && !outcome.ok) blocks.push(renderObject({ export_error: outcome.error }));
 
@@ -360,6 +411,8 @@ export async function sheetsQueryCommand(account: string, args: string[]): Promi
     );
   }
 
+  if (legend?.length) blocks.push(renderLegend(legend));
+
   // --- help[] ---
   const help: string[] = [];
   if (truncated) {
@@ -370,9 +423,10 @@ export async function sheetsQueryCommand(account: string, args: string[]): Promi
   for (const w of warnings.filter((w) => w.reason !== "data_truncated")) {
     help.push(`Google warned (${w.reason ?? "warning"}): ${issueText(w)}`);
   }
-  help.push(
-    `Columns are letters in the query (A, B, …); run \`gws-axi sheets read ${meta.id} --tab ${shellArg(tab.title)} --range 1:1 --raw\` to see what each letter holds`,
-  );
+  if (!legend?.length)
+    help.push(
+      `Columns are letters in the query (A, B, …); run \`gws-axi sheets read ${meta.id} --tab ${shellArg(tab.title)} --range 1:1 --raw\` to see what each letter holds`,
+    );
   if (outcome) help.push(outcome.helpLine);
   else help.push("Save the full result: --csv-out or --json-out");
   help.push(`The same query inside the sheet: ${queryFormula(tab, flags.query, headers)}`);

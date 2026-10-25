@@ -324,3 +324,98 @@ describe("sheetsQueryCommand --csv-out when Google's CSV fails", () => {
     expect(process.exitCode).toBe(1);
   });
 });
+
+describe("sheetsQueryCommand — header legend", () => {
+  /** Metadata for one tab, plus row 1's cells when the legend read asks for them. */
+  function withRow1(row1: Array<string | undefined>, opts: { fail?: boolean } = {}) {
+    const meta = {
+      data: {
+        spreadsheetId: ID,
+        properties: { title: "Q4 Tracker" },
+        sheets: [
+          {
+            properties: {
+              sheetId: 0,
+              title: "Costs",
+              index: 0,
+              gridProperties: { rowCount: 100, columnCount: 4, frozenRowCount: 0 },
+            },
+          },
+        ],
+      },
+    };
+    get.mockImplementation(async (req: { includeGridData?: boolean }) => {
+      if (!req.includeGridData) return meta;
+      if (opts.fail) throw new Error("backend error");
+      return {
+        data: {
+          sheets: [
+            {
+              data: [
+                {
+                  startRow: 0,
+                  startColumn: 0,
+                  rowData: [
+                    { values: row1.map((v) => (v === undefined ? {} : { formattedValue: v })) },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      };
+    });
+  }
+
+  it("renders row 1 as headers[N]{letter,header} and drops the letters line", async () => {
+    withRow1(["Item", "", "Qty", "Status"]);
+    respond({ body: wrapped(OK) });
+    const out = await sheetsQueryCommand(ACCOUNT, [ID, "select A, sum(C) group by A"]);
+    expect(out).toContain("headers[3]{letter,header}:");
+    expect(out).toContain("A,Item");
+    expect(out).toContain("C,Qty");
+    expect(out).toContain("D,Status");
+    expect(out).not.toContain("B,");
+    expect(out).not.toContain("--range 1:1 --raw");
+  });
+
+  it("skips the legend under --headers 0", async () => {
+    withRow1(["Item", "Unit"]);
+    respond({ body: wrapped(OK) });
+    const out = await sheetsQueryCommand(ACCOUNT, [ID, "select *", "--headers", "0"]);
+    expect(out).not.toContain("headers[");
+    expect(get.mock.calls.some(([r]) => (r as { includeGridData?: boolean }).includeGridData)).toBe(
+      false,
+    );
+    expect(out).toContain("--range 1:1 --raw");
+  });
+
+  it("keeps the query when the legend read fails, and says so", async () => {
+    withRow1([], { fail: true });
+    respond({ body: wrapped(OK) });
+    const out = await sheetsQueryCommand(ACCOUNT, [ID, "select A"]);
+    expect(out).toContain("rows: 3");
+    expect(out).toMatch(/headers: "?unavailable/);
+    expect(out).toContain("--range 1:1 --raw");
+  });
+
+  it("puts the compact legend on a QUERY_ERROR", async () => {
+    withRow1(["Item", "Unit", "Qty"]);
+    respond({
+      body: wrapped({
+        version: "0.6",
+        status: "error",
+        errors: [
+          {
+            reason: "invalid_query",
+            message: "INVALID_QUERY",
+            detailed_message: "Invalid query: Column [Z] does not exist in table.",
+          },
+        ],
+      }),
+    });
+    const err = await errorOf(() => sheetsQueryCommand(ACCOUNT, [ID, "select Z"]));
+    expect(err.code).toBe("QUERY_ERROR");
+    expect(err.suggestions).toContain("Columns in row 1: A=Item, B=Unit, C=Qty");
+  });
+});
