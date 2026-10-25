@@ -4,6 +4,7 @@ depends: []
 specs:
   - specs/commands/sheets-write.md
   - specs/commands/sheets-read.md
+  - specs/commands/sheets-cell.md
   - specs/commands/drive-upload.md
 ---
 
@@ -17,7 +18,8 @@ header-keyed objects, input mode), the three range commands (`update` with `--ra
 (`written[]`, `errors[]`), grid growth and the `--header` freeze, and the two structure
 commands (`create`, `add-tab`) that seed a new surface through the same write path. On the
 read side, `sheets read` gains `formulas[]` / `--formulas` and `errors[]` from the same
-`includeGridData` call it already makes. The `drive upload`
+`includeGridData` call it already makes, and `sheets cell` is the one-cell detail view that
+shows a formula beside the current values of what it references. The `drive upload`
 CSV signposts turn around to point here, and `sheets --help` loses its `alternatives[]` block.
 
 **Out of scope** (issues, not plans): formatting, widths, validation, merges beyond the
@@ -32,6 +34,7 @@ insertion that shifts data; multi-block batches; header-keyed `update`.
 - `specs/commands/sheets-read.md` — § Flags (`--formulas`), § Data Requirements (the wider
   fields mask), § Formulas, § Error values, the fidelity disclosure and the two new `help[]`
   lines.
+- `specs/commands/sheets-cell.md` — the whole command.
 - `specs/commands/drive-upload.md` — the `.csv`/`.tsv` help line and the Out-of-scope
   pointer to `sheets update` / `sheets append`.
 
@@ -64,8 +67,14 @@ Range commands first, structure commands on top of them; one branch, one PR.
    comparison from § Behavior as a pure `diffBlock(current, input, mode)` returning per-cell
    `{cell, before, changed}`. Unit-tested on every kind × mode case the spec names. The same
    fetch shape serves the **read-back** after the write (`formattedValue`, `effectiveValue`),
-   from which `written[]` (before ≠ input, or now ≠ input) and `errors[]` are built by a pure
+   from which `written[]` (before ≠ input, or now ≠ input) is built by a pure
    `reportWrite(pre, input, post)`; `--cell` passes one `ranges` entry per cell to both.
+   **Error scan**: both fetches add a whole-tab `ranges` entry under the errors-only mask
+   (when the allocation is ≤ 200k cells; else the written range, disclosed); a pure
+   `diffErrors(before, after, writtenCells)` yields `errors[]` (new or written), `errors_fixed`,
+   `errors_elsewhere`; `fixLines(errors, formulasById)` renders the `--cell` fix commands with
+   each cell's current formula and, for collateral errors, the written cell its formula
+   references. The read reuses `fixLines`.
 6. **Grid growth**: compare the block's extent against `gridProperties`; when larger, one
    `batchUpdate` `updateSheetProperties` (`gridProperties.rowCount/columnCount` with a fields
    mask) before the values call.
@@ -91,7 +100,13 @@ Range commands first, structure commands on top of them; one branch, one PR.
     `formula` and `error` per cell; `formulas[]` (cap 20, `formulas_total`), `errors[]` (cap
     50), `--formulas` swaps the rendered value; the two `help[]` lines. Unit tests on fixtures
     with a formula cell, an error cell and both.
-11. **Dispatcher** (`sheets.ts`): the five entries get `flags: "self"` and handlers, and lose
+11. **`sheets cell`** (`src/commands/sheets/cell.ts`): `parseFormulaRefs(formula)` — a pure
+    tokenizer for A1 cells/ranges (absolute, tab-qualified, column/row-only), named ranges,
+    skipping string literals and function names, flagging `INDIRECT`/`OFFSET` as dynamic;
+    `namedRanges` resolution; one multi-`ranges` fetch; breadth-first `--depth` with cycle
+    detection. Shares `fixLines`. Unit tests on the tokenizer (every form in the spec, a
+    quoted-string decoy, `Sheet1!A1:B2`, a named range) and the cycle case.
+12. **Dispatcher** (`sheets.ts`): the five entries get `flags: "self"` and handlers, and lose
     `instead`; `REPLACE_WHOLESALE` / `CREATE_VIA_UPLOAD` go away (the `renderAlternatives`
     call stays — it renders nothing when no stub remains). `drive upload`: the CSV/TSV line +
     the `MULTI_TAB_TARGET` suggestion. Help text, `flag-declarations` test, README § Sheets,
@@ -117,8 +132,15 @@ Range commands first, structure commands on top of them; one branch, one PR.
 - [ ] Live: re-running the same `update` is `action: unchanged` with no values call; a
       changed cell reports `changed: 1` and a `written[]` row with the previous value.
 - [ ] Live: writing `=B2*C2` reports the computed result in `written[].now`; writing
-      `=Cost!B2` on a tab with no `Cost` reports it in `errors[]` with Sheets' message and
-      `action: updated`; writing `1/2` reports `now: 1/2/<year>` and the hazard help line.
+      `=Cost!B2` on a tab with no `Cost` reports it in `errors[]` with Sheets' message, a
+      `Fix D2 …` help line carrying that formula, and `action: updated`, exit 0; writing `1/2`
+      reports `now: 1/2/<year>` and the hazard help line.
+- [ ] Live: writing text into a cell a `SUM` covers reports the `SUM` cell in `errors[]` with
+      `written: no` and names the written cell in its fix line; `clear` of a range a formula
+      references reports the `#REF!`; re-writing the formula correctly reports
+      `errors_fixed: 1`; a pre-existing unrelated error shows only as `errors_elsewhere`.
+- [ ] Live: the errors-only mask on a healthy 1000×26 tab — response size and latency
+      recorded in Notes; the 200k bound kept or amended from the measurement.
 - [ ] Live: `--cell B5=4800 --cell C9=3 --cell D2='=B2*C2'` writes all three in one
       `values.batchUpdate` with one pre-read and one read-back; a bad cell ref writes nothing.
 - [ ] Live: `create … --header` freezes row 1; `sheets read` then auto-promotes
@@ -129,7 +151,11 @@ Range commands first, structure commands on top of them; one branch, one PR.
       `COLUMN_NOT_FOUND` listing the headers.
 - [ ] Live: `sheets read` on the tab lists `formulas[N]{cell,formula}` with the formulas as
       entered, `--formulas` renders them in the grid, and a broken formula appears in
-      `errors[]` with the count as the first `help[]` line.
+      `errors[]` with the count as the first `help[]` line and a `sheets cell` line.
+- [ ] Live: `sheets cell` on `=B2*C2` where `C2` is text shows the `#VALUE!` message and
+      `refs[]` with `C2,text,n/a`; on `=SUM(Cost!B2:B500)` shows 20 ref rows, `ref_cells_total`
+      and a cross-tab ref; `--depth 2` expands a referenced formula; an `INDIRECT` ref is
+      `kind: dynamic`.
 - [ ] Live: a block wider than the tab grows the grid and reports `grid:`; the same block
       without growth is what upstream refuses.
 - [ ] Live: `append` lands after the last data row and `range:` matches where the rows

@@ -182,6 +182,9 @@ The response says `grid: grown to <rows>×<cols>` when it happened.
    formula shows its result or its error, and where `1/2` shows up as a date. One extra
    call so the caller does not need a `sheets read` to learn whether the write did what it
    meant to ([AXI §4](https://axi.md): the follow-up call is the expensive token cost).
+6. **Error scan**: the pre-read and the read-back each also fetch the **whole tab's error
+   cells** (`effectiveValue.errorValue` only — a mask that carries nothing for a healthy
+   cell), and the two sets are diffed. See § Formula errors: the feedback loop.
 
 Formatting, data validation, notes, and the other cells of the tab are never touched; the
 only requests sent are the values call, the grid growth when needed, and the freeze when
@@ -272,7 +275,9 @@ help[3]:
   cells excluded). `changed` — cells whose value differs after the write (`update` only).
 - `grid: grown to <rows>×<cols>` — only when the tab was enlarged.
 - `written[N]{cell,before,input,now}` — the cells worth a second look after the write:
-  every cell that **had a value** and received a different one (`before` is its previous
+  **every formula written** (its computed value in `now`, or its error text there and the
+  detail in `errors[]` — a formula never goes unreported), every cell that **had a value**
+  and received a different one (`before` is its previous
   entered text — a formula shows as its formula), and every cell whose **displayed value
   differs from the input** (`now` is the read-back `formattedValue`: a formula's result, a
   parsed date, a currency). A cell that was empty and now displays exactly what was typed
@@ -281,11 +286,9 @@ help[3]:
   is the undo line *and* the verification: the previous values and what Sheets made of the
   new ones are in the response, not behind a re-query
   ([provenance-by-default](../principles.md#provenance-by-default) applied to a write).
-- `errors[N]{cell,error,message}` — every written cell whose read-back is an error value
-  (`#REF!`, `#NAME?`, `#DIV/0!`, …) with Sheets' own message (`effectiveValue.errorValue`).
-  Shown only when there are any; the header then carries `errors: N` and the first `help[]`
-  line names the first one. The write still succeeded — the formula is stored — so this is
-  `action: updated` with a loud result, not a failure.
+- `errors[N]{cell,error,message,written}` and `errors_fixed: N` — the formula-error diff,
+  per § Formula errors: the feedback loop. Shown only when something errors now or stopped
+  erroring; the header then carries `errors: N`.
 - `header: frozen` — with `--header`; `frozen (N rows, unchanged)` when the tab already had a
   taller freeze.
 - `create` and `add-tab` end with the `sheets[N]{gid,title,index,rows,cols}` listing from
@@ -297,7 +300,7 @@ help[3]:
   `create`/`add-tab`, `sheets read <id> --tab <tab>`.
 - Undo: `drive revisions <id>` — Sheets exposes no revision id to the API, so the suggestion
   names the version history rather than a specific revision.
-- When `errors[]` is non-empty, first: "N written cell(s) show a formula error — see errors[]".
+- When `errors[]` is non-empty: the count first, then a fix line per error (up to 5) — § Formula errors.
 - The input-mode line (above), on every `USER_ENTERED` write; under `--raw`, the converse
   (`=…` was stored as text). When any `written[]` row has `now` differing from `input` without
   being a formula, the line names one (`D4: 1/2 became 1/2/2026; --raw stores it as text`).
@@ -308,6 +311,55 @@ help[3]:
   were; `sheets clear` empties them".
 - `create`: `drive share <id> --with <email>`; `sheets add-tab <id> --title <title>`.
 - `add-tab` with `exists`: `sheets update <id> --tab <title> --range A1 …` to write into it.
+
+## Formula errors: the feedback loop
+
+A formula that evaluates to an error is a write whose intent was not met, even though the
+value was stored. And a plain value can break a formula somewhere else: writing text into a
+cell a `SUM` covers, clearing a range a `VLOOKUP` reads (`#REF!`), renaming a header a
+`QUERY` names. The cells the caller named are not the only cells to check. So every write
+(`update`, `append`, `clear`, and the seed writes of `create` and `add-tab`) runs the same
+loop:
+
+1. **Before**: the set of cells in the tab whose effective value is an error, with the error
+   type and message. Fetched in the pre-read (one `ranges` entry for the whole tab, fields
+   `sheets(data(rowData(values(effectiveValue/errorValue))))`).
+2. **After**: the same set from the read-back.
+3. **Report** the diff, not the state:
+   - `errors[N]{cell,error,message,written}` — every cell that errors **after** the write and
+     either did not error before or was written by this call. `written: yes` marks cells the
+     block named; the rest are collateral — dependents the write broke. `message` is Sheets'
+     own (`Unresolved sheet name 'Cost'`, `Function SUM parameter 1 expects number values`),
+     which is the diagnostic the agent needs to fix it.
+   - `errors_fixed: N` — cells that errored before and do not now (a write whose point was to
+     fix a formula sees it confirmed).
+   - Pre-existing errors the write neither caused nor touched are not listed — they are
+     `sheets read`'s business — but the header carries `errors_elsewhere: N` so the agent
+     knows the tab is not clean.
+4. **Point at the fix.** The first `help[]` line is the count. Then one line per reported
+   error, up to 5, as a runnable command carrying the cell's **current formula** so the agent
+   edits rather than re-derives it:
+   `Fix D2 (#NAME?, Unknown range name: 'Cost'): gws-axi sheets update <id> --tab Costs --cell D2='=Cost!B2*C2'`.
+   For a collateral error the line also names the written cell it depends on when the
+   formula text contains that cell's reference, which is the common case. After the fix
+   lines, one line: `Run \`gws-axi sheets cell <id> <first error cell> --tab <t>\` to see the
+   formula with the current values it reads` — [sheets-cell.md](sheets-cell.md) is the
+   debugging view.
+
+**Exit code is 0 and `action` is unchanged.** The write did what it was told; the error is
+the *result* of what it was told, reported as loudly as the output envelope allows: `errors:
+N` directly under `action`, the block, and the first help line. A non-zero exit would turn a
+successful write into an error envelope and hide `written[]` — the undo — in the one case
+the agent most needs it.
+
+**Bound**: the tab-wide scan runs when the tab's allocation is at most 200,000 cells
+(`rowCount × columnCount`). Above that, the scan covers the written range only and the
+header says `error_scan: written range only (tab is R×C)`, so a silent gap never looks like
+a clean tab ([surface-completeness-limits](../principles.md#surface-completeness-limits)).
+
+**The read side of the loop** is [sheets read](sheets-read.md) § Error values: the same
+`errors[]` shape, the same fix line per error, so an agent that reads first and writes second
+sees one vocabulary.
 
 ## Errors
 
@@ -344,6 +396,7 @@ what makes a collision visible after the fact.
 | A protected range refuses `values.update` with a 403 naming the protection | Documented. **To verify live** for the message `PROTECTED_RANGE` is classified from |
 | `updateSheetProperties` with `gridProperties.frozenRowCount` and that fields mask freezes the top rows and changes nothing else | Documented. **To verify live**, including that `sheets read` then auto-promotes |
 | A `spreadsheets.get` right after `values.update` returns computed formula results and `effectiveValue.errorValue` for broken ones (no "Loading…" state for ordinary formulas) | Expected from the API's synchronous recalculation. **To verify live**; `IMPORTRANGE`-class formulas may lag and are disclosed if so |
+| A fields mask of `effectiveValue/errorValue` alone returns a compact response for a healthy tab (no per-cell payload for cells with no error) | Expected from field masks. **To verify live** on a 1000×26 tab — the bound in § Formula errors follows from the measured size |
 | `values.batchUpdate` with one single-cell range per entry writes them all, or none on a bad range | Documented (atomic per request). **To verify live** |
 | Drive `files.create` with the spreadsheet MIME creates a spreadsheet whose first tab is `Sheet1` | **Observed** (the `drive upload --convert` path produces the same) |
 
@@ -390,6 +443,16 @@ and the `MULTI_TAB_TARGET` suggestions name `sheets update --tab` as the tab-saf
   turn around to point here.
 
 **Local:**
+
+- **A write is judged by the tab it leaves, not the cells it named.** Every write reports
+  the formula errors it introduced anywhere in the tab, the ones it fixed, and a ready fix
+  for each — the same way whether the cause was a formula it wrote or a value a formula
+  elsewhere depended on.
+
+  > **Why:** an agent fills a sheet in a loop: write, read, adjust. A `#REF!` three columns
+  > over, found two turns later by a human, is the failure that makes the loop untrustworthy.
+  > The scan costs one tab-wide errors-only fetch on each side of the write; that is cheaper
+  > than any re-read, and far cheaper than the undetected case.
 
 - **Values, never the file.** A `sheets` writer sends values calls and the one structural
   request that makes them fit. It never replaces the file, never touches formatting it was not

@@ -86,7 +86,14 @@ A cell whose effective value is an error (`#REF!`, `#NAME?`, `#DIV/0!`, `#N/A`, 
 an `errors[N]{cell,error,message}` block with Sheets' own message (`errorValue.message`,
 e.g. "Unresolved sheet name 'Cost'"). The header carries `errors: <n>` and the **first**
 `help[]` line names the count, so an agent never takes `#REF!` for data. Capped at 50 rows
-with `errors_total` past the cap.
+with `errors_total` past the cap. After the count, one `help[]` line per error (up to 5) is a
+runnable fix carrying the cell's current formula —
+`Fix D2 (#NAME?, Unknown range name: 'Cost'): gws-axi sheets update <id> --tab Costs --cell D2='=Cost!B2*C2'`
+— the same line the write side emits ([sheets-write.md](sheets-write.md) § Formula errors:
+the feedback loop), so read and write speak one vocabulary — and then a `sheets cell <id>
+<cell>` line for the first error ([sheets-cell.md](sheets-cell.md)), the view that shows a
+formula beside the values it reads. The scan is the fetched window:
+a capped default read says so (`errors` counts the window; `--full` scans the tab).
 
 ### Truncation
 
