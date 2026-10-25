@@ -239,6 +239,12 @@ asked for. `append`, `create` and `add-tab` read back the same way.
 
 ## Output
 
+**The rule for formulas:** the response to any write that contains a formula carries, for
+**every** formula written, its computed result or its error with Sheets' message — in the
+same response, from the read-back, always. There is no formula write whose outcome needs a
+`sheets read` to learn. This is the immediate feedback loop; `sheets read` and `sheets cell`
+are for the next turn, not for finding out whether this one worked.
+
 Header: `action: updated | unchanged | appended | cleared | created | added | exists`, then
 `account` (+ `account_source` per the standard rules).
 
@@ -254,15 +260,22 @@ spreadsheet:
 range: Costs!B2:D4
 shape: 3x3
 cells: 9
-changed: 4
+changed: 5
+errors: 1
 input: user-entered
-written[4]{cell,before,input,now}:
+formulas[2]{cell,formula,result,message}:
+  D2,=B2*C2,"$9,600",
+  D3,=B3/C3,#DIV/0!,Function DIVIDE parameter 2 cannot be zero.
+written[3]{cell,before,input,now}:
   B2,"$4,200",4800,"$4,800"
   C3,pending,done,done
-  D2,,=B2*C2,"$9,600"
   D4,,1/2,1/2/2026
-help[3]:
-  Run `gws-axi sheets read 1AbC… --tab Costs --range B2:D4 --formulas` to see the range with its formulas
+errors[1]{cell,error,message,written}:
+  D3,DIV_BY_ZERO,Function DIVIDE parameter 2 cannot be zero.,yes
+help[5]:
+  1 formula error after this write — see errors[]
+  Fix D3 (#DIV/0!, Function DIVIDE parameter 2 cannot be zero.): gws-axi sheets update 1AbC… --tab Costs --cell D3='=B3/C3'
+  Run `gws-axi sheets cell 1AbC… D3 --tab Costs` to see the formula with the current values it reads
   Run `gws-axi drive revisions 1AbC…` for the version history; the pre-write version is the newest revision before this one
   Values were parsed as typed (USER_ENTERED): dates, numbers, currencies and =formulas take effect. Pass --raw to store strings verbatim
 ```
@@ -274,10 +287,13 @@ help[3]:
 - `shape`, `cells` — the block's rows×columns and the number of cells it carried (`null`
   cells excluded). `changed` — cells whose value differs after the write (`update` only).
 - `grid: grown to <rows>×<cols>` — only when the tab was enlarged.
-- `written[N]{cell,before,input,now}` — the cells worth a second look after the write:
-  **every formula written** (its computed value in `now`, or its error text there and the
-  detail in `errors[]` — a formula never goes unreported), every cell that **had a value**
-  and received a different one (`before` is its previous
+- `formulas[N]{cell,formula,result,message}` — **every formula the block contained**, in
+  block order, never capped: the formula as stored, `result` as the displayed value after
+  recalculation or the error text (`#DIV/0!`), and `message` — Sheets' own explanation —
+  only when it errored. Under `--raw` there are no formulas (the `=` text is a string) and
+  the block is absent; the help line says so.
+- `written[N]{cell,before,input,now}` — the non-formula cells worth a second look after the
+  write: every cell that **had a value** and received a different one (`before` is its previous
   entered text — a formula shows as its formula), and every cell whose **displayed value
   differs from the input** (`now` is the read-back `formattedValue`: a formula's result, a
   parsed date, a currency). A cell that was empty and now displays exactly what was typed

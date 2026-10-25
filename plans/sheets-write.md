@@ -67,7 +67,8 @@ Range commands first, structure commands on top of them; one branch, one PR.
    comparison from § Behavior as a pure `diffBlock(current, input, mode)` returning per-cell
    `{cell, before, changed}`. Unit-tested on every kind × mode case the spec names. The same
    fetch shape serves the **read-back** after the write (`formattedValue`, `effectiveValue`),
-   from which `written[]` (before ≠ input, or now ≠ input) is built by a pure
+   from which `formulas[]` (every formula in the block, uncapped) and `written[]` (before ≠
+   input, or now ≠ input, non-formula) are built by a pure
    `reportWrite(pre, input, post)`; `--cell` passes one `ranges` entry per cell to both.
    **Error scan**: both fetches add a whole-tab `ranges` entry under the errors-only mask
    (when the allocation is ≤ 200k cells; else the written range, disclosed); a pure
@@ -131,7 +132,7 @@ Range commands first, structure commands on top of them; one branch, one PR.
       (`includeGridData` diff).
 - [ ] Live: re-running the same `update` is `action: unchanged` with no values call; a
       changed cell reports `changed: 1` and a `written[]` row with the previous value.
-- [ ] Live: writing `=B2*C2` reports the computed result in `written[].now`; writing
+- [ ] Live: writing `=B2*C2` reports it in `formulas[]` with `result: $9,600`; writing
       `=Cost!B2` on a tab with no `Cost` reports it in `errors[]` with Sheets' message, a
       `Fix D2 …` help line carrying that formula, and `action: updated`, exit 0; writing `1/2`
       reports `now: 1/2/<year>` and the hazard help line.
