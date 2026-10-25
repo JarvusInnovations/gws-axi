@@ -5,6 +5,7 @@ import {
   isEmptyBlock,
   mapKeyedRows,
   parseCellArgs,
+  formatCsv,
   parseCsv,
   parseJsonGrid,
 } from "./values.js";
@@ -143,5 +144,32 @@ describe("blockShape / isEmptyBlock", () => {
     expect(isEmptyBlock([])).toBe(true);
     expect(isEmptyBlock([[], ["", null]])).toBe(true);
     expect(isEmptyBlock([["", "x"]])).toBe(false);
+  });
+});
+
+describe("formatCsv", () => {
+  const fixtures: string[][][] = [
+    [["a", "b,c", 'say "hi"', "line1\nline2"]],
+    [
+      ["Item", "Qty"],
+      ["bolts", "40"],
+    ],
+    [["a", "b", "c"], ["d"], ["", "e"]],
+    [["x"], [""], ["y"]],
+    [["crlf\r\ninside", "$9,600"]],
+    [["", "", ""]],
+  ];
+
+  it("round-trips through parseCsv", () => {
+    for (const rows of fixtures) expect(parseCsv(formatCsv(rows))).toEqual(rows);
+  });
+
+  it("quotes only what needs it and ends rows with CRLF", () => {
+    expect(formatCsv([["a", "b c", "d,e"]])).toBe('a,b c,"d,e"\r\n');
+  });
+
+  it("round-trips tab-separated", () => {
+    const rows = [["a\tb", "c,d"]];
+    expect(parseCsv(formatCsv(rows, "\t"), "\t")).toEqual(rows);
   });
 });

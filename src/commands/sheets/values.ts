@@ -11,6 +11,20 @@ export type InputValue = string | number | boolean | null;
 export type Block = InputValue[][];
 
 /**
+ * The inverse of `parseCsv`: RFC 4180 with `\r\n` row ends. A field is quoted
+ * when it holds the separator, a quote, or a line break; a row that is one
+ * empty field is written `""` so it does not read back as a blank line.
+ */
+export function formatCsv(rows: ReadonlyArray<ReadonlyArray<string>>, sep = ","): string {
+  const quote = (field: string): string =>
+    field.includes(sep) || /["\r\n]/.test(field) ? `"${field.replace(/"/g, '""')}"` : field;
+  return rows
+    .map((row) => (row.length === 1 && row[0] === "" ? '""' : row.map(quote).join(sep)))
+    .map((line) => `${line}\r\n`)
+    .join("");
+}
+
+/**
  * RFC 4180: `sep`-separated fields, `"…"` quoting with `""` for a literal
  * quote, newlines inside quotes, `\r\n` or `\n` rows. A wholly blank line is an
  * empty row — nothing written in it — not a row with one empty field that

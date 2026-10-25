@@ -165,3 +165,22 @@ This is a rule about Gmail, where a draft exists for the human to review and rel
 When gws-axi composes content that reaches another person — a draft a human will send without re-authoring, or a message gws-axi sends itself — the command is responsible for the representation that reaches the **recipient**, not merely for content that looks right at an intermediate step. Choose the wire format whose rendering this tool controls, never rely on the receiving or sending client to infer structure from unstructured text, and verify against the delivered artifact rather than the request or the compose view.
 
 > **Why:** Every composing surface has a point where the content looks correct and is not yet what the recipient will see. For Gmail it was the compose window: single-part `text/plain` was correct there and hard-wrapped on arrival, with no signal in between. For Chat it is the request body: markup is interpreted on the way in, and only the stored message shows what it became. A check made at the intermediate step passes on exactly the defects this rule exists to catch.
+
+## preview-to-stdout-full-data-to-a-file
+
+When a command can return more data than fits an agent's turn, stdout carries a small,
+capped, agent-readable **preview**, and the **full payload goes to a file** only when an
+explicit per-format flag asks for it (`--json-out[=path]`, `--csv-out[=path]`;
+[api/conventions.md § Export files](api/conventions.md#export-files)). Writing the file never
+changes the preview. gws-axi never offers a `--json`-to-stdout dump, and never picks the
+format from a path's extension or a `--format` selector: the flag names the format.
+
+> **Why:** stdout is for *deciding* — is this the right data, what are the columns — and a
+> raw dump there defeats every other principle on this page. But an agent that has decided
+> needs the whole result to process with `jq`, `csvkit` or a script, and re-querying with
+> `--full` is a second call that still lands in the context window. A side-channel file, named
+> in the response with its columns, gives the agent the full data without reading it. This is
+> the house realization of the cross-AXI discussion in
+> [kunchenguid/axi#32](https://github.com/kunchenguid/axi/issues/32); AXI itself does not
+> prescribe it, so it is a gws-axi rule, applied only where a command's payload can exceed
+> its cap.

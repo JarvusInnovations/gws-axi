@@ -41,7 +41,7 @@ Read coverage is complete across all seven services; write coverage is rolling o
 | **Docs** | ✅ read · find · comments · download · revisions · diff · tabs | ✅ create · write · append · replace-text · edit-cell · tabs update/delete &nbsp;·&nbsp; 🚧 insert-text · delete-range · style-text · style-paragraph · insert-table · comment writes |
 | **Drive** | ✅ ls · get · search · permissions · download · revisions · activity | ✅ upload · mkdir · rename · move · trash · untrash · share · unshare &nbsp;·&nbsp; 🚧 create · copy &nbsp;·&nbsp; ✋ permanent delete |
 | **Slides** | ✅ get · page · summarize · comments | ✅ skip · unskip &nbsp;·&nbsp; 🚧 create · update |
-| **Sheets** | ✅ read · cell · comments · tabs | ✅ update · append · clear · create · add-tab · note · tabs update · tabs delete · insert-rows / insert-cols · delete-rows / delete-cols |
+| **Sheets** | ✅ read · query · cell · comments · tabs | ✅ update · append · clear · create · add-tab · note · tabs update · tabs delete · insert-rows / insert-cols · delete-rows / delete-cols |
 | **Chat** | ✅ spaces · messages · search · members · download · wait · watch | ✅ send · react · unreact · mark-read · mark-unread |
 
 <sub>✅ shipped · 🚧 planned · ✋ out of scope by design</sub>
@@ -448,9 +448,21 @@ gws-axi sheets read <spreadsheetId> --tab Costs --range A1:D50   # scope to an A
 gws-axi sheets read <spreadsheetId> --header-row          # promote row 1 to column names (auto for a frozen top row; --raw to force letters)
 gws-axi sheets read <spreadsheetId> --tab Costs --formulas       # formulas in the grid instead of their values
 gws-axi sheets read <spreadsheetId> --tab Costs --full    # don't cap at 50 rows
+gws-axi sheets read <spreadsheetId> --tab Costs --csv-out # 50-row preview here, every row in a file (--json-out for JSON)
 gws-axi sheets cell <spreadsheetId> D2 --tab Costs        # one cell: formula, value, error, and the values it reads
 gws-axi sheets comments <spreadsheetId>                   # review comments (Drive comments)
 ```
+
+`sheets query` runs a query in the language `=QUERY()` uses (Google's Visualization Query Language: `select`, `where`, `group by`, `pivot`, `order by`, `limit`, `label`, `format`) against one tab, without writing a formula into the sheet. Columns are letters. The query goes to Google as written, and a bad one comes back as `QUERY_ERROR` with Google's own message. The result is a 50-row preview (`--limit`), with every column's id, label and type on a `columns:` line, and the matching `=QUERY()` formula in `help[]`.
+
+```bash
+gws-axi sheets query <id> "select A, sum(C) where D = 'open' group by A" --tab Costs
+gws-axi sheets query <id> "select * where B > 100 order by B desc" --tab Costs --limit 10
+gws-axi sheets query <id> "select A, B" --tab Costs --headers 0          # name columns by letter, row 1 is data
+gws-axi sheets query <id> "select *" --tab Costs --json-out=./costs.json  # every row to a file
+```
+
+`--json-out[=<path>]` and `--csv-out[=<path>]` write the full result to a file and leave the preview as it is. Without `=<path>` the file goes in a per-user folder in the OS temp dir (`gws-axi-<uid>/<timestamp>-<kind>.<ext>`), owner-only: gws-axi refuses to write into that folder if someone else owns it or can read it, and never writes through an existing file or symlink. An explicit `=<path>` replaces a file that is there, and the response says `overwrote`. The response names the file, its row and column counts, and the columns, and gives a `jq` or `head` command for it. `sheets query --csv-out` saves Google's own CSV of the query. `sheets read` writes the whole tab as display strings, header row first.
 
 The writes put **values** into one tab and leave everything else — formats, widths, validation, other tabs — as it was. Values come as CSV (default), TSV, or a JSON 2-D array (`null` leaves a cell as it is), from a file, `-`, or `--content`. Strings are parsed as typed (`=formulas`, dates, currencies) unless `--raw`.
 
@@ -546,6 +558,7 @@ Conversations are addressed by id (from `chat spaces`) or by `--with <email>` �
 - **Slides writes**: `skip` / `unskip` (hide slides in presentation mode) are shipped; `create` / `update` are still scaffolded as `NOT_IMPLEMENTED`.
 - **Sheets writes** set values, plus tab properties through `sheets tabs`: no formatting, widths, or validation yet. Rows and columns can be inserted and deleted, not moved, resized, hidden or grouped. Tabs can be renamed, moved, hidden, frozen and deleted (`sheets tabs`), but not colored, copied or protected. Sheets exposes no revision id, so the undo is the `written[]` block plus the editor's version history.
 - **Sheets notes**: `sheets note` writes one cell's note per call; there is no batch form. Comments (`sheets comments`) are read-only.
+- **Sheets query** reads one tab per query; the language has no joins. Values in the preview are the sheet's formatted text, and the JSON export holds the raw values.
 - **Testing-mode tokens** still expire every 7 days *if* you haven't published your OAuth app yet. Run `gws-axi auth publish` for the walkthrough — it covers the single-developer Production flow and removes the expiry once you've re-auth'd each account.
 
 ## Design docs

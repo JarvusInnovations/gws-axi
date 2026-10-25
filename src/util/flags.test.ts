@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AxiError } from "axi-sdk-js";
-import { parseArgs, parseChoice, parseChoices, parseLimit } from "./flags.js";
+import { extraArgumentError, parseArgs, parseChoice, parseChoices, parseLimit } from "./flags.js";
 
 const SPEC = { value: ["--limit", "--since"], boolean: ["--full"] };
 
@@ -96,5 +96,88 @@ describe("parseChoice / parseChoices", () => {
   it("parses a list, dropping repeats", () => {
     expect(parseChoices("--fields", "dm, space,dm", kinds)).toEqual(["dm", "space"]);
     expect(errorFrom(() => parseChoices("--fields", "dm,nope", kinds)).message).toContain("nope");
+  });
+});
+
+describe("parseArgs optional-value flags", () => {
+  const OUT = { value: ["--range"], boolean: ["--full"], optional: ["--csv-out", "--json-out"] };
+
+  it("records a bare optional flag as present with no value", () => {
+    const parsed = parseArgs(["1AbC", "--csv-out"], OUT, "sheets query");
+    expect(parsed.booleans.has("--csv-out")).toBe(true);
+    expect(parsed.values["--csv-out"]).toBeUndefined();
+  });
+
+  it("takes the value after =", () => {
+    const parsed = parseArgs(["--csv-out=./x.csv"], OUT, "sheets query");
+    expect(parsed.booleans.has("--csv-out")).toBe(true);
+    expect(parsed.values["--csv-out"]).toBe("./x.csv");
+  });
+
+  it("keeps an = inside the path", () => {
+    expect(parseArgs(["--json-out=a=b.json"], OUT, "x").values["--json-out"]).toBe("a=b.json");
+  });
+
+  it("never consumes a following path-looking token", () => {
+    const parsed = parseArgs(["--csv-out", "./x.csv"], OUT, "sheets query");
+    expect(parsed.values["--csv-out"]).toBeUndefined();
+    expect(parsed.positionals).toEqual(["./x.csv"]);
+  });
+
+  it("refuses = on a value flag, so the two forms are not confused", () => {
+    const err = errorFrom(() => parseArgs(["--range=B2"], OUT, "sheets read"));
+    expect(err.code).toBe("VALIDATION_ERROR");
+    expect(err.message).toContain("--range B2");
+  });
+
+  it("refuses = on a boolean flag", () => {
+    expect(errorFrom(() => parseArgs(["--full=yes"], OUT, "sheets read")).message).toContain(
+      "--full takes no value",
+    );
+  });
+
+  it("refuses an empty value after =", () => {
+    expect(errorFrom(() => parseArgs(["--csv-out="], OUT, "x")).code).toBe("VALIDATION_ERROR");
+  });
+
+  it("lists optional flags with their [=<path>] form among the valid flags", () => {
+    const err = errorFrom(() => parseArgs(["--cvs-out"], OUT, "sheets query"));
+    expect(err.suggestions.join(" ")).toContain("--csv-out[=<path>]");
+  });
+
+  it("still refuses an unknown --name=value", () => {
+    expect(errorFrom(() => parseArgs(["--nope=1"], OUT, "x")).message).toContain("Unknown flag");
+  });
+});
+
+describe("parseArgs flag tokens after a value flag", () => {
+  const SPEC2 = { value: ["--tab", "--find"], optional: ["--csv-out"] };
+
+  it("treats --<declared>=… as a flag, so the value flag is missing its value", () => {
+    expect(errorFrom(() => parseArgs(["--tab", "--csv-out=x.csv"], SPEC2, "x")).message).toContain(
+      "--tab needs a value",
+    );
+  });
+
+  it("still takes a value that starts with -- and holds = but names no declared flag", () => {
+    expect(parseArgs(["--find", "--a=b"], SPEC2, "x").values["--find"]).toBe("--a=b");
+  });
+});
+
+describe("extraArgumentError", () => {
+  const SPEC3 = { optional: ["--csv-out"] };
+
+  it("says the path rides on = when the extra token followed a bare optional flag", () => {
+    const parsed = parseArgs(["1AbC", "--csv-out", "out.csv"], SPEC3, "x");
+    expect(parsed.optionalFollowers).toEqual({ "--csv-out": "out.csv" });
+    const err = extraArgumentError(parsed, ["out.csv"], "usage");
+    expect(err.message).toBe("--csv-out takes its path with =: --csv-out=out.csv");
+  });
+
+  it("is the generic error otherwise", () => {
+    const parsed = parseArgs(["1AbC", "stray"], SPEC3, "x");
+    expect(extraArgumentError(parsed, ["stray"], "usage").message).toBe(
+      "Unexpected argument: stray",
+    );
   });
 });
