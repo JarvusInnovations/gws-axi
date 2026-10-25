@@ -1,5 +1,3 @@
-import { readFile, stat } from "node:fs/promises";
-import { resolve } from "node:path";
 import { AxiError } from "axi-sdk-js";
 import type { docs_v1 } from "googleapis";
 import { docsClient, driveClient, translateGoogleError } from "../../google/client.js";
@@ -14,6 +12,7 @@ import {
   resolvePlacement,
 } from "./tabs.js";
 import { parseArgs } from "../../util/flags.js";
+import { checkOneSource, readSource as readAnySource, takeStdin } from "../../util/source.js";
 import {
   type ColSpec,
   locateTables,
@@ -174,11 +173,8 @@ export function parseWriteFlags(args: string[], mode: WriteMode): WriteFlags {
   const flags: WriteFlags = { stdin: false, frontmatter: "strip" };
   // `-` is stdin; parseArgs already treats it as a positional.
   const parsed = parseArgs(args, FLAGS[mode], `docs ${mode}`);
-  const positionals: string[] = [];
-  for (const arg of parsed.positionals) {
-    if (arg === "-") flags.stdin = true;
-    else positionals.push(arg);
-  }
+  const { stdin, rest: positionals } = takeStdin(parsed.positionals);
+  flags.stdin = stdin;
   flags.content = parsed.values["--content"];
   flags.tab = parsed.values["--tab"];
   flags.newTab = parsed.values["--new-tab"];
@@ -240,19 +236,11 @@ export function parseWriteFlags(args: string[], mode: WriteMode): WriteFlags {
   }
   flags.localPath = positionals[0];
 
-  const sources =
-    (flags.localPath ? 1 : 0) + (flags.stdin ? 1 : 0) + (flags.content !== undefined ? 1 : 0);
-  if (sources > 1) {
-    throw new AxiError("Provide exactly one content source", "VALIDATION_ERROR", [
-      "A local path, `-` (stdin), and --content are mutually exclusive",
-    ]);
-  }
-  if (sources === 0 && mode !== "create") {
-    throw new AxiError("Missing content source", "VALIDATION_ERROR", [
-      "Provide a local file path, `-` to read from stdin, or --content <markdown>",
-      `Usage: gws-axi docs ${mode} <documentId> (<file> | - | --content <markdown>)`,
-    ]);
-  }
+  checkOneSource(flags, {
+    optional: mode === "create",
+    what: "markdown",
+    usage: `gws-axi docs ${mode} <documentId> (<file> | - | --content <markdown>)`,
+  });
   if (flags.tab && flags.newTab) {
     throw new AxiError("--tab and --new-tab are mutually exclusive", "VALIDATION_ERROR", [
       "--tab writes into an existing tab; --new-tab adds one. Pick one",
@@ -266,33 +254,8 @@ export function parseWriteFlags(args: string[], mode: WriteMode): WriteFlags {
   return flags;
 }
 
-async function readStdin(): Promise<string> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
-  return Buffer.concat(chunks).toString("utf8");
-}
-
-export async function readSource(flags: WriteFlags): Promise<string | undefined> {
-  if (flags.content !== undefined) return flags.content;
-  if (flags.stdin) return readStdin();
-  if (!flags.localPath) return undefined;
-  const absolutePath = resolve(process.cwd(), flags.localPath);
-  let fileStat;
-  try {
-    fileStat = await stat(absolutePath);
-  } catch {
-    throw new AxiError(`Local file not found: ${flags.localPath}`, "LOCAL_FILE_NOT_FOUND", [
-      "Check the path; it must be a readable file on this machine",
-    ]);
-  }
-  if (fileStat.isDirectory()) {
-    throw new AxiError(
-      `Local path is a directory, not a file: ${flags.localPath}`,
-      "LOCAL_PATH_NOT_FILE",
-      ["Pass a single Markdown file"],
-    );
-  }
-  return readFile(absolutePath, "utf8");
+export function readSource(flags: WriteFlags): Promise<string | undefined> {
+  return readAnySource(flags, "Markdown file");
 }
 
 // ---------------------------------------------------------------------------

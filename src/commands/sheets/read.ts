@@ -2,6 +2,13 @@ import { AxiError } from "axi-sdk-js";
 import type { sheets_v4 } from "googleapis";
 import { sheetsClient, translateGoogleError } from "../../google/client.js";
 import {
+  type ExportOutcome,
+  type ExportRequest,
+  parseExportRequest,
+  writeExport,
+} from "../../util/export.js";
+import { type FlagSpec, extraArgumentError, parseArgs } from "../../util/flags.js";
+import {
   field,
   joinBlocks,
   renderHelp,
@@ -9,11 +16,34 @@ import {
   renderObject,
   type FieldDef,
 } from "../../output/index.js";
+import {
+  type CellError,
+  type LegendEntry,
+  fetchRow1,
+  renderTabs,
+  type RangeOrigin,
+  renderLegend,
+  type TabInfo,
+  columnLetter,
+  errorCountLine,
+  fixLines,
+  parseRangeOrigin,
+  quoteTitle,
+  shellArg,
+  spreadsheetNotFound,
+  splitQualifiedRange,
+  toTabInfo,
+} from "./shared.js";
+import { formatCsv } from "./values.js";
+
+// The A1 helpers moved to shared.ts with the write surface; re-exported so
+// existing importers keep working.
+export { columnIndex, columnLetter, parseRangeOrigin, type RangeOrigin } from "./shared.js";
 
 export const READ_HELP = `usage: gws-axi sheets read <spreadsheetId> [flags]
 args[1]:
   <spreadsheetId>      The spreadsheet ID (the portion of the URL after /d/)
-flags[7]:
+flags[10]:
   --tab <name|gid>     Tab to render (by title or numeric sheetId). Omit for a
                        single-tab file; required to pick one in a multi-tab file
   --range <A1>         Restrict to an A1 range within the tab (e.g. A1:D50). A
@@ -24,24 +54,34 @@ flags[7]:
                        auto-detection
   --full               Don't cap rendered rows (default cap: 50)
   --max-rows <n>       Override the 50-row render cap (ignored with --full)
+  --formulas           Show each formula cell's formula (=B2*C2) in the grid in
+                       place of its displayed value
+  --json-out[=<path>]  Also write the whole tab (or --range), uncapped, as JSON
+                       {tab, origin, columns, rows} (default path: a 0600 file
+                       in the OS temp dir). The preview stays capped
+  --csv-out[=<path>]   Same as CSV, header row first when there is one
   --account <email>    Account override when 2+ are configured
 examples:
   gws-axi sheets read 1AbC...
   gws-axi sheets read 1AbC... --tab Costs
   gws-axi sheets read 1AbC... --tab Costs --range A1:D50
   gws-axi sheets read 1AbC... --tab Costs --header-row
+  gws-axi sheets read 1AbC... --tab Costs --csv-out=./costs.csv
 output:
   A \`spreadsheet{id,title,tab?,tab_count?}\` header, a \`sheets[N]{gid,title,
   index,rows,cols}\` tabs listing (always shown), and — when a tab is selected —
   a \`cells[N]{row,A,B,…}\` grid (real sheet row numbers + A1 column letters).
   Embedded links are resolved inline as markdown \`[text](url)\` in the cells;
-  cell notes come back in a \`notes[N]{cell,note}\` block. Multi-tab files
-  without --tab return only the tabs listing so you can pick one.
+  cell notes come back in a \`notes[N]{cell,note}\` block, formulas in
+  \`formulas[N]{cell,formula}\`, and formula errors in
+  \`errors[N]{cell,error,message}\` with a fix line per error in help[].
+  Multi-tab files without --tab return only the tabs listing so you can pick one.
 notes:
   A single frozen top row is auto-promoted to column names (header_source:
   frozen-row in the output); pass --raw to override, or --header-row to force
   promotion when no row is frozen.
-  Cell values are FORMATTED_VALUE (displayed strings), not formulas/raw numbers.
+  Cell values are the displayed strings ($9,600, not 9600). Formula cells show
+  their value; their formulas are listed in formulas[] (or shown with --formulas).
   For review comments use \`gws-axi sheets comments <id>\` (Drive comments).
   Operates on native Google Sheets only; uploaded .xlsx/.csv route to Drive.
 `;
@@ -59,72 +99,62 @@ interface ParsedFlags {
   raw: boolean;
   full: boolean;
   maxRows: number;
+  formulas: boolean;
+  exportReq: ExportRequest | undefined;
 }
 
-const KNOWN_FLAGS = new Set(["--tab", "--range", "--header-row", "--raw", "--full", "--max-rows"]);
+export const READ_FLAGS: FlagSpec = {
+  value: ["--tab", "--range", "--max-rows"],
+  boolean: ["--header-row", "--raw", "--full", "--formulas"],
+  optional: ["--json-out", "--csv-out"],
+};
 
 function parseFlags(args: string[]): ParsedFlags {
-  let spreadsheetId: string | undefined;
-  let tab: string | undefined;
-  let range: string | undefined;
-  let headerRow = false;
-  let raw = false;
-  let full = false;
-  let maxRows = DEFAULT_MAX_ROWS;
-
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (!arg.startsWith("--")) {
-      if (spreadsheetId === undefined) spreadsheetId = arg;
-      continue;
-    }
-    switch (arg) {
-      case "--tab":
-        tab = args[++i];
-        break;
-      case "--range":
-        range = args[++i];
-        break;
-      case "--header-row":
-        headerRow = true;
-        break;
-      case "--raw":
-        raw = true;
-        break;
-      case "--full":
-        full = true;
-        break;
-      case "--max-rows": {
-        const raw = args[++i];
-        const n = Number(raw);
-        if (!Number.isInteger(n) || n <= 0) {
-          throw new AxiError(
-            `--max-rows must be a positive integer (got '${raw}')`,
-            "VALIDATION_ERROR",
-            ["Usage: gws-axi sheets read <spreadsheetId> --max-rows <n>"],
-          );
-        }
-        maxRows = n;
-        break;
-      }
-      default:
-        throw new AxiError(`unknown flag ${arg} for \`sheets read\``, "VALIDATION_ERROR", [
-          `valid flags: ${[...KNOWN_FLAGS].join(", ")} (globals --account, --help always allowed)`,
-        ]);
-    }
-  }
-
+  const parsed = parseArgs(args, READ_FLAGS, "sheets read");
+  const [spreadsheetId, ...extra] = parsed.positionals;
   if (!spreadsheetId) {
     throw new AxiError("Missing spreadsheetId argument", "VALIDATION_ERROR", [
       "Usage: gws-axi sheets read <spreadsheetId> [--tab <name|gid>] [--range <A1>]",
     ]);
   }
+  if (extra.length) {
+    throw extraArgumentError(
+      parsed,
+      extra,
+      "Usage: gws-axi sheets read <spreadsheetId> [--tab <name|gid>] [--range <A1>]",
+    );
+  }
+  let maxRows = DEFAULT_MAX_ROWS;
+  const rawMax = parsed.values["--max-rows"];
+  if (rawMax !== undefined) {
+    const n = Number(rawMax);
+    if (!Number.isInteger(n) || n <= 0) {
+      throw new AxiError(
+        `--max-rows must be a positive integer (got '${rawMax}')`,
+        "VALIDATION_ERROR",
+        ["Usage: gws-axi sheets read <spreadsheetId> --max-rows <n>"],
+      );
+    }
+    maxRows = n;
+  }
+  const headerRow = parsed.booleans.has("--header-row");
+  const raw = parsed.booleans.has("--raw");
   if (headerRow && raw) {
     throw new AxiError("--header-row and --raw are mutually exclusive", "VALIDATION_ERROR", [
       "Use --header-row to force header promotion, or --raw to force the column-letter grid",
     ]);
   }
-  return { spreadsheetId, tab, range, headerRow, raw, full, maxRows };
+  return {
+    spreadsheetId,
+    tab: parsed.values["--tab"],
+    range: parsed.values["--range"],
+    headerRow,
+    raw,
+    full: parsed.booleans.has("--full"),
+    maxRows,
+    formulas: parsed.booleans.has("--formulas"),
+    exportReq: parseExportRequest(parsed),
+  };
 }
 
 /**
@@ -149,64 +179,6 @@ export function resolveHeaderMode(opts: {
 // Pure helpers (unit-tested directly, no Google client)
 // ---------------------------------------------------------------------------
 
-/** 0-based column index → A1 column letter (0→A, 25→Z, 26→AA). */
-export function columnLetter(index0: number): string {
-  let n = index0;
-  let out = "";
-  do {
-    out = String.fromCharCode(65 + (n % 26)) + out;
-    n = Math.floor(n / 26) - 1;
-  } while (n >= 0);
-  return out;
-}
-
-/** A1 column letters → 0-based column index (A→0, Z→25, AA→26). */
-export function columnIndex(letters: string): number {
-  let n = 0;
-  for (const ch of letters.toUpperCase()) {
-    n = n * 26 + (ch.charCodeAt(0) - 64);
-  }
-  return n - 1;
-}
-
-export interface RangeOrigin {
-  col0: number;
-  row1: number;
-}
-
-/**
- * Parse the top-left origin of a `values.get` range echo. Handles a bare range
- * (`C5:E9`), a tab-qualified range (`Costs!C5:E9`), quoted titles that may
- * contain `!` (`'My Sheet!x'!A1:B2`), absolute refs (`$C$5`), and open-ended
- * ranges (`Costs!A:D` → row 1; `Costs!5:9` → col A). Falls back to A1 when the
- * origin can't be determined, so a parse miss degrades to a safe default rather
- * than mis-addressing.
- */
-export function parseRangeOrigin(range: string | undefined | null): RangeOrigin {
-  const fallback: RangeOrigin = { col0: 0, row1: 1 };
-  if (!range) return fallback;
-
-  // Strip a leading tab qualifier. A quoted title ('...') ends at the closing
-  // quote (doubled '' = literal quote); an unquoted title ends at the last `!`.
-  let a1 = range;
-  if (range.startsWith("'")) {
-    const close = range.indexOf("'!", 1);
-    if (close !== -1) a1 = range.slice(close + 2);
-  } else {
-    const bang = range.lastIndexOf("!");
-    if (bang !== -1) a1 = range.slice(bang + 1);
-  }
-
-  const start = a1.split(":")[0] ?? "";
-  const m = start.match(/^\$?([A-Za-z]+)?\$?([0-9]+)?$/);
-  if (!m) return fallback;
-  const [, letters, digits] = m;
-  return {
-    col0: letters ? columnIndex(letters) : 0,
-    row1: digits ? Number(digits) : 1,
-  };
-}
-
 function truncateCell(value: unknown): string {
   const s = value == null ? "" : String(value);
   if (s.length <= CELL_CAP) return s;
@@ -228,6 +200,8 @@ export interface GridRender {
   totalRows: number;
   /** Whether the render was capped below totalRows. */
   truncated: boolean;
+  /** Letter → header for a promoted header row (§ Header legend); absent for the letter grid. */
+  legend?: LegendEntry[];
 }
 
 /**
@@ -249,11 +223,13 @@ export function buildGrid(
   if (opts.headerRow) {
     const [headerCells = [], ...dataRows] = values;
     const used = new Set<string>();
+    const legend: LegendEntry[] = [];
     const names = letters.map((letter, j) => {
       const raw = truncateCell(headerCells[j]).trim();
       let name = raw || letter;
       if (used.has(name)) name = `${name} (${letter})`;
       used.add(name);
+      if (raw) legend.push({ letter, header: name });
       return name;
     });
     const totalRows = dataRows.length;
@@ -267,6 +243,7 @@ export function buildGrid(
       listName: "rows",
       totalRows,
       truncated: !opts.full && totalRows > opts.maxRows,
+      legend,
     };
   }
 
@@ -296,6 +273,10 @@ export function buildGrid(
 
 export interface GridCellLike {
   formattedValue?: string | null;
+  userEnteredValue?: { formulaValue?: string | null } | null;
+  effectiveValue?: {
+    errorValue?: { type?: string | null; message?: string | null } | null;
+  } | null;
   hyperlink?: string | null;
   note?: string | null;
   textFormatRuns?: Array<{
@@ -312,11 +293,23 @@ export interface NoteEntry {
   // Assignable to renderList's Record<string, unknown> row type.
   [key: string]: unknown;
 }
+export interface FormulaEntry {
+  cell: string;
+  formula: string;
+  [key: string]: unknown;
+}
+export interface ErrorEntry extends CellError {
+  [key: string]: unknown;
+}
 export interface ExtractedGrid {
   /** Cell values with links rendered inline as markdown `[text](url)`. */
   values: string[][];
   /** Cell notes (distinct from Drive comments), keyed by A1 cell. */
   notes: NoteEntry[];
+  /** Formula cells, by A1, with the formula as entered. */
+  formulas: FormulaEntry[];
+  /** Cells whose effective value is an error, with Sheets' type and message. */
+  errors: ErrorEntry[];
   /** Total number of resolved links inlined into the grid. */
   linkCount: number;
 }
@@ -373,20 +366,27 @@ export function cellToMarkdown(cell: GridCellLike): { text: string; links: numbe
  * cell so notes are addressed correctly. Trailing fully-empty rows are trimmed
  * to mirror the used-range behavior of a plain values fetch.
  */
-export function extractGrid(rows: GridRowLike[], origin: RangeOrigin): ExtractedGrid {
+export function extractGrid(
+  rows: GridRowLike[],
+  origin: RangeOrigin,
+  opts: { formulas?: boolean } = {},
+): ExtractedGrid {
   const values: string[][] = [];
   const notes: NoteEntry[] = [];
+  const formulas: FormulaEntry[] = [];
+  const errors: ErrorEntry[] = [];
   let linkCount = 0;
 
   rows.forEach((row, ri) => {
     const cells = row.values ?? [];
     const line: string[] = cells.map((cell, ci) => {
-      if (cell.note) {
-        notes.push({
-          cell: `${columnLetter(origin.col0 + ci)}${origin.row1 + ri}`,
-          note: cell.note,
-        });
-      }
+      const a1 = `${columnLetter(origin.col0 + ci)}${origin.row1 + ri}`;
+      if (cell.note) notes.push({ cell: a1, note: cell.note });
+      const formula = cell.userEnteredValue?.formulaValue;
+      if (formula) formulas.push({ cell: a1, formula });
+      const err = cell.effectiveValue?.errorValue;
+      if (err) errors.push({ cell: a1, error: err.type ?? "ERROR", message: err.message ?? "" });
+      if (opts.formulas && formula) return formula;
       const { text, links } = cellToMarkdown(cell);
       linkCount += links;
       return text;
@@ -399,54 +399,118 @@ export function extractGrid(rows: GridRowLike[], origin: RangeOrigin): Extracted
     values.pop();
   }
 
-  return { values, notes, linkCount };
+  return { values, notes, formulas, errors, linkCount };
 }
 
 // ---------------------------------------------------------------------------
 
-interface TabInfo {
-  gid: number;
-  title: string;
-  index: number;
-  rows: number;
-  cols: number;
-  frozenRows: number;
-  // Assignable to renderList's Record<string, unknown> row type.
-  [key: string]: unknown;
+/**
+ * The fetched window as plain display strings — no markdown links, the formula
+ * in place of the value under --formulas — for an export file. Trailing
+ * fully-empty rows are trimmed as `extractGrid` trims them.
+ */
+export function plainGrid(rows: GridRowLike[], opts: { formulas?: boolean } = {}): string[][] {
+  const values = rows.map((row) =>
+    (row.values ?? []).map(
+      (c) =>
+        (opts.formulas ? c.userEnteredValue?.formulaValue : undefined) ?? c.formattedValue ?? "",
+    ),
+  );
+  while (values.length > 0 && values[values.length - 1].every((c) => c === "")) values.pop();
+  return values;
 }
 
-function toTabInfo(props: sheets_v4.Schema$SheetProperties): TabInfo {
+export interface ReadExport {
+  /** Header names when the header was promoted, else the column letters. */
+  columns: string[];
+  /** Data rows (the header row excluded when promoted), padded to `columns`. */
+  rows: string[][];
+  /** Every fetched row, header first when there is one — the CSV. */
+  csvRows: string[][];
+  /** The A1 cell of `rows[0][0]`. */
+  origin: string;
+}
+
+/** What `--json-out` / `--csv-out` write for a read (specs/commands/sheets-read.md § Flags). */
+export function readExport(
+  values: string[][],
+  origin: RangeOrigin,
+  headerRow: boolean,
+): ReadExport {
+  const width = values.reduce((w, r) => Math.max(w, r.length), 0);
+  const padded = values.map((r) => [...r, ...Array<string>(width - r.length).fill("")]);
+  const letters = Array.from({ length: width }, (_, j) => columnLetter(origin.col0 + j));
+  if (!headerRow) {
+    return {
+      columns: letters,
+      rows: padded,
+      csvRows: padded,
+      origin: `${letters[0] ?? columnLetter(origin.col0)}${origin.row1}`,
+    };
+  }
+  const used = new Set<string>();
+  const columns = letters.map((letter, j) => {
+    let name = (padded[0]?.[j] ?? "").trim() || letter;
+    if (used.has(name)) name = `${name} (${letter})`;
+    while (used.has(name)) name = `${name}'`;
+    used.add(name);
+    return name;
+  });
   return {
-    gid: props.sheetId ?? 0,
-    title: props.title ?? "",
-    index: props.index ?? 0,
-    rows: props.gridProperties?.rowCount ?? 0,
-    cols: props.gridProperties?.columnCount ?? 0,
-    frozenRows: props.gridProperties?.frozenRowCount ?? 0,
+    columns,
+    rows: padded.slice(1),
+    csvRows: padded,
+    origin: `${letters[0] ?? columnLetter(origin.col0)}${origin.row1 + 1}`,
   };
 }
 
-/** Split a possibly tab-qualified A1 range into { tabTitle?, a1 }. */
-function splitQualifiedRange(range: string): { tabTitle?: string; a1: string } {
-  if (range.startsWith("'")) {
-    const close = range.indexOf("'!", 1);
-    if (close !== -1) {
-      return {
-        tabTitle: range.slice(1, close).replace(/''/g, "'"),
-        a1: range.slice(close + 2),
-      };
-    }
-  }
-  const bang = range.lastIndexOf("!");
-  if (bang !== -1) {
-    return { tabTitle: range.slice(0, bang), a1: range.slice(bang + 1) };
-  }
-  return { a1: range };
+function writeReadExport(
+  req: ExportRequest,
+  tab: string,
+  payload: ReadExport,
+): { outcome: ExportOutcome; columns: string } {
+  const data =
+    req.format === "csv"
+      ? formatCsv(payload.csvRows)
+      : `${JSON.stringify({ tab, origin: payload.origin, columns: payload.columns, rows: payload.rows })}\n`;
+  return {
+    outcome: writeExport(req, "read", data, {
+      rows: payload.rows.length,
+      cols: payload.columns.length,
+    }),
+    columns: payload.columns.map((c) => `${c}:string`).join(", "),
+  };
 }
 
-/** Quote a tab title for use in an A1 reference. */
-function quoteTitle(title: string): string {
-  return /^[A-Za-z0-9_]+$/.test(title) ? title : `'${title.replace(/'/g, "''")}'`;
+/** The `wrote:`/`columns:` block, or `export_error` (and exit 1) when the write failed. */
+function exportBlock(result: { outcome: ExportOutcome; columns: string }): string {
+  if (!result.outcome.ok) {
+    process.exitCode = 1;
+    return renderObject({ export_error: result.outcome.error });
+  }
+  return renderObject({ wrote: result.outcome.wrote, columns: result.columns });
+}
+
+/** Rows of the formulas[] block before `formulas_total` and the --formulas hint. */
+const FORMULAS_CAP = 20;
+/** Rows of the errors[] block before `errors_total`. */
+const ERRORS_CAP = 50;
+
+/**
+ * The help line for sheets `sheets read` leaves out of its listing. Chart
+ * sheets are upstream's `OBJECT` type; anything else non-grid (a data-source
+ * sheet) is not called a chart.
+ */
+export function nonGridLine(
+  charts: number,
+  others: number,
+  spreadsheetId: string,
+): string | undefined {
+  const parts: string[] = [];
+  if (charts > 0) parts.push(`${charts} chart sheet(s)`);
+  if (others > 0) parts.push(`${others} other non-grid sheet(s)`);
+  if (parts.length === 0) return undefined;
+  return `${parts.join(" and ")} not listed here; run \`gws-axi sheets tabs ${spreadsheetId}\` for every sheet`;
 }
 
 export async function sheetsReadCommand(account: string, args: string[]): Promise<string> {
@@ -466,17 +530,7 @@ export async function sheetsReadCommand(account: string, args: string[]): Promis
       account,
       operation: "sheets.spreadsheets.get",
     });
-    if (translated.code === "NOT_FOUND") {
-      throw new AxiError(
-        `Spreadsheet '${flags.spreadsheetId}' not found (or ${account} doesn't have access)`,
-        "SPREADSHEET_NOT_FOUND",
-        [
-          `Verify the spreadsheet ID is correct (the portion of the URL after /d/)`,
-          `Confirm ${account} has at least view access`,
-          `If this is an uploaded .xlsx/.csv (not a native Google Sheet), use \`gws-axi drive download ${flags.spreadsheetId}\` or convert it with \`gws-axi drive upload --convert\``,
-        ],
-      );
-    }
+    if (translated.code === "NOT_FOUND") throw spreadsheetNotFound(flags.spreadsheetId, account);
     throw translated;
   }
 
@@ -484,6 +538,16 @@ export async function sheetsReadCommand(account: string, args: string[]): Promis
     .map((s) => s.properties)
     .filter((p): p is sheets_v4.Schema$SheetProperties => !!p && (p.sheetType ?? "GRID") === "GRID")
     .map(toTabInfo);
+
+  // Chart sheets have no cells, so the listings here leave them out — say so.
+  const nonGrid = (meta.sheets ?? [])
+    .map((s) => s.properties?.sheetType ?? "GRID")
+    .filter((t) => t !== "GRID");
+  const chartLine = nonGridLine(
+    nonGrid.filter((t) => t === "OBJECT").length,
+    nonGrid.filter((t) => t !== "OBJECT").length,
+    flags.spreadsheetId,
+  );
 
   // Resolve which tab (if any) to render.
   //  - tab-qualified --range → that tab
@@ -510,6 +574,7 @@ export async function sheetsReadCommand(account: string, args: string[]): Promis
         [
           `Available tabs: ${gridSheets.map((t) => `${t.title} (gid ${t.gid})`).join(", ") || "none"}`,
           `Run \`gws-axi sheets read ${flags.spreadsheetId}\` to list tabs`,
+          ...(chartLine ? [chartLine] : []),
         ],
       );
     }
@@ -540,13 +605,17 @@ export async function sheetsReadCommand(account: string, args: string[]): Promis
   const suggestions: string[] = [];
 
   if (!target) {
+    // The agent is choosing a tab: show what each holds (row1, one call for all tabs).
+    const got = await fetchRow1(api, flags.spreadsheetId, gridSheets);
+    if ("unavailable" in got) header.row1 = `unavailable (${got.unavailable})`;
     blocks.push(renderObject({ spreadsheet: header }));
-    blocks.push(renderList("sheets", gridSheets, tabsSchema));
+    blocks.push(renderTabs(gridSheets, "row1" in got ? got.row1 : undefined));
     for (const t of gridSheets.slice(0, 4)) {
       suggestions.push(
-        `Run \`gws-axi sheets read ${flags.spreadsheetId} --tab ${quoteTitle(t.title)}\` to read the '${t.title}' tab`,
+        `Run \`gws-axi sheets read ${flags.spreadsheetId} --tab ${shellArg(t.title)}\` to read the '${t.title}' tab`,
       );
     }
+    if (chartLine) suggestions.push(chartLine);
     if (suggestions.length) blocks.push(renderHelp(suggestions));
     return joinBlocks(...blocks);
   }
@@ -557,7 +626,8 @@ export async function sheetsReadCommand(account: string, args: string[]): Promis
   // bounded to the render cap rather than pulling the whole sheet only to cap
   // it. `+2` gives headroom so --header-row still detects rows beyond the cap.
   // An explicit --range is honored verbatim; --full pulls the whole tab.
-  const boundedDefault = !flags.full && !rangeA1;
+  // An export takes the whole tab (or the whole --range) whatever the cap.
+  const boundedDefault = !flags.full && !rangeA1 && !flags.exportReq;
   const lastCol = target.cols > 0 ? columnLetter(target.cols - 1) : undefined;
   let windowRange: string;
   if (rangeA1) {
@@ -575,7 +645,7 @@ export async function sheetsReadCommand(account: string, args: string[]): Promis
       ranges: [windowRange],
       includeGridData: true,
       fields:
-        "sheets(data(rowData(values(formattedValue,hyperlink,note,textFormatRuns(startIndex,format(link(uri)))))))",
+        "sheets(data(rowData(values(formattedValue,userEnteredValue,effectiveValue,hyperlink,note,textFormatRuns(startIndex,format(link(uri)))))))",
     });
     rowData = (res.data.sheets?.[0]?.data?.[0]?.rowData ?? []) as GridRowLike[];
   } catch (err) {
@@ -585,16 +655,22 @@ export async function sheetsReadCommand(account: string, args: string[]): Promis
   // Origin: the top-left of the fetched window. Bounded/full start at A1; an
   // explicit --range starts wherever it says.
   const origin = rangeA1 ? parseRangeOrigin(rangeA1) : { col0: 0, row1: 1 };
-  const extracted = extractGrid(rowData, origin);
+  const extracted = extractGrid(rowData, origin, { formulas: flags.formulas });
   const values = extracted.values;
 
   if (values.length === 0) {
     blocks.push(renderObject({ spreadsheet: header }));
     blocks.push(renderList("sheets", gridSheets, tabsSchema));
+    if (flags.exportReq) {
+      const written = writeReadExport(flags.exportReq, target.title, readExport([], origin, false));
+      blocks.push(exportBlock(written));
+      suggestions.push(written.outcome.helpLine);
+    }
     blocks.push(renderObject({ cells: `no data in ${rangeA1 ?? target.title}` }));
     suggestions.push(
       `Run \`gws-axi drive revisions ${flags.spreadsheetId}\` to see this spreadsheet's version history`,
     );
+    if (chartLine) suggestions.push(chartLine);
     blocks.push(renderHelp(suggestions));
     return joinBlocks(...blocks);
   }
@@ -626,19 +702,75 @@ export async function sheetsReadCommand(account: string, args: string[]): Promis
   }
   if (extracted.linkCount > 0) header.links_resolved = extracted.linkCount;
   if (extracted.notes.length > 0) header.notes = extracted.notes.length;
+  if (extracted.formulas.length > 0) {
+    header.formulas = extracted.formulas.length;
+    if (!flags.formulas && extracted.formulas.length > FORMULAS_CAP) {
+      header.formulas_total = extracted.formulas.length;
+    }
+  }
+  if (extracted.errors.length > 0) {
+    header.errors = extracted.errors.length;
+    if (extracted.errors.length > ERRORS_CAP) header.errors_total = extracted.errors.length;
+  }
+
+  const written = flags.exportReq
+    ? writeReadExport(
+        flags.exportReq,
+        target.title,
+        readExport(plainGrid(rowData, { formulas: flags.formulas }), origin, headerMode.headerRow),
+      )
+    : undefined;
 
   blocks.push(renderObject({ spreadsheet: header }));
   blocks.push(renderList("sheets", gridSheets, tabsSchema));
+  if (written) blocks.push(exportBlock(written));
   blocks.push(renderList(grid.listName, grid.rows, grid.schema));
+  if (grid.legend?.length) blocks.push(renderLegend(grid.legend));
   if (extracted.notes.length > 0) {
     blocks.push(renderList("notes", extracted.notes, [field("cell"), field("note")]));
   }
+  if (extracted.formulas.length > 0 && !flags.formulas) {
+    blocks.push(
+      renderList("formulas", extracted.formulas.slice(0, FORMULAS_CAP), [
+        field("cell"),
+        field("formula"),
+      ]),
+    );
+  }
+  if (extracted.errors.length > 0) {
+    blocks.push(
+      renderList("errors", extracted.errors.slice(0, ERRORS_CAP), [
+        field("cell"),
+        field("error"),
+        field("message"),
+      ]),
+    );
+  }
 
   // help[]
-  if (grid.truncated) {
+  const tabArg = shellArg(target.title);
+  if (extracted.errors.length > 0) {
+    suggestions.push(errorCountLine(extracted.errors.length, "read"));
     suggestions.push(
-      `Run \`gws-axi sheets read ${flags.spreadsheetId} --tab ${quoteTitle(target.title)} --full\` to render all ${grid.totalRows} rows, or add \`--range <A1>\` to scope`,
+      ...fixLines(extracted.errors, new Map(extracted.formulas.map((f) => [f.cell, f.formula])), {
+        spreadsheetId: flags.spreadsheetId,
+        tabTitle: target.title,
+        account,
+      }),
     );
+  }
+  if (!flags.formulas && extracted.formulas.length > FORMULAS_CAP) {
+    suggestions.push(
+      `Run \`gws-axi sheets read ${flags.spreadsheetId} --tab ${tabArg} --formulas\` to see every formula in the grid (formulas[] shows the first ${FORMULAS_CAP} of ${extracted.formulas.length})`,
+    );
+  }
+  if (written) {
+    suggestions.push(written.outcome.helpLine);
+  } else if (grid.truncated) {
+    suggestions.push(
+      `Run \`gws-axi sheets read ${flags.spreadsheetId} --tab ${shellArg(target.title)} --full\` to render all ${grid.totalRows} rows, or add \`--range <A1>\` to scope`,
+    );
+    suggestions.push("Save the whole tab: --csv-out or --json-out");
   }
   if (grid.listName === "rows") {
     suggestions.push(
@@ -657,8 +789,17 @@ export async function sheetsReadCommand(account: string, args: string[]): Promis
     );
   }
   suggestions.push(
-    `Cell values are FORMATTED_VALUE (displayed strings), not formulas or raw numbers; embedded links are inlined as markdown and cell notes (if any) are in the notes[] block`,
+    flags.formulas
+      ? `Formula cells show their formula (--formulas); every other cell shows its displayed string, not the raw number; links are inlined as markdown and notes are in notes[]`
+      : `Cell values are the displayed strings, not raw numbers ($9,600 is text here); formulas are listed in formulas[], links are inlined as markdown and notes are in notes[]`,
   );
+  if (boundedDefault && grid.truncated) {
+    // A capped default read fetched a window, so formulas/errors cover only it.
+    suggestions.push(
+      `formulas and errors count the fetched window only; run with --full to scan the whole tab`,
+    );
+  }
+  if (chartLine) suggestions.push(chartLine);
   suggestions.push(
     `Run \`gws-axi sheets comments ${flags.spreadsheetId}\` for review comments, or \`gws-axi drive revisions ${flags.spreadsheetId}\` / \`gws-axi drive activity ${flags.spreadsheetId}\` for version history`,
   );

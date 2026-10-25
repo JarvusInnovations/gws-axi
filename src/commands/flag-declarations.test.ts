@@ -48,7 +48,11 @@ describe("flag declarations", () => {
       if (sub.flags && sub.flags !== "self") {
         const spec = sub.flags;
         it(`${command} declares exactly the flags its --help documents`, () => {
-          const declared = new Set([...(spec.value ?? []), ...(spec.boolean ?? [])]);
+          const declared = new Set([
+            ...(spec.value ?? []),
+            ...(spec.boolean ?? []),
+            ...(spec.optional ?? []),
+          ]);
           expect([...declared].sort()).toEqual([...documentedFlags(sub.help)].sort());
         });
 

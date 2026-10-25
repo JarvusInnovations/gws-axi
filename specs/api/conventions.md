@@ -170,6 +170,57 @@ command that has to turn such an id into a person does it through **one shared r
 
 When the upstream API documents that a response may be incomplete, or returns a lossy/partial representation of the underlying data, the command states that limit in its output (a `note`/`warning` field or a `help[]` line) rather than presenting the partial result as whole ([principles.md#surface-completeness-limits](../principles.md#surface-completeness-limits)).
 
+## Export files
+
+A command whose payload can exceed its display cap may offer the full payload as a **file**,
+beside the capped preview on stdout
+([principles.md#preview-to-stdout-full-data-to-a-file](../principles.md#preview-to-stdout-full-data-to-a-file)).
+The contract is the same on every command that offers it:
+
+- **One flag per format, named for the format**: `--json-out[=<path>]`, `--csv-out[=<path>]`.
+  No generic `--out`, no `--format`, no extension sniffing. A command offers only the formats
+  that are faithful for its payload (a grid offers both; a tree offers JSON only).
+- **The `=<path>` is optional.** Bare, the file is auto-generated at
+  `<os-temp-dir>/gws-axi-<uid>/<UTC-timestamp>-<kind>.<ext>` (`gws-axi/` where the platform has
+  no uid, i.e. Windows) and written **`0600`** — an export is ephemeral scratch and may be
+  sensitive, and the temp dir is OS-pruned and often shared. The auto path is **owner-only by
+  construction**, not by hope:
+  - the directory is per-user, created `0700`; before writing, it is `lstat`ed and the export
+    is refused (`EXPORT_WRITE_FAILED`, nothing written) unless it is a real directory — not a
+    symlink — owned by the current user with no group or other permission bits. A directory
+    someone else created at that name (on a shared `/tmp`) is never written into;
+  - the file is created exclusively (`O_EXCL`): an existing file *or a symlink* at the name is
+    never opened. On a name collision the next free `-2`, `-3`, … suffix is taken.
+- `=<path>` writes exactly there (`~/` expanded, relative to the working directory), with the
+  default umask: the caller chose where it persists. A parent directory that does not exist is
+  `EXPORT_WRITE_FAILED`. An existing file there is replaced, and the `wrote:` line says so
+  (`… (<rows> rows, <cols> cols, overwrote)`).
+- **At most one `*-out` flag per invocation**; two is a `VALIDATION_ERROR` naming both.
+- **A failed write does not discard the result.** The preview renders as usual and
+  `export_error: {code: EXPORT_WRITE_FAILED, message, path}` takes the place of `wrote:`; the
+  command exits 1 (the partial-failure rule, as `drive share`).
+- **The rendered rows do not change** when a file is written; counts a command reports about
+  the payload (totals, notes, formulas) may become exact for the whole payload rather than for
+  a capped window, because the whole payload was fetched. The response **adds** three things:
+  `wrote: <path> (<rows> rows, <cols> cols)`; `columns: <name>:<type>, …` so follow-up
+  processing can be written without opening the file; and one `help[]` line with a runnable
+  command against the path (`jq '.rows[]' <path>` for JSON, `head <path>` or a `csvkit` form
+  for CSV).
+- **The file is the source's real output where one exists** (a native CSV export upstream),
+  else gws-axi's own serialization of the complete, uncapped payload. JSON files carry the
+  columns and every row; nothing in them is truncated.
+- `--json-out` and `--csv-out` are declared like any flag and refused where not offered
+  ([fail-loud-on-unknown-flags](../principles.md#fail-loud-on-unknown-flags)).
+
+**Optional-value syntax.** These are the one place a flag takes an optional value, so the
+value rides on the flag with `=`: `--csv-out=./q4.csv`. `parseArgs` accepts `--<flag>=<value>`
+only for flags declared `optional`, and never for value flags (`--range=B2` stays a usage
+error, so the two forms are not confused). A bare `--csv-out` followed by a path-looking
+token does not consume it; when the command then refuses that token as an extra argument, the
+error says `--csv-out takes its path with =: --csv-out=<token>`. A value flag with nothing
+after it is `<flag> needs a value` also when the next token is `--<declared flag>=…` — that
+token is a flag, not the value.
+
 ## Unimplemented and unsupported surfaces
 
 A subcommand may be **scaffolded** (listed, `--help`-documented, no handler — throws
@@ -270,6 +321,10 @@ Every command refuses a flag it doesn't take, and an unknown `--fields` name, wi
 `VALIDATION_ERROR` (exit 2) — see [principles.md#fail-loud-on-unknown-flags](../principles.md#fail-loud-on-unknown-flags).
 The error lists the command's valid flags and its `--help` command, plus a targeted hint when one
 is declared for that flag.
+
+After a flag that takes a value, the next token is refused as a missing value only when it is
+flag-shaped (`--name`: letters, digits and dashes). Any other token that starts with `--` (`--- draft ---`,
+`-- note`) is the value.
 
 ## Error envelope
 

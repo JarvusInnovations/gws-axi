@@ -1,8 +1,54 @@
 import { checkFlags, type FlagSpec } from "../util/flags.js";
 import { AxiError } from "axi-sdk-js";
 import { resolveAccount, withAccountSource } from "../google/account.js";
+import { sheetsClient } from "../google/client.js";
 import { docsCommentsCommand } from "./docs/comments.js";
-import { READ_HELP, sheetsReadCommand } from "./sheets/read.js";
+import {
+  TAB_REQUIRED_CONTEXT,
+  type TabRequiredContext,
+  fetchRow1,
+  renderTabs,
+} from "./sheets/shared.js";
+import { ADD_TAB_FLAGS, ADD_TAB_HELP, sheetsAddTabCommand } from "./sheets/add-tab.js";
+import { CELL_FLAGS, CELL_HELP, sheetsCellCommand } from "./sheets/cell.js";
+import { CREATE_FLAGS, CREATE_HELP, sheetsCreateCommand } from "./sheets/create.js";
+import { NOTE_FLAGS, NOTE_HELP, sheetsNoteCommand } from "./sheets/note.js";
+import {
+  DELETE_COLS_HELP,
+  DELETE_DIM_FLAGS,
+  DELETE_ROWS_HELP,
+  INSERT_COLS_HELP,
+  INSERT_DIM_FLAGS,
+  INSERT_ROWS_HELP,
+  sheetsDeleteColsCommand,
+  sheetsDeleteRowsCommand,
+  sheetsInsertColsCommand,
+  sheetsInsertRowsCommand,
+} from "./sheets/dimensions.js";
+import { QUERY_FLAGS, QUERY_HELP, sheetsQueryCommand } from "./sheets/query.js";
+import { READ_FLAGS, READ_HELP, sheetsReadCommand } from "./sheets/read.js";
+import {
+  TABS_DELETE_FLAGS,
+  TABS_DELETE_HELP,
+  TABS_FLAGS,
+  TABS_HELP,
+  TABS_UPDATE_FLAGS,
+  TABS_UPDATE_HELP,
+  sheetsTabsCommand,
+  sheetsTabsDeleteCommand,
+  sheetsTabsUpdateCommand,
+} from "./sheets/tabs.js";
+import {
+  APPEND_FLAGS,
+  APPEND_HELP,
+  CLEAR_FLAGS,
+  CLEAR_HELP,
+  UPDATE_FLAGS,
+  UPDATE_HELP,
+  sheetsAppendCommand,
+  sheetsClearCommand,
+  sheetsUpdateCommand,
+} from "./sheets/write.js";
 import { notImplemented, renderAlternatives, withInstead } from "./stub-signposts.js";
 
 // Google Sheets comments are Drive comments — the exact same file-agnostic API
@@ -24,7 +70,8 @@ output:
 notes:
   Sheets comments are Drive comments (file-type-agnostic); this is the same
   data as \`gws-axi docs comments\`. Cell *notes* are distinct — those come
-  back in the notes[] block of \`gws-axi sheets read\`.
+  back in the notes[] block of \`gws-axi sheets read\` and are set with
+  \`gws-axi sheets note\`.
 `;
 
 interface SheetsSubcommand {
@@ -37,47 +84,6 @@ interface SheetsSubcommand {
   instead?: string[];
 }
 
-// Until the Sheets write surface lands, `drive upload --convert` is the only
-// way to put content into a spreadsheet. It replaces the file wholesale, so
-// each line says so — an agent that reads "use drive upload" and nothing else
-// would silently destroy the sheets it never looked at.
-const REPLACE_WHOLESALE = [
-  "gws-axi drive upload <file.csv> --update <spreadsheetId> --convert --account <email> — replaces the ENTIRE spreadsheet from CSV/TSV (or --content <string>); NOT a per-range write",
-  "Multi-sheet targets are refused with MULTI_TAB_TARGET unless --replace-all-tabs; read them first with `gws-axi sheets read <spreadsheetId>`",
-];
-const CREATE_VIA_UPLOAD = [
-  'gws-axi drive upload <file.csv> --convert --name "<title>" --account <email> — creates a new native Spreadsheet and returns its id',
-];
-
-// Write subcommands are stubs for the next slice — kept with per-command --help
-// so agents can plan around the future surface. They throw NOT_IMPLEMENTED after
-// account resolution runs.
-const UPDATE_HELP = `usage: gws-axi sheets update <spreadsheetId> --tab <name> --range <A1> --values <json|csv> [flags]
-status: planned for writes — not yet implemented
-notes:
-  Will wrap spreadsheets.values.update. Requires --account <email> when 2+
-  accounts are authenticated.
-`;
-const APPEND_HELP = `usage: gws-axi sheets append <spreadsheetId> --tab <name> --values <json|csv> [flags]
-status: planned for writes — not yet implemented
-notes:
-  Will wrap spreadsheets.values.append (adds rows after the used range).
-`;
-const CLEAR_HELP = `usage: gws-axi sheets clear <spreadsheetId> --tab <name> --range <A1> [flags]
-status: planned for writes — not yet implemented
-`;
-const CREATE_HELP = `usage: gws-axi sheets create --title <text> [--tab <name>...] [flags]
-status: planned for writes — not yet implemented
-notes:
-  Will wrap spreadsheets.create. Produces the spreadsheetId that
-  \`sheets read\` / \`sheets update\` consume.
-`;
-const ADD_TAB_HELP = `usage: gws-axi sheets add-tab <spreadsheetId> --title <text> [flags]
-status: planned for writes — not yet implemented
-notes:
-  Will wrap spreadsheets.batchUpdate addSheet.
-`;
-
 const sheetsCommentsCommand = (account: string, args: string[]): Promise<string> =>
   docsCommentsCommand(account, args, {
     resource: "spreadsheet",
@@ -85,7 +91,14 @@ const sheetsCommentsCommand = (account: string, args: string[]): Promise<string>
   });
 
 export const SUBCOMMANDS: SheetsSubcommand[] = [
-  { name: "read", mutation: false, flags: "self", help: READ_HELP, handler: sheetsReadCommand },
+  { name: "read", mutation: false, flags: READ_FLAGS, help: READ_HELP, handler: sheetsReadCommand },
+  {
+    name: "query",
+    mutation: false,
+    flags: QUERY_FLAGS,
+    help: QUERY_HELP,
+    handler: sheetsQueryCommand,
+  },
   {
     name: "comments",
     mutation: false,
@@ -93,13 +106,94 @@ export const SUBCOMMANDS: SheetsSubcommand[] = [
     help: COMMENTS_HELP,
     handler: sheetsCommentsCommand,
   },
-  { name: "update", mutation: true, help: UPDATE_HELP, instead: REPLACE_WHOLESALE },
-  { name: "append", mutation: true, help: APPEND_HELP, instead: REPLACE_WHOLESALE },
-  { name: "clear", mutation: true, help: CLEAR_HELP, instead: REPLACE_WHOLESALE },
-  { name: "create", mutation: true, help: CREATE_HELP, instead: CREATE_VIA_UPLOAD },
-  // Adding a tab needs spreadsheets.batchUpdate — drive upload can only
-  // collapse a spreadsheet to one sheet, never grow it one.
-  { name: "add-tab", mutation: true, help: ADD_TAB_HELP },
+  { name: "cell", mutation: false, flags: CELL_FLAGS, help: CELL_HELP, handler: sheetsCellCommand },
+  {
+    name: "update",
+    mutation: true,
+    flags: UPDATE_FLAGS,
+    help: UPDATE_HELP,
+    handler: sheetsUpdateCommand,
+  },
+  {
+    name: "append",
+    mutation: true,
+    flags: APPEND_FLAGS,
+    help: APPEND_HELP,
+    handler: sheetsAppendCommand,
+  },
+  {
+    name: "clear",
+    mutation: true,
+    flags: CLEAR_FLAGS,
+    help: CLEAR_HELP,
+    handler: sheetsClearCommand,
+  },
+  {
+    name: "create",
+    mutation: true,
+    flags: CREATE_FLAGS,
+    help: CREATE_HELP,
+    handler: sheetsCreateCommand,
+  },
+  {
+    name: "add-tab",
+    mutation: true,
+    flags: ADD_TAB_FLAGS,
+    help: ADD_TAB_HELP,
+    handler: sheetsAddTabCommand,
+  },
+  {
+    name: "note",
+    mutation: true,
+    flags: NOTE_FLAGS,
+    help: NOTE_HELP,
+    handler: sheetsNoteCommand,
+  },
+  // Two-word subcommands (as in `docs`): the dispatcher tries `tabs update`
+  // before `tabs`, so write protection applies to exactly the tab writes.
+  { name: "tabs", mutation: false, flags: TABS_FLAGS, help: TABS_HELP, handler: sheetsTabsCommand },
+  {
+    name: "tabs update",
+    mutation: true,
+    flags: TABS_UPDATE_FLAGS,
+    help: TABS_UPDATE_HELP,
+    handler: sheetsTabsUpdateCommand,
+  },
+  {
+    name: "tabs delete",
+    mutation: true,
+    flags: TABS_DELETE_FLAGS,
+    help: TABS_DELETE_HELP,
+    handler: sheetsTabsDeleteCommand,
+  },
+  {
+    name: "insert-rows",
+    mutation: true,
+    flags: INSERT_DIM_FLAGS,
+    help: INSERT_ROWS_HELP,
+    handler: sheetsInsertRowsCommand,
+  },
+  {
+    name: "insert-cols",
+    mutation: true,
+    flags: INSERT_DIM_FLAGS,
+    help: INSERT_COLS_HELP,
+    handler: sheetsInsertColsCommand,
+  },
+  {
+    name: "delete-rows",
+    mutation: true,
+    flags: DELETE_DIM_FLAGS,
+    help: DELETE_ROWS_HELP,
+    handler: sheetsDeleteRowsCommand,
+  },
+  {
+    name: "delete-cols",
+    mutation: true,
+    flags: DELETE_DIM_FLAGS,
+    help: DELETE_COLS_HELP,
+    handler: sheetsDeleteColsCommand,
+  },
 ];
 
 const SUB_BY_NAME: Record<string, SheetsSubcommand> = Object.fromEntries(
@@ -135,16 +229,33 @@ writes[${writes.length}]:
 notes:
   Writes require --account <email> when 2+ accounts are authenticated.
   Reads use the default account when --account is not provided.
-  Write subcommands are scaffolded for the next slice — all currently
-  throw NOT_IMPLEMENTED after account resolution runs.
+  Writes put values into one tab and touch nothing else (formats, widths,
+  validation, other tabs). Each reads back what Sheets made of the values and
+  reports any formula errors it left in the tab.
+  insert-rows/-cols and delete-rows/-cols are the exception: they shift the
+  cells after them, and say where everything went in old-row terms.
 ${renderAlternatives(SUBCOMMANDS)}subcommand help:
   gws-axi sheets read --help       for spreadsheetId + tab/range handling
+  gws-axi sheets query --help      for a SQL-like query over one tab (=QUERY's language)
+  gws-axi sheets cell --help       for one cell: its formula and what it reads
+  gws-axi sheets update --help     for writing a block, or single cells
+  gws-axi sheets append --help     for adding rows (CSV, JSON, header-keyed)
+  gws-axi sheets insert-rows --help  for making room mid-tab (and insert-cols,
+                                   delete-rows, delete-cols to take rows out)
   gws-axi sheets comments --help   for review comments (Drive comments)
+  gws-axi sheets note --help       for setting or clearing one cell's note
+  gws-axi sheets tabs --help       for listing, moving, renaming, hiding, freezing, deleting tabs
 examples:
   gws-axi sheets read 1AbC...
   gws-axi sheets read 1AbC... --tab Costs --range A1:D50
-  gws-axi sheets read 1AbC... --tab Costs --header-row
+  gws-axi sheets query 1AbC... "select A, sum(C) group by A" --tab Costs
+  gws-axi sheets cell 1AbC... D2 --tab Costs
+  gws-axi sheets update 1AbC... --tab Costs --range B2 costs.csv --account you@example.com
+  gws-axi sheets append 1AbC... --tab Costs --content 'bolts,40' --account you@example.com
+  gws-axi sheets insert-rows 1AbC... 3:5 --tab Costs --account you@example.com
+  gws-axi sheets create --title "Q4 Tracker" costs.csv --header --account you@example.com
   gws-axi sheets comments 1AbC...
+  gws-axi sheets tabs update 1AbC... Archive --first --freeze-rows 1 --account you@example.com
 `;
 
 export async function sheetsCommand(args: string[]): Promise<string> {
@@ -152,7 +263,8 @@ export async function sheetsCommand(args: string[]): Promise<string> {
     return SHEETS_HELP;
   }
 
-  const sub = args[0];
+  const twoWord = args.length > 1 ? `${args[0]} ${args[1]}` : undefined;
+  const sub = twoWord && SUB_BY_NAME[twoWord] ? twoWord : args[0];
   const def = SUB_BY_NAME[sub];
   if (!def) {
     throw new AxiError(`Unknown sheets subcommand: ${sub}`, "VALIDATION_ERROR", [
@@ -160,7 +272,7 @@ export async function sheetsCommand(args: string[]): Promise<string> {
     ]);
   }
 
-  const rest = args.slice(1);
+  const rest = args.slice(sub === twoWord ? 2 : 1);
   if (rest.includes("--help")) {
     return def.handler ? def.help : withInstead(def.help, def.instead);
   }
@@ -178,5 +290,30 @@ export async function sheetsCommand(args: string[]): Promise<string> {
     throw notImplemented("sheets", sub, resolution.account, def.instead);
   }
 
-  return withAccountSource(resolution, await def.handler(resolution.account, remaining));
+  try {
+    return withAccountSource(resolution, await def.handler(resolution.account, remaining));
+  } catch (err) {
+    throw await withRow1(err, resolution.account);
+  }
+}
+
+/**
+ * A TAB_REQUIRED error re-rendered with each tab's `row1`, so the agent picks a
+ * tab knowing what each holds (specs/commands/sheets-write.md § Choosing the
+ * tab). One fetch for all tabs; any failure returns the error unchanged.
+ */
+export async function withRow1(err: unknown, account: string): Promise<unknown> {
+  if (!(err instanceof AxiError) || err.code !== "TAB_REQUIRED") return err;
+  const ctx = (err as unknown as Record<symbol, TabRequiredContext | undefined>)[
+    TAB_REQUIRED_CONTEXT
+  ];
+  if (!ctx) return err;
+  try {
+    const api = await sheetsClient(account);
+    const got = await fetchRow1(api, ctx.meta.id, ctx.meta.tabs);
+    if (!("row1" in got)) return err;
+    return new AxiError(err.message, err.code, [renderTabs(ctx.meta.tabs, got.row1), ...ctx.rest]);
+  } catch {
+    return err;
+  }
 }

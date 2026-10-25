@@ -30,6 +30,9 @@ examples:
   gws-axi doctor
   gws-axi calendar events
   gws-axi setup hooks
+notes:
+  Long results are capped previews. Where one can run past its cap, --json-out[=<path>]
+  or --csv-out[=<path>] writes all of it to a file (sheets read, sheets query).
 `;
 
 // Services that have real subcommand dispatchers handle --help themselves

@@ -279,3 +279,76 @@ describe("buildGrid — --header-row promotion", () => {
     expect(g.rows[0]).toEqual({ Name: "a", B: "b", "Name (C)": "c" });
   });
 });
+
+describe("extractGrid — formulas and errors", () => {
+  const rows = [
+    {
+      values: [
+        { formattedValue: "$9,600", userEnteredValue: { formulaValue: "=B2*C2" } },
+        {
+          formattedValue: "#REF!",
+          userEnteredValue: { formulaValue: "=Cost!B2" },
+          effectiveValue: { errorValue: { type: "REF", message: "Unresolved sheet name 'Cost'." } },
+        },
+        { formattedValue: "plain" },
+      ],
+    },
+  ];
+  it("lists formulas and errors by A1 and renders displayed values", () => {
+    const g = extractGrid(rows, { col0: 3, row1: 2 });
+    expect(g.values).toEqual([["$9,600", "#REF!", "plain"]]);
+    expect(g.formulas).toEqual([
+      { cell: "D2", formula: "=B2*C2" },
+      { cell: "E2", formula: "=Cost!B2" },
+    ]);
+    expect(g.errors).toEqual([
+      { cell: "E2", error: "REF", message: "Unresolved sheet name 'Cost'." },
+    ]);
+  });
+  it("--formulas renders the formula in place of the value", () => {
+    expect(extractGrid(rows, { col0: 0, row1: 1 }, { formulas: true }).values).toEqual([
+      ["=B2*C2", "=Cost!B2", "plain"],
+    ]);
+  });
+});
+
+describe("nonGridLine", () => {
+  it("calls only OBJECT sheets charts", async () => {
+    const { nonGridLine } = await import("./read.js");
+    expect(nonGridLine(0, 0, "1AbC")).toBeUndefined();
+    expect(nonGridLine(2, 0, "1AbC")).toBe(
+      "2 chart sheet(s) not listed here; run `gws-axi sheets tabs 1AbC` for every sheet",
+    );
+    expect(nonGridLine(1, 1, "1AbC")).toBe(
+      "1 chart sheet(s) and 1 other non-grid sheet(s) not listed here; run `gws-axi sheets tabs 1AbC` for every sheet",
+    );
+    expect(nonGridLine(0, 1, "1AbC")).toMatch(/^1 other non-grid sheet\(s\) not listed/);
+  });
+});
+
+describe("buildGrid — header legend", () => {
+  it("maps each named column's letter from the origin, skipping empty headers", () => {
+    const g = buildGrid(
+      [
+        ["Item", "", "Item"],
+        ["bolts", "x", "y"],
+      ],
+      { col0: 2, row1: 1 },
+      { headerRow: true, maxRows: 50, full: false },
+    );
+    expect(g.listName).toBe("rows");
+    expect(g.legend).toEqual([
+      { letter: "C", header: "Item" },
+      { letter: "E", header: "Item (E)" },
+    ]);
+  });
+
+  it("has no legend for the letter grid", () => {
+    const g = buildGrid(
+      [["a", "b"]],
+      { col0: 0, row1: 1 },
+      { headerRow: false, maxRows: 50, full: false },
+    );
+    expect(g.legend).toBeUndefined();
+  });
+});

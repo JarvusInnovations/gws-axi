@@ -1,0 +1,231 @@
+# Command group: sheets insert-rows, insert-cols, delete-rows, delete-cols
+
+## Summary
+
+Structural edits that **shift data in place**: insert empty rows or columns at a position
+(everything below or to the right moves), or delete rows or columns (everything after them
+moves up or left). `sheets append` only ever adds rows at the end and `sheets clear` empties
+cells without moving anything; these four are the verbs for "make room in the middle" and
+"take this row out". Formulas elsewhere are adjusted by Sheets on an insert and turn `#REF!`
+on a delete that removes what they read — both reported.
+
+No new scope: `insertDimension` / `deleteDimension` under the `spreadsheets` grant.
+
+## Invocation
+
+```
+gws-axi sheets insert-rows <spreadsheetId> <rows> [--tab <name|gid>] [--no-inherit]
+gws-axi sheets insert-cols <spreadsheetId> <cols> [--tab <name|gid>] [--no-inherit]
+gws-axi sheets delete-rows <spreadsheetId> <rows> [--tab <name|gid>]
+gws-axi sheets delete-cols <spreadsheetId> <cols> [--tab <name|gid>]
+```
+
+- `<rows>` is an A1 row range: `3:5`, or `3` for one row; `<cols>` an A1 column range: `B:D`,
+  or `B` for one. Either may be tab-qualified (`Costs!3:5`), which makes `--tab` optional and
+  must agree with it when both are given. Anything else (`B2:D9`, `3:B`) is a
+  `VALIDATION_ERROR` naming the two forms.
+- **Insert** means: after the call, **those** rows/columns are the new empty ones. `insert-rows
+  3:5` inserts three rows so that rows 3–5 are empty and the old row 3 is now row 6.
+  `insert-rows 1` inserts above everything.
+- **Delete** means: those rows/columns are removed, and what followed moves up/left.
+- `--tab` — as every `sheets` write: required on a multi-tab spreadsheet (`TAB_REQUIRED`).
+- `--account <email>` — REQUIRED when 2+ accounts are authenticated.
+
+## Upstream behavior relied on
+
+| Fact | Status |
+| --- | --- |
+| `insertDimension` with `range{sheetId,dimension,startIndex,endIndex}` inserts `end−start` empty rows/columns **before** `startIndex`; `inheritFromBefore: true` copies the formatting of the row/column before the range (background, borders, number format — values are not copied), and is refused (400 "range.startIndex must not be 0 if inheritFromBefore is true") when `startIndex` is 0 | **Observed 2026-10-25** |
+| `inheritFromBefore: false` does **not** mean "no formatting": the new rows/columns inherit from the row/column **after** the range instead — cell formats *and* row height (an insert at row 1 above a bold, green, 40px header gets a bold, green, 40px row). There is no un-inherited insert. A `repeatCell` with `fields: "userEnteredFormat"` and an empty `cell` clears the cell formats; the row height stays | **Observed 2026-10-25** (amended: the spec read `false` as "off") |
+| Formulas referencing rows/columns at or after an insertion point are shifted by Sheets; a range that spans the insertion point grows (`SUM(B2:B9)` → `SUM(B2:B12)` after three rows at 3) | **Observed 2026-10-25** |
+| `deleteDimension` removes the range; what follows moves up/left; a range partly deleted shrinks (`SUM(B2:B12)` → `SUM(B2:B11)`). A formula that read a deleted cell becomes `#REF!` — and **its text is rewritten**: `=B7` is stored as `=#REF!`, so the original formula exists only in a read taken before the delete | **Observed 2026-10-25** (amended: the rewrite was not documented) |
+| Deleting every row (or every column) of a sheet is refused (400 "You can't delete all the rows on the sheet." / "… all the columns …") | **Observed 2026-10-25**; refused locally first |
+| Deleting every **non-frozen** row (or column) is refused too, whether or not the range also reaches into the freeze (400 "Sorry, it is not possible to delete all non-frozen rows." / "… columns."); deleting only frozen rows, or part of the non-frozen ones, is allowed | **Observed 2026-10-25** (amended: found in review); refused locally first |
+| An insert inside a data-validation or conditional-format range extends it over the new cells, `--no-inherit`'s format clear notwithstanding (validation is a cell property `userEnteredFormat` doesn't cover; a conditional-format rule's range just grows). An insert at the range's first row lands above it and is not covered | **Observed 2026-10-25** |
+| `values.get` over a whole-row or whole-column range returns values from the range's first row/column, keeping leading empty rows (`[]`) and trimming trailing ones | **Observed 2026-10-25** |
+| A range starting past the allocation is refused: insert 400 "range.startIndex is larger than current grid size (N)", delete 400 "Cannot delete a row that doesn't exist". An insert starting **at** the allocation (one past the last row) is accepted and adds rows at the end. A delete that starts inside the allocation and runs past it is **accepted and silently clipped** — only the existing part is deleted | **Observed 2026-10-25** (amended: the silent clip is why a delete past the end is refused locally) |
+| Deleting rows/columns inside the frozen area reduces the frozen count; deleting all frozen rows is allowed (the count goes to 0). **Inserting** inside the frozen area *grows* the count (an insert at row 1 or 2 of a 3-row freeze → 4). Columns behave the same | **Observed 2026-10-25** (amended: the insert half) |
+| An insert that would exceed the 10,000,000-cell spreadsheet limit is refused (400) | Documented. Not exercised; translated generically |
+| A protected range overlapping the dimension is refused (400 "You are trying to edit a protected cell or object…") for both insert and delete, including a column insert/delete that crosses a protected row band; a dimension request that leaves the protected rows alone (insert above them, delete below them) succeeds and the protected range moves with its rows | **Observed 2026-10-25** (as an editor without rights to the range) |
+
+## Behavior
+
+### Common
+
+1. **Read**: the tabs (`spreadsheets.get`, properties) to resolve the tab and its allocation;
+   the dimension range is checked against the allocation (`VALIDATION_ERROR` when the start
+   is past it; an insert may *extend* it, and does — see below). The whole-tab errors-only
+   scan runs when the allocation is ≤ 200,000 cells, as every `sheets` write does
+   ([sheets-write.md § Formula errors](sheets-write.md#formula-errors-the-feedback-loop));
+   a delete's scan also carries each cell's formula, because the delete rewrites a broken
+   reference to `#REF!` and the pre-read is the only place the original survives.
+2. **Write**: one `batchUpdate` with the one dimension request.
+3. **Read back**: the errors-only scan again; the diff is reported. For a delete, the
+   populated cells of the deleted range were read **before** the write and are the undo.
+
+### Insert
+
+- `inheritFromBefore` is **true by default** when the insertion point is not the first
+  row/column: the new rows take the formatting of the row above (the editor's "insert
+  below" behavior — a row inserted mid-table gets the table's borders and number formats,
+  which is what a human doing this gets); `inherit: from row N`. At row/column 1 upstream
+  refuses `true`, and `false` inherits from the row **after** — the old row 1, as the
+  editor's "insert above" does; `inherit: from row N (was row 1)`, naming where that row is
+  now.
+- `--no-inherit` leaves the new cells unformatted: the insert and a `repeatCell` clearing
+  `userEnteredFormat` over the new rows/columns go in **one** `batchUpdate` (all or
+  nothing). The response says `inherit: none`, and a help line discloses that the row
+  height / column width still came from the neighbor (upstream has no un-inherited insert,
+  and resetting a size would mean guessing the tab's default), and that data validation and
+  conditional formatting whose range spans the insertion point now cover the new cells
+  (they are range properties, not cell formats; observed).
+- The tab's allocation grows by the inserted count (upstream does this); the response
+  carries `grid: R×C` after.
+- A request that starts **past** the current allocation is a `VALIDATION_ERROR` pointing at
+  `sheets update --range` (which grows the grid) — inserting at row 5000 of a 1000-row tab is
+  not "make room", it is a typo. Starting one past the last row (`insert-rows 1001` on a
+  1000-row tab) is allowed and adds rows at the end, as upstream does.
+- **Not idempotent**: re-running inserts again. The response says so.
+
+### Delete
+
+- Before the write, the deleted range's cells are fetched and rendered in the read's grid
+  shape — the undo record, as `written[]` is for a value write. The block is **anchored**:
+  it starts at the range's first row (rows) or at row 1 (columns), and at column A (rows) or
+  the range's first column (columns), and runs through the last populated row, with empty
+  rows and cells kept as empty — so `insert-*` at the same range then `sheets update --range
+  <anchor>` with the block puts every value back where it was.
+- The fetch is **bounded**: the render window (the first 50 rows of the block, by old row
+  number, clipped to the allocation) under the write mask (entered value + display), and a
+  `values.get` (display only) over the whole range for the count — `cells` (populated
+  cells) and `cells_total_rows` (rows from the anchor through the last populated row) when
+  that exceeds the 50 rendered (the read's name for the same count). When the range holds
+  more than 200,000 cells, the count is skipped: `cells: not counted (range is N cells)`,
+  and the block is what the window holds.
+- A delete covering the whole allocation (every row, or every column) — or every row/column
+  **outside the freeze** (upstream refuses that too; observed) — is refused locally with
+  `VALIDATION_ERROR`, pointing at `sheets clear --all` or `sheets tabs delete`.
+- A delete whose range runs past the allocation is refused locally with `VALIDATION_ERROR`
+  naming the last row/column: upstream would silently delete only the part that exists,
+  and `count` would then be wrong.
+- Deleting inside the frozen rows/columns is allowed; the response notes the new freeze
+  count when it changed. (An insert inside the frozen area grows the count; it is reported
+  the same way.)
+- A `#REF!` the delete caused names its formula **as it was before the delete** (from the
+  pre-scan) **and as it is now**: the stored formula has the broken reference rewritten to
+  `#REF!` and every surviving reference already shifted (`=B7+C20` → `=#REF!+C17` after rows
+  5:7 go), so the old text alone would send a re-pointed `C20` to the wrong cell. The
+  runnable `sheets update --cell` carries the **current** formula, `#REF!` and all, for the
+  agent to edit.
+- **Not idempotent** in the usual sense: a second identical call deletes the rows that
+  moved into the range. The response says so, naming the rows that now occupy the range.
+
+## Output
+
+```
+account: alice@example.com
+action: inserted
+spreadsheet:
+  id: 1AbC…
+  title: Q4 Tracker
+  tab: Costs
+  gid: 0
+  web_view_link: https://docs.google.com/spreadsheets/d/1AbC…/edit#gid=0
+range: Costs!3:5
+count: 3
+shifted: rows 3 and below moved down by 3 (old row 3 is now row 6)
+inherit: from row 2
+grid: 1003×26
+help[3]:
+  Run `gws-axi sheets update 1AbC… --tab Costs --range A3 <source> --account alice@example.com` to fill the new rows
+  Re-running inserts three more rows at 3:5 (not idempotent); `gws-axi sheets delete-rows 1AbC… 3:5 --tab Costs --account alice@example.com` undoes this
+  Formulas below row 3 were shifted by Sheets; none errored
+```
+
+For a delete:
+
+```
+action: deleted
+range: Costs!3:5
+count: 3
+shifted: rows 6 and below moved up by 3 (old row 6 is now row 3)
+cells: 8
+cells[3]{row,A,B,C,D}:
+  3,bolts,40,"$4.00",=B3*C3
+  4,"","","",""
+  5,washers,200,"$0.05",=B5*C5
+errors: 1
+errors[1]{cell,error,message,written}:
+  D12,REF,…,no
+help[4]:
+  1 formula error after this delete — see errors[]
+  Fix D12 (#REF!, …): it was =C4*1.1+D20 (in D15) before the delete; it is now =#REF!*1.1+D17 — re-point the #REF! in the current formula: gws-axi sheets update 1AbC… --tab Costs --cell D12='=#REF!*1.1+D17' --account alice@example.com
+  The deleted cells are above and in version history: `gws-axi drive revisions 1AbC…`; `gws-axi sheets insert-rows 1AbC… 3:5 --tab Costs` then `sheets update --range A3` with cells[] as-is (empty rows included) restores them
+  Rows 3:5 are now what was 6:8 — re-running would delete those
+```
+
+- `range` — the tab-qualified dimension range as given; `count` the number of rows/columns.
+- `shifted` — one sentence stating the move in old-row terms, so an agent holding a stale read
+  can re-address.
+- `inherit` (insert) — `from row N` / `from column X` (the neighbor above/left), `from row
+  N (was row 1)` (an insert at row/column 1, which inherits from below/right), or `none`
+  (`--no-inherit`).
+- `grid` — the tab's allocation after an insert.
+- `cells` + `cells[N]{row,…}` (delete) — `cells` counts the populated cells removed (or
+  `not counted (range is N cells)` past the bound); the block is the anchored grid described
+  above, empty rows included, with the **old** row numbers. Omitted (`cells: 0`) when the
+  range held nothing.
+- `errors[]`, `errors_fixed`, `errors_elsewhere`, `error_scan` — as a value write, with the
+  pre-call errors re-keyed to their post-call addresses first (an error that only moved is
+  `errors_elsewhere`, not new); an error cell the delete removed is neither fixed nor
+  reported — it is in `cells[]`. Over the 200,000-cell bound there is no "written range" to
+  fall back to, so the scan is skipped: `error_scan: not run (tab is R×C, over 200000
+  cells)` and a help line pointing at `sheets read` for the tab's errors.
+- `frozen_rows: N` / `frozen_cols: N` — only when the freeze count changed (a delete inside
+  the frozen area shrinks it, an insert inside it grows it).
+
+## Errors
+
+| Code | When |
+| --- | --- |
+| `VALIDATION_ERROR` | Missing id or range; a range that is not a row range (for `*-rows`) or column range (for `*-cols`); `--tab` disagreeing with a qualified range; start past the allocation; a delete whose end is past the allocation; a delete covering every row/column, or every one outside the freeze; `--no-inherit` on a delete |
+| `SPREADSHEET_NOT_FOUND`, `TAB_REQUIRED`, `TAB_NOT_FOUND` | As `sheets update` |
+| `PROTECTED_RANGE` | Upstream refused because a protected range overlaps |
+
+## Dispatcher
+
+Four `{ mutation: true }` entries with their own `FlagSpec`s; the shared dimension-range
+parser lives beside `parseA1`. `sheets --help` groups them under writes.
+
+## Out of scope
+
+- **Moving** rows/columns (`moveDimension`), **resizing** them (`updateDimensionProperties`
+  pixel size), **hiding** them — later verbs if asked for; hiding is formatting-adjacent.
+- **Grouping** (`addDimensionGroup`).
+- **Insert with content in one call** — insert, then `sheets update --range`, which the
+  help line spells out; a combined form is a convenience to add once the pair is in use.
+
+## Principles
+
+**Inherited:**
+
+- [write-protection-requires-explicit-account](../principles.md#write-protection-requires-explicit-account)
+- [provenance-by-default](../principles.md#provenance-by-default) — a delete carries the
+  cells it removed.
+- [fail-loud-on-unknown-flags](../principles.md#fail-loud-on-unknown-flags) — a range of the
+  wrong shape is refused, never reinterpreted.
+- [contextual-help-suggestions](../principles.md#contextual-help-suggestions) — the undo and
+  the "what is at that range now" line.
+
+**Local:**
+
+- **Say where everything went.** A structural edit invalidates every A1 address the agent is
+  holding from its last read. The response states the shift in old-row terms and names the
+  new occupant of the edited range, so the next command is addressed right without a
+  re-read. Inherited from [sheets-write.md](sheets-write.md)'s "the response is the proof",
+  applied to position instead of value.
+- **The editor's default for formatting continuity, nothing more.** An inserted row inherits
+  its neighbor's formatting because that is what the editor does and a table with one
+  unbordered row is a defect, not a choice; the flag to turn it off exists because the
+  `sheets` writers otherwise never touch formatting. Turning it off has to *clear* the
+  inherited formats, because upstream always copies from one side or the other.
