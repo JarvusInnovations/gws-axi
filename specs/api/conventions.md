@@ -181,17 +181,27 @@ The contract is the same on every command that offers it:
   No generic `--out`, no `--format`, no extension sniffing. A command offers only the formats
   that are faithful for its payload (a grid offers both; a tree offers JSON only).
 - **The `=<path>` is optional.** Bare, the file is auto-generated at
-  `<os-temp-dir>/gws-axi/<UTC-timestamp>-<kind>.<ext>` and written **`0600`** — an export is
-  ephemeral scratch and may be sensitive, and the temp dir is OS-pruned and sometimes
-  world-readable. `=<path>` writes exactly there (`~/` expanded, relative to the working
-  directory), with the default umask: the caller chose where it persists. A parent directory
-  that does not exist is created for an auto path and is `EXPORT_WRITE_FAILED` for an explicit
-  one.
+  `<os-temp-dir>/gws-axi-<uid>/<UTC-timestamp>-<kind>.<ext>` (`gws-axi/` where the platform has
+  no uid, i.e. Windows) and written **`0600`** — an export is ephemeral scratch and may be
+  sensitive, and the temp dir is OS-pruned and often shared. The auto path is **owner-only by
+  construction**, not by hope:
+  - the directory is per-user, created `0700`; before writing, it is `lstat`ed and the export
+    is refused (`EXPORT_WRITE_FAILED`, nothing written) unless it is a real directory — not a
+    symlink — owned by the current user with no group or other permission bits. A directory
+    someone else created at that name (on a shared `/tmp`) is never written into;
+  - the file is created exclusively (`O_EXCL`): an existing file *or a symlink* at the name is
+    never opened. On a name collision the next free `-2`, `-3`, … suffix is taken.
+- `=<path>` writes exactly there (`~/` expanded, relative to the working directory), with the
+  default umask: the caller chose where it persists. A parent directory that does not exist is
+  `EXPORT_WRITE_FAILED`. An existing file there is replaced, and the `wrote:` line says so
+  (`… (<rows> rows, <cols> cols, overwrote)`).
 - **At most one `*-out` flag per invocation**; two is a `VALIDATION_ERROR` naming both.
 - **A failed write does not discard the result.** The preview renders as usual and
   `export_error: {code: EXPORT_WRITE_FAILED, message, path}` takes the place of `wrote:`; the
   command exits 1 (the partial-failure rule, as `drive share`).
-- **The preview does not change** when a file is written. The response **adds** three things:
+- **The rendered rows do not change** when a file is written; counts a command reports about
+  the payload (totals, notes, formulas) may become exact for the whole payload rather than for
+  a capped window, because the whole payload was fetched. The response **adds** three things:
   `wrote: <path> (<rows> rows, <cols> cols)`; `columns: <name>:<type>, …` so follow-up
   processing can be written without opening the file; and one `help[]` line with a runnable
   command against the path (`jq '.rows[]' <path>` for JSON, `head <path>` or a `csvkit` form
@@ -206,7 +216,10 @@ The contract is the same on every command that offers it:
 value rides on the flag with `=`: `--csv-out=./q4.csv`. `parseArgs` accepts `--<flag>=<value>`
 only for flags declared `optional`, and never for value flags (`--range=B2` stays a usage
 error, so the two forms are not confused). A bare `--csv-out` followed by a path-looking
-token does not consume it.
+token does not consume it; when the command then refuses that token as an extra argument, the
+error says `--csv-out takes its path with =: --csv-out=<token>`. A value flag with nothing
+after it is `<flag> needs a value` also when the next token is `--<declared flag>=…` — that
+token is a flag, not the value.
 
 ## Unimplemented and unsupported surfaces
 

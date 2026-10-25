@@ -39,8 +39,10 @@ Operates only on native Google Sheets. Uploaded `.xlsx`/`.csv` files (Drive file
 - Sheets `spreadsheets.get` with `includeGridData=true`, `ranges=[<window>]`, and `fields=sheets(data(rowData(values(formattedValue,userEnteredValue,effectiveValue,hyperlink,note,textFormatRuns(startIndex,format(link(uri)))))))` — the grid **plus** formulas (`userEnteredValue.formulaValue`), error values (`effectiveValue.errorValue`), embedded links and cell notes in one call (rather than a plain `values.get`, which would return only display text and silently drop links/notes). Only issued once a specific tab is being rendered. Covered by the `spreadsheets` scope; no new scope.
   - **Bounded default window**: with neither `--range` nor `--full`, the window is bounded to the render cap (`A1:<lastCol><maxRows+2>`, `lastCol` from the tab's `columnCount`) rather than the whole sheet — keeps the read context-sized and fast on tall sheets. `--full` fetches the whole tab; an explicit `--range` is honored verbatim. Trailing fully-empty rows padded by the bounded window are trimmed.
   - **With an export flag** the window is the whole tab (as `--full`) or the explicit `--range`,
-    whatever the render cap; the cap then applies to the preview only, so `cells_total_rows` is
-    exact.
+    whatever the render cap; the cap then applies to the rendered rows only. Everything counted
+    from the fetch then covers the whole tab, not the window: `cells_total_rows` is exact, and
+    `notes`/`notes[]`, `formulas` (and `formulas_total`) and `errors` count every cell — so a
+    capped read with an export can report more of them than the same read without one.
 
 ## Display Rules
 
