@@ -113,6 +113,7 @@ Built from the current result:
 - Grid rendered → `sheets read <id> --tab <t> --range <A1>` to scope, `--full` when row-capped, `--header-row` to promote headers (only when not already set).
 - When links were resolved → an `N embedded link(s) resolved inline as markdown` line.
 - Review comments funnel → `sheets comments <id>` (Drive comments; see below).
+- When the spreadsheet has non-grid sheets (charts): `N chart sheet(s) not listed here; run `sheets tabs <id>` for every sheet` ([sheets-tabs.md](sheets-tabs.md)).
 - Version history / provenance funnel → `drive revisions <id>` and `drive activity <id>` (Sheets' `spreadsheets.get` exposes no per-read revision id, so provenance is funnelled to Drive rather than inlined — see Follow-ups in the plan).
 - Formatted-values caveat line (see Errors/fidelity).
 - When `errors[]` is non-empty, **first**: "N cell(s) show formula errors — see errors[]".
