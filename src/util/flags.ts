@@ -33,6 +33,9 @@ export interface ParsedArgs {
   positionals: string[];
 }
 
+/** A token that reads as a flag name: `--clear`, `--txet` — not `---` or `-- note`. */
+const FLAG_SHAPED = /^--[A-Za-z][A-Za-z0-9-]*$/;
+
 export function parseArgs(args: string[], spec: FlagSpec, command: string): ParsedArgs {
   const valueFlags = new Set(spec.value ?? []);
   const booleanFlags = new Set(spec.boolean ?? []);
@@ -54,7 +57,8 @@ export function parseArgs(args: string[], spec: FlagSpec, command: string): Pars
     }
     if (valueFlags.has(arg)) {
       const next = args[i + 1];
-      if (next === undefined || (next.startsWith("--") && next.length > 2)) {
+      // Only a flag-shaped token is a missing value; `--- draft ---` is a value.
+      if (next === undefined || FLAG_SHAPED.test(next)) {
         throw new AxiError(`${arg} needs a value`, "VALIDATION_ERROR", [
           `Run \`gws-axi ${command} --help\` for usage`,
         ]);

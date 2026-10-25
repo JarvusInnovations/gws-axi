@@ -271,6 +271,10 @@ Every command refuses a flag it doesn't take, and an unknown `--fields` name, wi
 The error lists the command's valid flags and its `--help` command, plus a targeted hint when one
 is declared for that flag.
 
+After a flag that takes a value, the next token is refused as a missing value only when it is
+flag-shaped (`--name`: letters, digits and dashes). Any other token that starts with `--` (`--- draft ---`,
+`-- note`) is the value.
+
 ## Error envelope
 
 - All errors are `AxiError(message, code, suggestions[])` on **stdout** ([principles.md#structured-errors-to-stdout](../principles.md#structured-errors-to-stdout)).

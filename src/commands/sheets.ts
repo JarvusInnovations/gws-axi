@@ -5,6 +5,7 @@ import { docsCommentsCommand } from "./docs/comments.js";
 import { ADD_TAB_FLAGS, ADD_TAB_HELP, sheetsAddTabCommand } from "./sheets/add-tab.js";
 import { CELL_FLAGS, CELL_HELP, sheetsCellCommand } from "./sheets/cell.js";
 import { CREATE_FLAGS, CREATE_HELP, sheetsCreateCommand } from "./sheets/create.js";
+import { NOTE_FLAGS, NOTE_HELP, sheetsNoteCommand } from "./sheets/note.js";
 import { READ_HELP, sheetsReadCommand } from "./sheets/read.js";
 import {
   APPEND_FLAGS,
@@ -38,7 +39,8 @@ output:
 notes:
   Sheets comments are Drive comments (file-type-agnostic); this is the same
   data as \`gws-axi docs comments\`. Cell *notes* are distinct — those come
-  back in the notes[] block of \`gws-axi sheets read\`.
+  back in the notes[] block of \`gws-axi sheets read\` and are set with
+  \`gws-axi sheets note\`.
 `;
 
 interface SheetsSubcommand {
@@ -102,6 +104,13 @@ export const SUBCOMMANDS: SheetsSubcommand[] = [
     help: ADD_TAB_HELP,
     handler: sheetsAddTabCommand,
   },
+  {
+    name: "note",
+    mutation: true,
+    flags: NOTE_FLAGS,
+    help: NOTE_HELP,
+    handler: sheetsNoteCommand,
+  },
 ];
 
 const SUB_BY_NAME: Record<string, SheetsSubcommand> = Object.fromEntries(
@@ -146,6 +155,7 @@ ${renderAlternatives(SUBCOMMANDS)}subcommand help:
   gws-axi sheets update --help     for writing a block, or single cells
   gws-axi sheets append --help     for adding rows (CSV, JSON, header-keyed)
   gws-axi sheets comments --help   for review comments (Drive comments)
+  gws-axi sheets note --help       for setting or clearing one cell's note
 examples:
   gws-axi sheets read 1AbC...
   gws-axi sheets read 1AbC... --tab Costs --range A1:D50
