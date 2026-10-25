@@ -118,7 +118,11 @@ gws-axi sheets update <id> --tab Tasks --json --key Name --content '[{"Name":"Sh
   block is checked before any call — unless `--append-missing`, in which case unmatched
   objects are appended as new rows, placed by the keyed `append` rule below (column A of
   the row after the last row with data in the header's columns), and the response says
-  which were which. They ride the same `values.batchUpdate` as the matched cells, after
+  which were which. `--append-missing` never turns a near miss into a second row: an
+  unmatched key that some row displays **case-insensitively**, or a number that some row
+  displays once its formatting is stripped (`7` against `7.00`, `1200` against `1,200`), is
+  still `ROW_NOT_FOUND` with the near miss named — pass the label exactly as displayed, or
+  fix the sheet. On a tab with nothing below the header every object is unmatched. They ride the same `values.batchUpdate` as the matched cells, after
   them — one pre-read, one write, one read-back and one error diff for the whole block —
   rather than a second write with a second report. A block that writes no cell at all
   (every object names only its key, and every one matched) is a `VALIDATION_ERROR`. Two or more rows match →
@@ -127,7 +131,14 @@ gws-axi sheets update <id> --tab Tasks --json --key Name --content '[{"Name":"Sh
 - The write is the `--cell` path: every named cell goes in one `values.batchUpdate`, with
   the pre-read, `unchanged`, read-back, `formulas[]`, `written[]` and the error diff a
   scattered-cell write gets. `--range`, a grid block, `--header` and `--cell` cannot be
-  combined with `--key` (`VALIDATION_ERROR`).
+  combined with a keyed update, whether or not `--key` is given (`VALIDATION_ERROR`).
+  The pre-read fetches one rectangle per row — the bounding box of the cells written in
+  it — not one range per cell, and `range:` is the bounding rectangle of the whole write
+  with its row count (`Tasks!A2:G8 (3 rows)`); `rows[]` carries the detail.
+- The key cell is re-read in the pre-read; a row that moved in between (a sort, an
+  inserted row) is `ROW_MOVED` naming the row and the key it now shows, with nothing
+  written. The window in which a row can move unnoticed is then the one round trip
+  between the pre-read and the write.
 - The response adds `rows[N]{key,row,cells,action}` after the summary — which row each
   object matched, how many cells it names besides its key (`null`s excluded), and
   `updated`, `unchanged` (the row already held every value) or (with `--append-missing`)
@@ -483,7 +494,8 @@ sees one vocabulary.
 | `TAB_NOT_FOUND` | `--tab`, a qualified range, or a placement anchor names no grid tab; carries the listing |
 | `RANGE_INVALID` | Upstream rejected the A1 reference (translated from the 400), or a `--cell` whose A1 part does not parse |
 | `COLUMN_NOT_FOUND` | Header-keyed `append`/`update`: an object key, or `--key`, names no cell in the tab's row 1; lists the header cells |
-| `ROW_NOT_FOUND` | Keyed `update`: an object's key value matches no row (and no `--append-missing`); names the value and nothing is written |
+| `ROW_NOT_FOUND` | Keyed `update`: an object's key value matches no row (and no `--append-missing`), or — even with `--append-missing` — matches a row only case-insensitively or once number formatting is stripped; names the value and the near miss, and nothing is written |
+| `ROW_MOVED` | Keyed `update`: a matched row's key cell no longer displays the key at the pre-read (the row moved after it was matched); names the row and what it now shows, and nothing is written |
 | `ROW_AMBIGUOUS` | Keyed `update`: a key value matches 2+ rows; names the row numbers |
 | `HEADER_REQUIRED` | Header-keyed `append` on a tab whose row 1 is empty |
 | `PROTECTED_RANGE` | Upstream refused the write because the range is protected for this account (a 400 whose message reads "You are trying to edit a protected cell or object"); names the range and that an editor of the sheet must unprotect it or write it |
