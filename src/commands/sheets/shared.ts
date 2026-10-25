@@ -132,6 +132,54 @@ export function toRect(ref: A1Ref, grid: { rows: number; cols: number }): GridRe
   };
 }
 
+/** A whole-row or whole-column range for the dimension verbs, 0-based, end-exclusive. */
+export interface DimensionRange {
+  kind: "rows" | "cols";
+  start0: number;
+  end0: number;
+  /** The tab the range names (`Costs!3:5`), when it names one. */
+  tabTitle?: string;
+}
+
+/**
+ * Parse a dimension range (specs/commands/sheets-dimensions.md): rows as `3:5`
+ * or `3`, columns as `B:D` or `B`, either tab-qualified. A range of the other
+ * kind, or any cell range, is refused naming the two forms — never
+ * reinterpreted.
+ */
+export function parseDimensionRange(text: string, kind: "rows" | "cols"): DimensionRange {
+  const { tabTitle, a1 } = splitQualifiedRange(text.trim());
+  const parts = a1.split(":");
+  const re = kind === "rows" ? ROW : COL;
+  const index = (m: RegExpExecArray) => (kind === "rows" ? Number(m[1]) - 1 : columnIndex(m[1]));
+  const matches = parts.map((p) => re.exec(p));
+  if ((parts.length === 1 || parts.length === 2) && matches.every((m) => m)) {
+    const [a, b = a] = matches.map((m) => index(m as RegExpExecArray));
+    return { kind, start0: Math.min(a, b), end0: Math.max(a, b) + 1, tabTitle };
+  }
+  const other = kind === "rows" ? "cols" : "rows";
+  const ofOther =
+    (parts.length === 1 || parts.length === 2) &&
+    parts.every((p) => (other === "rows" ? ROW : COL).exec(p));
+  const verbs = kind === "rows" ? "insert-rows / delete-rows" : "insert-cols / delete-cols";
+  const otherVerbs = kind === "rows" ? "insert-cols / delete-cols" : "insert-rows / delete-rows";
+  throw new AxiError(
+    ofOther
+      ? `'${text}' is a ${other === "rows" ? "row" : "column"} range; ${verbs} take${kind === "rows" ? " rows" : " columns"}`
+      : `'${text}' is not a ${kind === "rows" ? "row" : "column"} range`,
+    "VALIDATION_ERROR",
+    [
+      kind === "rows"
+        ? "Give rows as 3:5 (rows 3 to 5) or 3 (one row), optionally tab-qualified: 'Costs!3:5'"
+        : "Give columns as B:D (columns B to D) or B (one column), optionally tab-qualified: 'Costs!B:D'",
+      ofOther
+        ? `For ${other === "rows" ? "rows" : "columns"}, use ${otherVerbs}`
+        : "A cell range (B2:D9) is not accepted: these verbs move whole rows or columns",
+      "Nothing was changed",
+    ],
+  );
+}
+
 export interface RangeOrigin {
   col0: number;
   row1: number;

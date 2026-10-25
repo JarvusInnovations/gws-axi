@@ -41,7 +41,7 @@ Read coverage is complete across all seven services; write coverage is rolling o
 | **Docs** | ✅ read · find · comments · download · revisions · diff · tabs | ✅ create · write · append · replace-text · edit-cell · tabs update/delete &nbsp;·&nbsp; 🚧 insert-text · delete-range · style-text · style-paragraph · insert-table · comment writes |
 | **Drive** | ✅ ls · get · search · permissions · download · revisions · activity | ✅ upload · mkdir · rename · move · trash · untrash · share · unshare &nbsp;·&nbsp; 🚧 create · copy &nbsp;·&nbsp; ✋ permanent delete |
 | **Slides** | ✅ get · page · summarize · comments | ✅ skip · unskip &nbsp;·&nbsp; 🚧 create · update |
-| **Sheets** | ✅ read · cell · comments · tabs | ✅ update · append · clear · create · add-tab · note · tabs update · tabs delete |
+| **Sheets** | ✅ read · cell · comments · tabs | ✅ update · append · clear · create · add-tab · note · tabs update · tabs delete · insert-rows / insert-cols · delete-rows / delete-cols |
 | **Chat** | ✅ spaces · messages · search · members · download · wait · watch | ✅ send · react · unreact · mark-read · mark-unread |
 
 <sub>✅ shipped · 🚧 planned · ✋ out of scope by design</sub>
@@ -466,6 +466,17 @@ gws-axi sheets add-tab <id> --title Q4 q4.csv --after Q3 --account <email>
 
 Every write reads back what Sheets made of it: each formula's result or error (`formulas[]`), the cells it replaced with their previous values (`written[]` — the undo), and any formula errors it caused anywhere in the tab (`errors[]`, with a fix line each). Re-running an `update` that changes nothing is `action: unchanged`; `--header` freezes row 1 so `sheets read` names columns by it.
 
+Rows and columns can be inserted or deleted in place; everything after them moves, and the response says where, in old-row terms (`shifted: rows 3 and below moved down by 3 (old row 3 is now row 6)`), so a range from your last read can be re-addressed without reading again.
+
+```bash
+gws-axi sheets insert-rows <id> 3:5 --tab Costs --account <email>   # rows 3–5 are new and empty; formatting from row 2
+gws-axi sheets insert-cols <id> B --tab Costs --no-inherit --account <email>
+gws-axi sheets delete-rows <id> 'Costs!7' --account <email>         # cells[] holds what row 7 had — the undo
+gws-axi sheets delete-cols <id> D:E --tab Costs --account <email>
+```
+
+An insert takes the formatting of the row above (at row 1, the row below), as the editor does; `--no-inherit` clears it (data validation and conditional formatting spanning the insert still cover the new cells). Sheets shifts the formulas; a delete turns a reference to a removed cell into `#REF!`, and the response lists it in `errors[]` with the formula before and after, and a fix that edits the current one. Neither is idempotent — the response says what re-running would hit.
+
 <sub>Cell values are the displayed strings. `drive upload --convert` is the other way in from CSV — Google's importer, whole-file; the `sheets` writers write values, one tab at a time.</sub>
 
 A cell's **note** — the annotation `sheets read` lists in `notes[]` and `sheets cell` shows — is set, replaced or cleared one cell at a time. Only the note changes; the value and its format stay. The previous note comes back as `note.before` with an undo line, and the same text again is `action: unchanged`.
@@ -533,7 +544,7 @@ Conversations are addressed by id (from `chat spaces`) or by `--with <email>` �
 - **Revision exports cover every tab**: `docs diff` and `docs download --revision` export the whole Doc, so on a multi-tab Doc they include all tabs ([#110](https://github.com/JarvusInnovations/gws-axi/issues/110)).
 - **Drive writes**: `upload`, `mkdir`, `rename`, `move`, `trash`, `untrash`, `share`, and `unshare` are shipped; `create` / `copy` are still scaffolded as `NOT_IMPLEMENTED`. There is no permanent delete by design — `trash` is reversible for 30 days.
 - **Slides writes**: `skip` / `unskip` (hide slides in presentation mode) are shipped; `create` / `update` are still scaffolded as `NOT_IMPLEMENTED`.
-- **Sheets writes** set values, plus tab properties through `sheets tabs`: no formatting, widths, validation, or row/column insertion yet. Tabs can be renamed, moved, hidden, frozen and deleted (`sheets tabs`), but not colored, copied or protected. Sheets exposes no revision id, so the undo is the `written[]` block plus the editor's version history.
+- **Sheets writes** set values, plus tab properties through `sheets tabs`: no formatting, widths, or validation yet. Rows and columns can be inserted and deleted, not moved, resized, hidden or grouped. Tabs can be renamed, moved, hidden, frozen and deleted (`sheets tabs`), but not colored, copied or protected. Sheets exposes no revision id, so the undo is the `written[]` block plus the editor's version history.
 - **Sheets notes**: `sheets note` writes one cell's note per call; there is no batch form. Comments (`sheets comments`) are read-only.
 - **Testing-mode tokens** still expire every 7 days *if* you haven't published your OAuth app yet. Run `gws-axi auth publish` for the walkthrough — it covers the single-developer Production flow and removes the expiry once you've re-auth'd each account.
 
