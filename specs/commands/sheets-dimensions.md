@@ -78,7 +78,8 @@ gws-axi sheets delete-cols <spreadsheetId> <cols> [--tab <name|gid>]
 
 - Before the write, the deleted range's populated cells are fetched (the write mask:
   entered value + display) and rendered in the read's grid shape, capped at 50 rows with
-  `cells_total` past the cap — the undo record, as `written[]` is for a value write.
+  `cells_total_rows` past the cap (the read's name for the same count; `cells` is already
+  the number of populated cells) — the undo record, as `written[]` is for a value write.
 - A delete covering the whole allocation (every row, or every column) is refused locally
   with `VALIDATION_ERROR`, pointing at `sheets clear --all` or `sheets tabs delete`.
 - A delete whose range runs past the allocation is refused locally with `VALIDATION_ERROR`
