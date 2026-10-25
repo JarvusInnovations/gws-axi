@@ -155,9 +155,12 @@ Only grid tabs are addressable; a chart-only tab is `TAB_NOT_FOUND` with a note.
 
 The written range is **grown into the tab's allocation when it would exceed it**: a 30-column
 block at `A1` on a fresh 26-column tab makes the tab 30 columns wide (one
-`updateSheetProperties` on `gridProperties` before the values call). Upstream refuses such a
-write outright ("exceeds grid limits"); growing is what a human pasting the same block gets.
-The response says `grid: grown to <rows>×<cols>` when it happened.
+`updateSheetProperties` on `gridProperties` before the values call). Upstream is inconsistent
+here: a block that spills from an anchor *inside* the allocation is grown by `values.update`
+itself, but a range — or an anchor — that lies outside it is refused ("Range (Tiny!D1:E2)
+exceeds grid limits. Max rows: 3, max columns: 3"), and so is a `--cell` outside it. Growing
+first makes every case one path, and is what a human pasting the same block gets. The
+response says `grid: grown to <rows>×<cols>` when it happened.
 
 ## Behavior
 
@@ -198,8 +201,9 @@ asked for. `append`, `create` and `add-tab` read back the same way.
    row each, shifting nothing. Upstream locates "the table" from the range; with the whole
    tab as the range that is the tab's data region. The response reports the **actual rows
    written** (`range: Costs!A12:C13`) from the API's `updatedRange`, so the caller sees where
-   they landed — a tab with blank rows inside its data can place them later than its last
-   visible row.
+   they landed. A blank row inside the data is **not** filled: the rows land after the last
+   row that has data, below the gap (observed). `values.append` grows the tab's rows — and
+   its columns, for a wider block — itself, so `append` sends no growth request.
 3. `append` is **not idempotent**: re-running adds the rows again. The response says so
    ([drive mkdir](drive-mkdir.md) sets the pattern). Rows are appended as a block; a
    partial append is not possible through this API.
@@ -245,12 +249,14 @@ same response, from the read-back, always. There is no formula write whose outco
 `sheets read` to learn. This is the immediate feedback loop; `sheets read` and `sheets cell`
 are for the next turn, not for finding out whether this one worked.
 
-Header: `action: updated | unchanged | appended | cleared | created | added | exists`, then
-`account` (+ `account_source` per the standard rules).
+Header: `account` (+ `account_source` per the standard rules), then `action: updated |
+unchanged | appended | cleared | created | added | exists`, then — when the write left formula
+errors to report — `errors: N` and its siblings directly under `action`.
 
 ```
 account: alice@example.com
 action: updated
+errors: 1
 spreadsheet:
   id: 1AbC…
   title: Q4 Tracker
@@ -261,7 +267,6 @@ range: Costs!B2:D4
 shape: 3x3
 cells: 9
 changed: 5
-errors: 1
 input: user-entered
 formulas[2]{cell,formula,result,message}:
   D2,=B2*C2,"$9,600",
@@ -269,9 +274,9 @@ formulas[2]{cell,formula,result,message}:
 written[3]{cell,before,input,now}:
   B2,"$4,200",4800,"$4,800"
   C3,pending,done,done
-  D4,,1/2,1/2/2026
+  D4,,1/2,1/2 (date 2026-01-02)
 errors[1]{cell,error,message,written}:
-  D3,DIV_BY_ZERO,Function DIVIDE parameter 2 cannot be zero.,yes
+  D3,DIVIDE_BY_ZERO,Function DIVIDE parameter 2 cannot be zero.,yes
 help[5]:
   1 formula error after this write — see errors[]
   Fix D3 (#DIV/0!, Function DIVIDE parameter 2 cannot be zero.): gws-axi sheets update 1AbC… --tab Costs --cell D3='=B3/C3'
@@ -285,7 +290,8 @@ help[5]:
 - `range` — the A1 range actually written, tab-qualified. For `append`, the rows the API
   reports. For `clear`, the range cleared.
 - `shape`, `cells` — the block's rows×columns and the number of cells it carried (`null`
-  cells excluded). `changed` — cells whose value differs after the write (`update` only).
+  cells excluded); for `clear`, `cells` counts the cells that held a value. `changed` — cells
+  whose value differs after the write (`update` only).
 - `grid: grown to <rows>×<cols>` — only when the tab was enlarged.
 - `formulas[N]{cell,formula,result,message}` — **every formula the block contained**, in
   block order, never capped: the formula as stored, `result` as the displayed value after
@@ -296,8 +302,11 @@ help[5]:
   write: every cell that **had a value** and received a different one (`before` is its previous
   entered text — a formula shows as its formula), and every cell whose **displayed value
   differs from the input** (`now` is the read-back `formattedValue`: a formula's result, a
-  parsed date, a currency). A cell that was empty and now displays exactly what was typed
-  is not listed — the block is the record of it. Capped at 50 rows; past the cap the header
+  parsed date, a currency). A string that Sheets **parsed into a date** shows the date it
+  became beside its display — `1/2 (date 2026-01-02)` — because the display alone hides it:
+  `1/2` is stored as a date whose `m/d` format displays `1/2` again (observed). An input that
+  already reads as that ISO date (`2026-10-24`) is not annotated. A cell that was empty and
+  now displays exactly what was typed is not listed — the block is the record of it. Capped at 50 rows; past the cap the header
   carries `written_total`. `clear` lists the cleared cells with `input` and `now` empty. This
   is the undo line *and* the verification: the previous values and what Sheets made of the
   new ones are in the response, not behind a re-query
@@ -319,7 +328,8 @@ help[5]:
 - When `errors[]` is non-empty: the count first, then a fix line per error (up to 5) — § Formula errors.
 - The input-mode line (above), on every `USER_ENTERED` write; under `--raw`, the converse
   (`=…` was stored as text). When any `written[]` row has `now` differing from `input` without
-  being a formula, the line names one (`D4: 1/2 became 1/2/2026; --raw stores it as text`).
+  being a formula, the line names one (`D4: 1/2 became the date 2026-01-02; --raw stores it as
+  text`).
 - When the block has 2+ columns, was written at row 1, and `--header` was not given: one line
   showing the `--header` form, so the agent learns that the read promotes a frozen row.
 - `append`: "re-running appends the same rows again".
@@ -338,8 +348,12 @@ cell a `SUM` covers, clearing a range a `VLOOKUP` reads (`#REF!`), renaming a he
 loop:
 
 1. **Before**: the set of cells in the tab whose effective value is an error, with the error
-   type and message. Fetched in the pre-read (one `ranges` entry for the whole tab, fields
-   `sheets(data(rowData(values(effectiveValue/errorValue))))`).
+   type (`errorValue.type`: `REF`, `NAME`, `VALUE`, `DIVIDE_BY_ZERO`, `N_A`, `NUM`,
+   `NULL_VALUE`, `ERROR`) and message. Fetched beside the pre-read, as its own
+   `spreadsheets.get` sent in parallel (one `ranges` entry for the whole tab, fields
+   `sheets(data(startRow,startColumn,rowData(values(effectiveValue/errorValue))))`) — a
+   request carries one fields mask, and the target range's mask on the whole tab would fetch
+   every value in it.
 2. **After**: the same set from the read-back.
 3. **Report** the diff, not the state:
    - `errors[N]{cell,error,message,written}` — every cell that errors **after** the write and
@@ -372,6 +386,11 @@ the agent most needs it.
 (`rowCount × columnCount`). Above that, the scan covers the written range only and the
 header says `error_scan: written range only (tab is R×C)`, so a silent gap never looks like
 a clean tab ([surface-completeness-limits](../principles.md#surface-completeness-limits)).
+The mask is **not** compact: every populated cell comes back as an empty
+`{"effectiveValue":{}}` (only empty rows collapse to `{}`), about 22 bytes a cell. Measured
+2026-10-24: a fully populated 1000×26 tab returned 585 KB in about 230 ms; a fully populated
+8000×25 tab (200,000 cells) 4.5 MB in about 610 ms. Two of those per write is the price of
+the scan at the bound, and the bound stays at 200,000.
 
 **The read side of the loop** is [sheets read](sheets-read.md) § Error values: the same
 `errors[]` shape, the same fix line per error, so an agent that reads first and writes second
@@ -389,32 +408,32 @@ sees one vocabulary.
 | `RANGE_INVALID` | Upstream rejected the A1 reference (translated from the 400), or a `--cell` whose A1 part does not parse |
 | `COLUMN_NOT_FOUND` | Header-keyed `append`: an object key names no cell in the tab's row 1; lists the header cells |
 | `HEADER_REQUIRED` | Header-keyed `append` on a tab whose row 1 is empty |
-| `PROTECTED_RANGE` | Upstream refused the write because the range is protected for this account; names the range and that an editor of the sheet must unprotect it or write it |
+| `PROTECTED_RANGE` | Upstream refused the write because the range is protected for this account (a 400 whose message reads "You are trying to edit a protected cell or object"); names the range and that an editor of the sheet must unprotect it or write it |
 | `FILE_NOT_FOUND` | `--parent` folder absent or inaccessible (`create`) |
 | `WRITE_INCOMPLETE` | `add-tab`: the tab was added but the value write failed and the tab could not be deleted again; names the tab so it can be removed by hand. `create`: the spreadsheet exists but the tabs or values did not all apply; names the id |
 
 All Google failures pass through `translateGoogleError`. There is no optimistic-locking guard:
 the Sheets API has no `requiredRevisionId`, so a change between the read and the write is
-not detected. The read-then-write window is one round trip; the `overwritten[]` block is
+not detected. The read-then-write window is one round trip; the `written[]` block is
 what makes a collision visible after the fact.
 
 ## Upstream behavior relied on
 
 | Fact | Status |
 | --- | --- |
-| `values.update` with a range larger than the block leaves the uncovered cells unchanged | Documented (values.update reference: "cells outside the values are not changed"). **To verify live** before the spec is trusted |
-| `values.update` beyond the tab's allocated rows/columns is refused ("exceeds grid limits"), not grown | Documented behavior; seen in third-party reports. **To verify live**; the growth step exists because of it |
-| `values.append` with the tab as the range appends after the last data row and grows the row allocation itself | Documented ("the table" detection; `INSERT_ROWS`). **To verify live**, including where rows land on a tab with a blank row inside its data |
-| `null` in a `values.update` row leaves the cell untouched; `""` clears it | Documented (ValueRange: "null values are skipped"). **To verify live** |
-| `USER_ENTERED` parses `=…`, dates and currencies; `RAW` stores verbatim | Documented. **To verify live** for the exact strings the help line claims |
-| `values.clear` keeps formatting, notes and validation | Documented ("only values are cleared"). **To verify live** |
-| `addSheet` with a duplicate title is refused (400) and adds nothing | Documented. **To verify live** — the `exists` path is computed from the pre-read, not from the 400 |
-| A protected range refuses `values.update` with a 403 naming the protection | Documented. **To verify live** for the message `PROTECTED_RANGE` is classified from |
-| `updateSheetProperties` with `gridProperties.frozenRowCount` and that fields mask freezes the top rows and changes nothing else | Documented. **To verify live**, including that `sheets read` then auto-promotes |
-| A `spreadsheets.get` right after `values.update` returns computed formula results and `effectiveValue.errorValue` for broken ones (no "Loading…" state for ordinary formulas) | Expected from the API's synchronous recalculation. **To verify live**; `IMPORTRANGE`-class formulas may lag and are disclosed if so |
-| A fields mask of `effectiveValue/errorValue` alone returns a compact response for a healthy tab (no per-cell payload for cells with no error) | Expected from field masks. **To verify live** on a 1000×26 tab — the bound in § Formula errors follows from the measured size |
-| `values.batchUpdate` with one single-cell range per entry writes them all, or none on a bad range | Documented (atomic per request). **To verify live** |
-| Drive `files.create` with the spreadsheet MIME creates a spreadsheet whose first tab is `Sheet1` | **Observed** (the `drive upload --convert` path produces the same) |
+| `values.update` with a range larger than the block leaves the uncovered cells unchanged | **Observed 2026-10-24**: one value into `A1:C3` wrote `A1` and left the other eight cells as they were (`updatedCells: 1`) |
+| `values.update` beyond the tab's allocated rows/columns is refused ("exceeds grid limits"), not grown | **Amended 2026-10-24**: only partly. A block spilling from an anchor inside the allocation is grown by upstream (3 values at `Z1` made a 26-column tab 28 wide; 2 rows at `A1000` made it 1001 rows). A range or anchor outside it is refused — `values.update` `Tiny!D1:E2`, `values.batchUpdate` `Tiny!G9`, and `spreadsheets.get` on a range wholly outside the grid (one partly outside is clipped). The growth step stays, for the refused cases |
+| `values.append` with the tab as the range appends after the last data row and grows the row allocation itself | **Observed 2026-10-24**: rows landed after the last data row; with data in rows 1–4 and 6 (row 5 blank) the row landed at 7, not 5; a value in a far column (`J2`) did not move it. A full 2×2 tab took a 3-column row and grew to 3×3. A `null` in the row left that cell empty (`updatedColumns: 2`) |
+| `null` in a `values.update` row leaves the cell untouched; `""` clears it | **Observed 2026-10-24**: `[null, "", "9"]` kept the first cell, emptied the second, wrote the third |
+| `USER_ENTERED` parses `=…`, dates and currencies; `RAW` stores verbatim | **Observed 2026-10-24**: `=1+1` → formula showing `2`; `2026-10-24` → date (`yyyy-mm-dd`); `$5.00` → 5 as currency; `TRUE` → boolean; `42` → number; `00123` → 123; `1/2` → a date with format `m/d` that **displays `1/2`** (hence the date annotation in `written[]`). `RAW` stored all ten strings as `stringValue` verbatim |
+| `values.clear` keeps formatting, notes and validation | **Observed 2026-10-24**: a bold cell with a note and a list-validation rule kept all three. Clearing an already-empty range succeeds silently (`unchanged` is computed from the pre-read) |
+| `addSheet` with a duplicate title is refused (400) and adds nothing | **Observed 2026-10-24**: 400 `A sheet with the name "Sheet1" already exists. Please enter another name.` |
+| A protected range refuses `values.update` with a 403 naming the protection | **Amended 2026-10-24**: it is a **400** `INVALID_ARGUMENT`, not a 403, and it names no range: "You are trying to edit a protected cell or object. Please contact the spreadsheet owner to remove protection if you need to edit." (`values.update`, `values.clear`; `values.batchUpdate` prefixes `Invalid data[0]: `). Observed as an editor writing a range protected to the owner. `PROTECTED_RANGE` is classified from that message and names the range from the request |
+| `updateSheetProperties` with `gridProperties.frozenRowCount` and that fields mask freezes the top rows and changes nothing else | **Observed 2026-10-24**: `frozenRowCount: 1` set, `rowCount`/`columnCount` unchanged, and `sheets read` on the tab then reported `header_source: frozen-row` |
+| A `spreadsheets.get` right after `values.update` returns computed formula results and `effectiveValue.errorValue` for broken ones (no "Loading…" state for ordinary formulas) | **Observed 2026-10-24** for `=1+1`, `=SUM(A5:B5)`, `=A2/0` (`DIVIDE_BY_ZERO`, "Function DIVIDE parameter 2 cannot be zero.") and `=Cost!B2` with no `Cost` tab (`REF`, "Unresolved sheet name 'Cost'."). `IMPORTRANGE`-class formulas not tested; a `LOADING` error type is reported as it comes |
+| A fields mask of `effectiveValue/errorValue` alone returns a compact response for a healthy tab (no per-cell payload for cells with no error) | **Amended 2026-10-24**: not compact — each populated cell returns `{"effectiveValue":{}}`. 585 KB / ~230 ms on a populated 1000×26 tab; 4.5 MB / ~610 ms at 200,000 cells. Bound kept (§ Formula errors) |
+| `values.batchUpdate` with one single-cell range per entry writes them all, or none on a bad range | **Observed 2026-10-24**: a good `H1` beside a bad `Nope!A1` → 400 `Invalid data[1]: Unable to parse range: Nope!A1`, and `H1` stayed empty. A range naming no tab is the same "Unable to parse range" 400 as a malformed one |
+| Drive `files.create` with the spreadsheet MIME creates a spreadsheet whose first tab is `Sheet1` | **Observed 2026-10-24**: `Sheet1`, gid `0`, 1000×26, created directly in the `parents` folder |
 
 Each row flips to **Observed <date>** as the plan's live checks run; a contradicted row changes
 the spec, not the code.

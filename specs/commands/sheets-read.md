@@ -83,8 +83,10 @@ never both in one column.
 
 A cell whose effective value is an error (`#REF!`, `#NAME?`, `#DIV/0!`, `#N/A`, `#VALUE!`,
 `#NUM!`, `#ERROR!`) renders its error text in the grid, as the editor shows it, and is listed in
-an `errors[N]{cell,error,message}` block with Sheets' own message (`errorValue.message`,
-e.g. "Unresolved sheet name 'Cost'"). The header carries `errors: <n>` and the **first**
+an `errors[N]{cell,error,message}` block: `error` is Sheets' error type (`errorValue.type` —
+`REF`, `NAME`, `VALUE`, `DIVIDE_BY_ZERO`, …, the vocabulary the write side's `errors[]` uses)
+and `message` its own explanation (`errorValue.message`, e.g. "Unresolved sheet name
+'Cost'."). The header carries `errors: <n>` and the **first**
 `help[]` line names the count, so an agent never takes `#REF!` for data. Capped at 50 rows
 with `errors_total` past the cap. After the count, one `help[]` line per error (up to 5) is a
 runnable fix carrying the cell's current formula —
