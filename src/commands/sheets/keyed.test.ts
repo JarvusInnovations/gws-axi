@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { AxiError } from "axi-sdk-js";
-import { appendedCells, keyText, matchKeyedRows, resolveKeyColumn } from "./keyed.js";
+import {
+  appendedCells,
+  keyText,
+  matchKeyedRows,
+  nearMiss,
+  resolveKeyColumn,
+  rowRects,
+  strippedNumber,
+} from "./keyed.js";
 
 function codeOf(fn: () => unknown): string {
   try {
@@ -51,6 +59,7 @@ describe("keyText", () => {
     expect(keyText(" Ship it ")).toBe("Ship it");
     expect(keyText(42)).toBe("42");
     expect(keyText(true)).toBe("TRUE");
+    expect(keyText(1e21)).toBe("1000000000000000000000");
   });
 });
 
@@ -120,7 +129,7 @@ describe("matchKeyedRows", () => {
     expect(codeOf(fn)).toBe("ROW_NOT_FOUND");
     expect(messageOf(fn)).toMatch(/"ship it", "Gone"/);
     expect(messageOf(fn)).toMatch(/row 2 displays "Ship it"/);
-    expect(messageOf(fn)).toMatch(/--append-missing/);
+    expect(messageOf(fn)).toMatch(/exactly as displayed/);
   });
   it("returns unmatched objects as header-aligned rows with --append-missing", () => {
     const plan = matchKeyedRows(
@@ -186,5 +195,58 @@ describe("matchKeyedRows", () => {
   it("leaves the gap column and unnamed headers out of the write", () => {
     const plan = matchKeyedRows([{ Name: "Ship it", Owner: "x" }], headers, nameKey, names, opts);
     expect(plan.matches[0].cells.map((c) => c.col0)).toEqual([3]);
+  });
+});
+
+describe("near misses under --append-missing", () => {
+  const append = { appendMissing: true };
+  it("refuses a case-only near miss instead of appending a duplicate", () => {
+    const fn = () =>
+      matchKeyedRows([{ Name: "ship it", Owner: "x" }], headers, nameKey, names, append);
+    expect(codeOf(fn)).toBe("ROW_NOT_FOUND");
+    expect(messageOf(fn)).toMatch(/row 2 displays "Ship it"/);
+    expect(messageOf(fn)).toMatch(/exactly as displayed, or fix the sheet/);
+  });
+  it("refuses a number that a row displays with formatting", () => {
+    const shown = ["Name", "7.00", "$1,200", "0001"];
+    for (const [k, row] of [
+      [7, 2],
+      [1200, 3],
+      ["1,200", 3],
+      [1, 4],
+    ] as const) {
+      const fn = () => matchKeyedRows([{ Name: k, Owner: "x" }], headers, nameKey, shown, append);
+      expect(codeOf(fn)).toBe("ROW_NOT_FOUND");
+      expect(messageOf(fn)).toMatch(new RegExp(`row ${row} displays`));
+    }
+  });
+  it("still appends a key nothing resembles", () => {
+    const plan = matchKeyedRows(
+      [{ Name: "Brand new", Owner: "x" }],
+      headers,
+      nameKey,
+      names,
+      append,
+    );
+    expect(plan.missing.map((m) => m.key)).toEqual(["Brand new"]);
+  });
+  it("strips formatting from displayed numbers only", () => {
+    expect(strippedNumber("$1,200.50")).toBe(1200.5);
+    expect(strippedNumber("7.00")).toBe(7);
+    expect(strippedNumber("Ship it")).toBeUndefined();
+    expect(nearMiss("abc", new Map([["ABD", [1]]]))).toBeUndefined();
+  });
+});
+
+describe("rowRects", () => {
+  const cell = (row0: number, col0: number) => ({ a1: "", row0, col0, value: "v" });
+  it("groups cells into one bounding rectangle per row, in order", () => {
+    expect(rowRects([cell(4, 1), cell(1, 3), cell(4, 6), cell(1, 2)])).toEqual([
+      { r0: 4, r1: 5, c0: 1, c1: 7 },
+      { r0: 1, r1: 2, c0: 2, c1: 4 },
+    ]);
+  });
+  it("widens a matched row to take in its key cell", () => {
+    expect(rowRects([cell(2, 3), cell(2, 4)], 0)).toEqual([{ r0: 2, r1: 3, c0: 0, c1: 5 }]);
   });
 });

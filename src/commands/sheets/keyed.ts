@@ -1,5 +1,5 @@
 import { AxiError } from "axi-sdk-js";
-import { cellA1, columnLetter } from "./shared.js";
+import { type GridRect, cellA1, columnLetter } from "./shared.js";
 import { type Block, type CellArg, type InputValue, mapKeyedRows } from "./values.js";
 
 /**
@@ -60,6 +60,10 @@ export function resolveKeyColumn(headerCells: string[], key: string | undefined)
 /** A key value as the cell would display it: numbers plain, booleans TRUE/FALSE. */
 export function keyText(value: Exclude<InputValue, null>): string {
   if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
+  // String(1e21) is "1e+21"; an integer that large is written out in full.
+  if (typeof value === "number" && Number.isInteger(value) && Math.abs(value) >= 1e21) {
+    return BigInt(value).toString();
+  }
   return String(value).trim();
 }
 
@@ -173,21 +177,35 @@ export function matchKeyedRows(
     matches.push({ key: k, index, row0: hit, cells });
   });
 
+  // A near miss is refused even under --append-missing: appending it would
+  // leave the row it meant stale and add a duplicate the next run matches.
+  const near = missing.flatMap((m) => {
+    const hit = nearMiss(m.key, byText);
+    return hit
+      ? [
+          `${JSON.stringify(m.key)}: row ${hit.row0 + 1} displays ${JSON.stringify(hit.text)} (${hit.why})`,
+        ]
+      : [];
+  });
+  if (near.length > 0) {
+    throw new AxiError(
+      `No row's ${key.name} (column ${letter}) displays ${missing.map((m) => JSON.stringify(m.key)).join(", ")} exactly, but a row nearly does`,
+      "ROW_NOT_FOUND",
+      [
+        ...near,
+        "Pass the label exactly as displayed, or fix the sheet",
+        ...(opts.appendMissing
+          ? ["--append-missing does not append a near miss as a new row"]
+          : []),
+        "Nothing was written",
+      ],
+    );
+  }
   if (missing.length > 0 && !opts.appendMissing) {
-    const near = missing.flatMap((m) => {
-      const lower = m.key.toLowerCase();
-      const found = [...byText.entries()].find(([t]) => t.toLowerCase() === lower);
-      return found
-        ? [
-            `${JSON.stringify(m.key)}: row ${found[1][0] + 1} displays ${JSON.stringify(found[0])} (labels are case-sensitive)`,
-          ]
-        : [];
-    });
     throw new AxiError(
       `No row's ${key.name} (column ${letter}) displays ${missing.map((m) => JSON.stringify(m.key)).join(", ")}`,
       "ROW_NOT_FOUND",
       [
-        ...near,
         "Labels match the key column's displayed text exactly (trimmed, case-sensitive)",
         "Pass --append-missing to add unmatched objects as new rows",
         "Nothing was written",
@@ -195,6 +213,63 @@ export function matchKeyedRows(
     );
   }
   return { matches, missing };
+}
+
+const NUMBER = /^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i;
+
+/** A displayed number without its formatting (`$1,200.00` → 1200), or undefined. */
+export function strippedNumber(text: string): number | undefined {
+  const bare = text.replace(/[\s,$€£¥%]/g, "");
+  if (!NUMBER.test(bare)) return undefined;
+  const n = Number(bare);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/**
+ * The row an unmatched key almost names: one displaying it case-insensitively,
+ * or — for a numeric key — one whose displayed number equals it once its
+ * formatting is stripped (`7` against `7.00`, `1200` against `1,200`).
+ */
+export function nearMiss(
+  key: string,
+  byText: Map<string, number[]>,
+): { row0: number; text: string; why: string } | undefined {
+  const lower = key.toLowerCase();
+  for (const [text, rows] of byText) {
+    if (text.toLowerCase() === lower) {
+      return { row0: rows[0], text, why: "labels are case-sensitive" };
+    }
+  }
+  const n = NUMBER.test(key.replace(/,/g, "")) ? Number(key.replace(/,/g, "")) : undefined;
+  if (n === undefined) return undefined;
+  for (const [text, rows] of byText) {
+    if (strippedNumber(text) === n) {
+      return { row0: rows[0], text, why: "labels match the displayed text, formatting included" };
+    }
+  }
+  return undefined;
+}
+
+/**
+ * One read rectangle per row: the bounding box of the cells written in it,
+ * widened to take in the key cell when `keyCol0` is given (a matched row, whose
+ * key the pre-read re-checks). Rows in first-seen order.
+ */
+export function rowRects(cells: CellArg[], keyCol0?: number): GridRect[] {
+  const byRow = new Map<number, { c0: number; c1: number }>();
+  for (const c of cells) {
+    const r = byRow.get(c.row0);
+    if (r) {
+      r.c0 = Math.min(r.c0, c.col0);
+      r.c1 = Math.max(r.c1, c.col0 + 1);
+    } else byRow.set(c.row0, { c0: c.col0, c1: c.col0 + 1 });
+  }
+  return [...byRow].map(([row0, { c0, c1 }]) => ({
+    r0: row0,
+    r1: row0 + 1,
+    c0: keyCol0 === undefined ? c0 : Math.min(c0, keyCol0),
+    c1: keyCol0 === undefined ? c1 : Math.max(c1, keyCol0 + 1),
+  }));
 }
 
 /** Appended rows as cells, from `row0` down (nulls skipped). */

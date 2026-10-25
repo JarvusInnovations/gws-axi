@@ -57,7 +57,7 @@ import {
   parseCsv,
   parseJsonGrid,
 } from "./values.js";
-import { appendedCells, matchKeyedRows, resolveKeyColumn } from "./keyed.js";
+import { appendedCells, matchKeyedRows, resolveKeyColumn, rowRects } from "./keyed.js";
 
 /**
  * The range writers — `sheets update`, `sheets append`, `sheets clear` — and
@@ -132,8 +132,10 @@ notes:
   Keyed rows match the key column's displayed text exactly (trimmed,
   case-sensitive): a column formatted 0001 matches "0001", not 1. No match is
   ROW_NOT_FOUND and two matches ROW_AMBIGUOUS, for the whole block before
-  anything is written. The key cell, headers an object does not name, and every
-  other row are left as they are.
+  anything is written. A near miss (case only, or a number shown formatted) is
+  refused even with --append-missing, and a row that moved between the match and
+  the write is ROW_MOVED. The key cell, headers an object does not name, and
+  every other row are left as they are.
 ${CSV_NOTES}
 `;
 
@@ -281,21 +283,7 @@ export function parseUpdateFlags(args: string[]): UpdateFlags {
   const cellArgs = parsed.lists["--cell"];
   if (flags.key !== undefined || flags.appendMissing) {
     const what = flags.key !== undefined ? "--key" : "--append-missing";
-    const others = [
-      flags.range !== undefined && "--range",
-      cellArgs?.length && "--cell",
-      flags.header && "--header",
-    ].filter(Boolean);
-    if (others.length) {
-      throw new AxiError(
-        `${what} edits rows by label; it cannot be combined with ${others.join(", ")}`,
-        "VALIDATION_ERROR",
-        [
-          "A keyed update finds each row itself: drop --range/--cell and pass --json objects",
-          "Address cells directly with --cell or --range instead, without --key",
-        ],
-      );
-    }
+    refuseKeyedCombos(flags, cellArgs?.length ?? 0, `${what} edits rows by label`);
     if (!flags.json) {
       throw new AxiError(`${what} takes --json objects keyed by header`, "VALIDATION_ERROR", [
         `e.g. --json --key Name --content '[{"Name":"Ship it","Status":"done"}]'`,
@@ -337,6 +325,11 @@ export function parseUpdateFlags(args: string[]): UpdateFlags {
     // A JSON block with no --range may be objects: a keyed update keyed on
     // column A. Whether it is objects is known once the block is read.
     if (flags.json && (flags.localPath || flags.stdin || flags.content !== undefined)) {
+      refuseKeyedCombos(
+        flags,
+        0,
+        "A --json block without --range is a keyed update (objects edit rows by label)",
+      );
       checkOneSource(flags, { optional: false, what: "values", usage: UPDATE_USAGE });
       flags.keyed = true;
       return flags;
@@ -345,6 +338,26 @@ export function parseUpdateFlags(args: string[]): UpdateFlags {
   }
   checkOneSource(flags, { optional: false, what: "values", usage: UPDATE_USAGE });
   return flags;
+}
+
+/** A keyed update — with or without --key — finds its own rows: no --range/--cell/--header. */
+function refuseKeyedCombos(flags: UpdateFlags, cellCount: number, what: string): void {
+  const others = [
+    flags.range !== undefined && "--range",
+    cellCount > 0 && "--cell",
+    flags.header && "--header",
+  ].filter(Boolean);
+  if (others.length) {
+    throw new AxiError(
+      `${what}; it cannot be combined with ${others.join(", ")}`,
+      "VALIDATION_ERROR",
+      [
+        "A keyed update finds each row itself: drop --range/--cell/--header and pass --json objects",
+        "Address cells directly with --cell or --range instead, without --key",
+        "--header freezes row 1 of a block written with --range A1",
+      ],
+    );
+  }
 }
 
 function missingRange(): AxiError {
@@ -493,7 +506,12 @@ export interface WriteTarget {
 
 export type WritePlan =
   | { kind: "block"; row0: number; col0: number; rows: Block }
-  | { kind: "cells"; cells: CellArg[] };
+  | {
+      kind: "cells";
+      cells: CellArg[];
+      /** A keyed update's read rectangles, one per row (else one per cell). */
+      rows?: GridRect[];
+    };
 
 export interface WriteOutcome {
   action: "updated" | "unchanged";
@@ -535,6 +553,7 @@ export function plannedCells(plan: WritePlan): PlannedCell[] {
 
 /** The rectangles a plan touches: the block's extent, or one per cell. */
 export function planRects(plan: WritePlan): GridRect[] {
+  if (plan.kind === "cells" && plan.rows) return plan.rows;
   if (plan.kind === "cells") {
     return plan.cells.map((c) => ({ r0: c.row0, c0: c.col0, r1: c.row0 + 1, c1: c.col0 + 1 }));
   }
@@ -658,18 +677,60 @@ export function scanRange(tab: TabInfo, grid: { rows: number; cols: number }): s
  * `update`'s path, shared by `create` and `add-tab` (`fresh`: a new tab, with
  * nothing to pre-read). Read → compare → grow → write → freeze → read back.
  */
+/** A keyed row's key cell, re-checked in the pre-read (ROW_MOVED). */
+export interface KeyGuard {
+  a1: string;
+  /** The key the row was matched on. */
+  key: string;
+  keyName: string;
+}
+
+/** The smallest rectangle holding every rectangle. */
+export function boundingRect(rects: GridRect[]): GridRect {
+  return {
+    r0: Math.min(...rects.map((r) => r.r0)),
+    c0: Math.min(...rects.map((r) => r.c0)),
+    r1: Math.max(...rects.map((r) => r.r1)),
+    c1: Math.max(...rects.map((r) => r.c1)),
+  };
+}
+
+/** Matched rows whose key cell no longer displays the key → ROW_MOVED. */
+export function checkKeyGuards(guards: KeyGuard[], pre: Map<string, CellLike>): void {
+  const moved = guards.filter((g) => (pre.get(g.a1)?.formattedValue ?? "").trim() !== g.key);
+  if (moved.length === 0) return;
+  const what = moved
+    .map((g) => {
+      const now = (pre.get(g.a1)?.formattedValue ?? "").trim();
+      return `row ${g.a1.replace(/^[A-Z]+/, "")} was matched on ${g.keyName} ${JSON.stringify(g.key)} but ${g.a1} now displays ${now ? JSON.stringify(now) : "nothing"}`;
+    })
+    .join("; ");
+  throw new AxiError(`A matched row moved before the write: ${what}`, "ROW_MOVED", [
+    "Rows were sorted, inserted or deleted after the match; re-run the same command to match again",
+    "Nothing was written",
+  ]);
+}
+
 export async function writePlan(
   target: WriteTarget,
   plan: WritePlan,
-  opts: { raw: boolean; header: boolean; fresh?: boolean },
+  opts: { raw: boolean; header: boolean; fresh?: boolean; keyGuards?: KeyGuard[] },
 ): Promise<WriteOutcome> {
   const { api, account, meta, tab } = target;
   const q = quoteTitle(tab.title);
   const planned = plannedCells(plan);
   const rects = planRects(plan);
-  const a1 = plan.kind === "cells" ? plan.cells.map((c) => c.a1).join(",") : rectA1(rects[0]);
+  const byRow = plan.kind === "cells" && plan.rows;
+  const a1 =
+    plan.kind === "block"
+      ? rectA1(rects[0])
+      : byRow
+        ? rectA1(boundingRect(rects))
+        : plan.cells.map((c) => c.a1).join(",");
   const range = `${q}!${a1}`;
-  const label = `${displayTitle(tab.title)}!${a1}`;
+  const label = byRow
+    ? `${displayTitle(tab.title)}!${a1} (${rects.length} ${rects.length === 1 ? "row" : "rows"})`
+    : `${displayTitle(tab.title)}!${a1}`;
   const shape = plan.kind === "block" ? blockShape(plan.rows) : undefined;
   const grid = grownGrid(tab, rects);
   const wholeScan = scanRange(tab, grid);
@@ -689,6 +750,7 @@ export async function writePlan(
           : Promise.resolve(undefined),
       ]);
   const pre = cellMap(preData);
+  if (opts.keyGuards) checkKeyGuards(opts.keyGuards, pre);
 
   // 2. Compare.
   const diffs = diffBlock(planned, pre, opts.raw, { locale: meta.locale });
@@ -1052,13 +1114,18 @@ async function updateKeyed(account: string, flags: UpdateFlags): Promise<string>
   const headerCells = await fetchHeaderCells(target);
   const key = resolveKeyColumn(headerCells, flags.key);
   const letter = columnLetter(key.col0);
-  const keyData = await fetchGrid(
-    api,
-    account,
-    meta.id,
-    [`${quoteTitle(tab.title)}!${letter}2:${letter}`],
-    "sheets(data(startRow,startColumn,rowData(values(formattedValue))))",
-  );
+  // A header-only tab has no row 2 to read (and may refuse the range): every
+  // object is then unmatched.
+  const keyData =
+    tab.rows <= 1
+      ? []
+      : await fetchGrid(
+          api,
+          account,
+          meta.id,
+          [`${quoteTitle(tab.title)}!${letter}2:${letter}${tab.rows}`],
+          "sheets(data(startRow,startColumn,rowData(values(formattedValue))))",
+        );
   const keyTexts: Array<string | undefined> = [];
   for (const [, { row0, cell }] of gridCells(keyData)) keyTexts[row0] = cell.formattedValue ?? "";
   const matched = matchKeyedRows(block.objects, headerCells, key, keyTexts, {
@@ -1085,8 +1152,25 @@ async function updateKeyed(account: string, flags: UpdateFlags): Promise<string>
     );
   }
 
-  const plan: WritePlan = { kind: "cells", cells };
-  const outcome = await writePlan(target, plan, { raw: flags.raw, header: false });
+  // One read rectangle per row, matched rows widened to their key cell so the
+  // pre-read can confirm the row is still where it was matched.
+  const plan: WritePlan = {
+    kind: "cells",
+    cells,
+    rows: [
+      ...matched.matches.flatMap((m) => rowRects(m.cells, key.col0)),
+      ...rowRects(appended.flat()),
+    ],
+  };
+  // A key-only object writes nothing in its row, so its key cell is not read.
+  const keyGuards = matched.matches
+    .filter((m) => m.cells.length > 0)
+    .map((m) => ({
+      a1: cellA1(m.row0, key.col0),
+      key: m.key,
+      keyName: key.name,
+    }));
+  const outcome = await writePlan(target, plan, { raw: flags.raw, header: false, keyGuards });
   const changed = new Set(outcome.changedCells);
   const rows: KeyedRow[] = [
     ...matched.matches.map((m) => ({
@@ -1173,7 +1257,8 @@ function renderUpdate(
         : "Nothing was written: every cell already holds what the block would store",
     );
   }
-  const readRange = plan.kind === "cells" ? rectA1(cellsBounds(plan.cells)) : outcome.a1;
+  const readRange =
+    plan.kind === "cells" && !plan.rows ? rectA1(cellsBounds(plan.cells)) : outcome.a1;
   help.push(
     `Run \`gws-axi sheets read ${id} --tab ${tabArg} --range ${readRange}\` to read the range back`,
   );
