@@ -43,6 +43,24 @@ describe("parseArgs", () => {
     expect(parseArgs(["--since", "-7d"], SPEC, "chat messages").values["--since"]).toBe("-7d");
   });
 
+  it("accepts a value that starts with -- but is not flag-shaped", () => {
+    const spec = { value: ["--text"], boolean: ["--clear"] };
+    expect(parseArgs(["--text", "--- draft ---"], spec, "sheets note").values["--text"]).toBe(
+      "--- draft ---",
+    );
+    expect(parseArgs(["--text", "-- note"], spec, "sheets note").values["--text"]).toBe("-- note");
+  });
+
+  it("still refuses a flag-shaped token after a value flag", () => {
+    const spec = { value: ["--text"], boolean: ["--clear"] };
+    expect(
+      errorFrom(() => parseArgs(["--text", "--clear"], spec, "sheets note")).message,
+    ).toContain("--text needs a value");
+    expect(errorFrom(() => parseArgs(["--text", "--txet"], spec, "sheets note")).message).toContain(
+      "--text needs a value",
+    );
+  });
+
   it("treats a lone dash as a positional", () => {
     expect(parseArgs(["-"], SPEC, "chat send").positionals).toEqual(["-"]);
   });
