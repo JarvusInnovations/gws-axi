@@ -24,7 +24,7 @@ Designed for use by AI agents. Every response is structured, every error names a
   - [Docs](#docs) · [Reading](#reading-docs) · [Writing Markdown](#writing-markdown) · [Tabs](#tabs) · [Editing in place](#editing-in-place)
   - [Drive](#drive)
   - [Slides](#slides)
-  - [Sheets](#sheets)
+  - [Sheets](#sheets) · [Reading](#reading-sheets) · [Querying](#querying-a-sheet) · [Writing values](#writing-values) · [Rows and columns](#rows-and-columns) · [Notes](#cell-notes) · [Tabs](#sheet-tabs)
   - [Chat](#chat)
 - [Known issues & roadmap](#known-issues--roadmap)
 - [Design docs](#design-docs)
@@ -158,6 +158,8 @@ help[2]:
 ```
 
 Errors are structured too: a stable `code` (`ACCOUNT_REQUIRED`, `SCOPE_MISSING`, `MULTIPLE_MATCHES`, …) and suggestions naming the fix. An unknown flag is an error, never silently ignored — a misspelled `--free` can't be reported as a success that didn't do what was asked.
+
+When a result can outgrow what fits on screen ([`sheets read`](#reading-sheets) and [`sheets query`](#querying-a-sheet) today), `--json-out` or `--csv-out` saves the whole of it to a file while the screen shows the usual preview. These are the only flags that take their value with `=`: `--csv-out=./q4.csv` writes there, and a bare `--csv-out` writes to an owner-only folder in the OS temp dir (`gws-axi-<uid>/`) — gws-axi refuses that folder if anyone else owns it or can read it, and never writes through an existing file or link. The response names the file, its row and column counts and its columns, and gives a `jq` or `head` command for it; an explicit path that replaced a file says `overwrote`.
 
 ### Accounts
 
@@ -439,21 +441,30 @@ gws-axi slides skip <presentationId> <slideId>... --account you@example.com   # 
 
 ### Sheets
 
-A spreadsheet's tabs are its sheets, so `sheets read` mirrors `docs read`: it lists the tabs, and renders one tab's grid into context. Embedded links resolve inline as markdown `[text](url)`; cell notes come back in a `notes[]` block, formulas in `formulas[]`, and formula errors in `errors[]` with a runnable fix line each.
+A spreadsheet's tabs are its sheets, so the Sheets commands work one tab at a time, the way the Docs writers do.
+
+#### Reading sheets
+
+`sheets read` lists the tabs and renders one tab's grid into context. On a multi-tab file without `--tab`, each tab in the list shows its first row (`row1`), so you can tell `Sheet1` from `Data` without opening both. Embedded links resolve inline as markdown `[text](url)`; cell notes come back in `notes[]`, formulas in `formulas[]`, and formula errors in `errors[]` with a runnable fix line each. When row 1 becomes the column names, a `headers[N]{letter,header}` block maps each name back to its column letter.
 
 ```bash
-gws-axi sheets read <spreadsheetId>                       # single tab renders; multi-tab lists tabs to pick, each with its row 1
+gws-axi sheets read <spreadsheetId>                       # single tab renders; multi-tab lists tabs, each with its row 1
 gws-axi sheets read <spreadsheetId> --tab Costs           # by tab title (or numeric gid)
 gws-axi sheets read <spreadsheetId> --tab Costs --range A1:D50   # scope to an A1 range
 gws-axi sheets read <spreadsheetId> --header-row          # promote row 1 to column names (auto for a frozen top row; --raw to force letters)
 gws-axi sheets read <spreadsheetId> --tab Costs --formulas       # formulas in the grid instead of their values
-gws-axi sheets read <spreadsheetId> --tab Costs --full    # don't cap at 50 rows
+gws-axi sheets read <spreadsheetId> --tab Costs --full    # don't cap at 50 rows (or --max-rows <n>)
 gws-axi sheets read <spreadsheetId> --tab Costs --csv-out # 50-row preview here, every row in a file (--json-out for JSON)
 gws-axi sheets cell <spreadsheetId> D2 --tab Costs        # one cell: formula, value, error, and the values it reads
-gws-axi sheets comments <spreadsheetId>                   # review comments (Drive comments)
+gws-axi sheets cell <spreadsheetId> D2 --tab Costs --depth 2   # …and the cells those referenced formulas read (max 3)
+gws-axi sheets comments <spreadsheetId>                   # review comments (Drive comments; --include-resolved for closed threads)
 ```
 
-`sheets query` runs a query in the language `=QUERY()` uses (Google's Visualization Query Language: `select`, `where`, `group by`, `pivot`, `order by`, `limit`, `label`, `format`) against one tab, without writing a formula into the sheet. Columns are letters. The query goes to Google as written, and a bad one comes back as `QUERY_ERROR` with Google's own message. The result is a 50-row preview (`--limit`), with every column's id, label and type on a `columns:` line, and the matching `=QUERY()` formula in `help[]`. Every result also lists the tab's row 1 as `headers[N]{letter,header}`, so you can write the next query by letter without looking up which letter holds which column; a `QUERY_ERROR` carries the same map on one line. `sheets read` shows the same legend whenever it promotes a header row.
+<sub>Cell values are the displayed strings (`$9,600`, not `9600`). `sheets read --csv-out` writes the whole tab, header row first.</sub>
+
+#### Querying a sheet
+
+`sheets query` runs a query in the language `=QUERY()` uses (Google's Visualization Query Language: `select`, `where`, `group by`, `pivot`, `order by`, `limit`, `label`, `format`) against one tab, without writing a formula into the sheet. Columns are letters, and every result lists the tab's row 1 as `headers[N]{letter,header}` so you can write the next query by letter. The query goes to Google as written; a bad one comes back as `QUERY_ERROR` with Google's own message and the same letter map on one line. The result is a 50-row preview (`--limit`), with every column's id, label and type on a `columns:` line, and the matching `=QUERY()` formula in `help[]`.
 
 ```bash
 gws-axi sheets query <id> "select A, sum(C) where D = 'open' group by A" --tab Costs
@@ -462,21 +473,30 @@ gws-axi sheets query <id> "select A, B" --tab Costs --headers 0          # name 
 gws-axi sheets query <id> "select *" --tab Costs --json-out=./costs.json  # every row to a file
 ```
 
-`--json-out[=<path>]` and `--csv-out[=<path>]` write the full result to a file and leave the preview as it is. Without `=<path>` the file goes in a per-user folder in the OS temp dir (`gws-axi-<uid>/<timestamp>-<kind>.<ext>`), owner-only: gws-axi refuses to write into that folder if someone else owns it or can read it, and never writes through an existing file or symlink. An explicit `=<path>` replaces a file that is there, and the response says `overwrote`. The response names the file, its row and column counts, and the columns, and gives a `jq` or `head` command for it. `sheets query --csv-out` saves Google's own CSV of the query. `sheets read` writes the whole tab as display strings, header row first.
+`sheets query --csv-out` saves Google's own CSV of the query; `--json-out` saves the raw values. See [Output and errors](#output-and-errors) for how export files work.
 
-The writes put **values** into one tab and leave everything else — formats, widths, validation, other tabs — as it was. Values come as CSV (default), TSV, or a JSON 2-D array (`null` leaves a cell as it is), from a file, `-`, or `--content`. Strings are parsed as typed (`=formulas`, dates, currencies) unless `--raw`.
+#### Writing values
+
+The writes put **values** into one tab and leave everything else — formats, widths, validation, other tabs — as it was. Values come as CSV (default), TSV (`--tsv`, or a `.tsv` file), or a JSON 2-D array (`null` leaves a cell as it is), from a file, `-`, or `--content`. Strings are parsed as typed (`=formulas`, dates, currencies) unless `--raw`.
 
 ```bash
 gws-axi sheets update <id> --tab Costs --range B2 costs.csv --account <email>    # a block anchored at B2
 gws-axi sheets update <id> --tab Costs --cell B5=4800 --cell D2='=B2*C2' --account <email>
 gws-axi sheets append <id> --tab Tasks --json --content '[{"Name":"Ship","Status":"open"}]' --account <email>   # keyed by row 1
 gws-axi sheets update <id> --tab Tasks --json --key Name --content '[{"Name":"Ship","Status":"done"}]' --account <email>   # edit the row labelled Ship
-gws-axi sheets clear  <id> --tab Costs --range B2:D9 --account <email>          # values only
+gws-axi sheets update <id> --tab Tasks --json --key Name --append-missing --content '[…]' --account <email>   # …and add rows for labels not found
+gws-axi sheets clear  <id> --tab Costs --range B2:D9 --account <email>          # values only (--all for the whole tab)
 gws-axi sheets create --title "Q4" costs.csv --tab Costs --tab Notes --header --parent <folderId> --account <email>
-gws-axi sheets add-tab <id> --title Q4 q4.csv --after Q3 --account <email>
+gws-axi sheets add-tab <id> --title Q4 q4.csv --after Q3 --account <email>      # or --first, --last, --before <tab>
 ```
 
 Every write reads back what Sheets made of it: each formula's result or error (`formulas[]`), the cells it replaced with their previous values (`written[]` — the undo), and any formula errors it caused anywhere in the tab (`errors[]`, with a fix line each). Re-running an `update` that changes nothing is `action: unchanged`; `--header` freezes row 1 so `sheets read` names columns by it.
+
+A keyed update (`--key`) finds each row by the displayed text of its label column, exactly. A label with no row is refused unless `--append-missing`; one that matches only by case or number formatting (`ship it` vs `Ship it`, `7` vs `7.00`) is refused either way rather than added as a duplicate.
+
+<sub>`drive upload --convert` is the other way in from CSV — Google's importer, whole-file; the `sheets` writers write values, one tab at a time.</sub>
+
+#### Rows and columns
 
 Rows and columns can be inserted or deleted in place; everything after them moves, and the response says where, in old-row terms (`shifted: rows 3 and below moved down by 3 (old row 3 is now row 6)`), so a range from your last read can be re-addressed without reading again.
 
@@ -489,7 +509,7 @@ gws-axi sheets delete-cols <id> D:E --tab Costs --account <email>
 
 An insert takes the formatting of the row above (at row 1, the row below), as the editor does; `--no-inherit` clears it (data validation and conditional formatting spanning the insert still cover the new cells). Sheets shifts the formulas; a delete turns a reference to a removed cell into `#REF!`, and the response lists it in `errors[]` with the formula before and after, and a fix that edits the current one. Neither is idempotent — the response says what re-running would hit.
 
-<sub>Cell values are the displayed strings. `drive upload --convert` is the other way in from CSV — Google's importer, whole-file; the `sheets` writers write values, one tab at a time.</sub>
+#### Cell notes
 
 A cell's **note** — the annotation `sheets read` lists in `notes[]` and `sheets cell` shows — is set, replaced or cleared one cell at a time. Only the note changes; the value and its format stay. The previous note comes back as `note.before` with an undo line, and the same text again is `action: unchanged`.
 
@@ -498,12 +518,14 @@ gws-axi sheets note <id> B2 --tab Costs --text 'source: Q3 invoice' --account <e
 gws-axi sheets note <id> 'Costs!B2' --clear --account <email>
 ```
 
+#### Sheet tabs
+
 Tabs are objects too: `sheets tabs` lists every sheet (chart sheets included), and `tabs update` / `tabs delete` change them with the placement flags `add-tab` takes.
 
 ```bash
 gws-axi sheets tabs <id>                                                          # every sheet: gid, index, kind, hidden, freezes
-gws-axi sheets tabs update <id> Archive --first --title "Archive 2025" --hide --account <email>
-gws-axi sheets tabs update <id> Costs --freeze-rows 1 --account <email>         # the header row `sheets read` promotes
+gws-axi sheets tabs update <id> Archive --first --title "Archive 2025" --hide --account <email>   # --show to unhide; --last, --before, --after
+gws-axi sheets tabs update <id> Costs --freeze-rows 1 --freeze-cols 1 --account <email>         # row 1 is what `sheets read` promotes
 gws-axi sheets tabs delete <id> Archive --account <email>                       # reports the #REF! it causes elsewhere
 ```
 
