@@ -243,6 +243,7 @@ gws-axi calendar events --today          # or --this-week
 gws-axi calendar events --from 2026-04-20 --to 2026-04-20   # all of Apr 20 (a date-only --to closes at end of day)
 gws-axi calendar events --from today --to +2w               # tokens: now, today, tomorrow, yesterday, +Nd, +Nw, +Nh
 gws-axi calendar events --fields attendees,location,status,availability
+gws-axi calendar events --fields status,eventType     # include native types such as outOfOffice
 gws-axi calendar events --fields join_url,conference  # provider-uniform join link (Meet/Zoom/Teams/Webex)
 gws-axi calendar get <event-id>          # full detail + attendees + conference block
 gws-axi calendar get <event-id> --full   # don't truncate description
