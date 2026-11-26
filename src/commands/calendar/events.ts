@@ -19,6 +19,7 @@ import { resolveWeekStart } from "./week-start.js";
 const FIELD_CHOICES = [
   "availability",
   "status",
+  "eventType",
   "organizer",
   "location",
   "attendees",
@@ -41,7 +42,7 @@ flags[10]:
   --limit <n>          Max events to return (default: 100, max: 2500)
   --query <text>       Full-text search across summary/description/location/attendees
   --single-events      Expand recurring events into individual instances (default: true)
-  --fields <list>      Extra columns: availability, status, organizer, location, attendees, description, htmlLink, hangoutLink, join_url, conference, conference_source
+  --fields <list>      Extra columns: availability, status, eventType, organizer, location, attendees, description, htmlLink, hangoutLink, join_url, conference, conference_source
   --account <email>    Account override when 2+ are configured
 examples:
   gws-axi calendar events --today
@@ -50,7 +51,7 @@ examples:
   gws-axi calendar events --from 2026-04-20T00:00 --to 2026-04-21T00:00
   gws-axi calendar events --calendar team@jarv.us --limit 50
   gws-axi calendar events --query standup
-  gws-axi calendar events --fields status,attendees,location
+  gws-axi calendar events --fields status,eventType
   gws-axi calendar events --fields join_url,conference
 time formats / ranges:
   Ranges are half-open: [--from, --to).
@@ -77,6 +78,9 @@ default columns:
   to see file_ids and hand off to \`docs read\`).
   status column suppressed by default (most events are "confirmed" —
   add --fields status to see cancelled/tentative).
+event types:
+  --fields eventType shows Google's exact event type (e.g. outOfOffice),
+  blank if absent.
 conferencing:
   --fields join_url         provider-uniform join link — resolves from
                             structured conferenceData (Meet + Calendar add-on
@@ -256,6 +260,9 @@ function schemaWithExtras(extras: string[]): FieldDef[] {
               .join(", ")})`;
           },
         });
+        break;
+      case "eventType":
+        base.push(field("eventType"));
         break;
       case "htmlLink":
         base.push(field("htmlLink"));
