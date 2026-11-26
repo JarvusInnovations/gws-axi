@@ -24,21 +24,21 @@
 12. As a user reading command help, I want to see `eventType` among the valid extra fields, so that I can discover the feature without looking at the source.
 13. As a CLI user, I want misspelled field names to keep producing the existing validation error, so that I do not mistake a failed field request for a successful read.
 
-## Implementation Decisions
+## Command contract
 
 - The public interface is the existing `calendar events` command and its `--fields` option. The accepted field name and TOON column name are both `eventType`.
-- The command renders Google Calendar’s `events.list` value directly through the existing extra-field renderer. It does not infer type from the title, `availability`, or `status`; it does not normalize or restrict Google’s values to a local list.
+- The column shows Google Calendar’s `events.list` value as returned. It does not infer type from the title, `availability`, or `status`, or restrict the values to a local list.
 - An omitted or null value renders as a blank cell, just like other absent extra fields. An explicit `default` remains `default`.
 - `eventType` follows the existing field selection, ordering, and validation rules. It does not change which rows are returned, the default columns, or the meaning of other columns.
-- The list request, time window, recurrence expansion, result limits, and account selection stay unchanged. The command already receives event records containing this property when Google supplies it. No extra request, OAuth scope, or dependency is needed.
+- The list request, time window, recurrence expansion, result limits, and account selection stay unchanged. Requesting `eventType` adds no API call or OAuth scope.
 - Command help lists the field. The README shows how to request it alongside `status`.
 
-## Testing Decisions
+## Principles
 
-- Use one automated seam: invoke the calendar list command handler with CLI arguments and fixture events provided through the existing Google client interface. Assert on rendered TOON columns and values, not field registration or renderer internals. The Sheets query handler tests establish this pattern. No new production seam is needed.
-- Supply events with an explicit `outOfOffice` type, a `default` event whose title says “Out of office,” another native type, an unfamiliar type, and a missing type. Verify the exact values, including the blank cell, when `eventType` is requested alongside `status`.
-- With the same event data, call the handler without `--fields` and verify that the default column set is unchanged. Unknown-field validation follows the existing `--fields` contract.
-- Smoke-test the fork’s CLI: check command help and run a read-only calendar list with `status,eventType` against the intended account. Do not install the fork globally or include private event details in the PR.
+**Inherited**
+
+- [Minimal default schemas](../principles.md#minimal-default-schemas) — `eventType` is opt-in, so existing listings keep their default columns.
+- [Fail loud on unknown flags](../principles.md#fail-loud-on-unknown-flags) — a misspelled `--fields` value returns the existing validation error rather than being ignored.
 
 ## Out of Scope
 

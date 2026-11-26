@@ -1,5 +1,5 @@
 ---
-status: done
+status: in-progress
 depends: []
 specs:
   - specs/commands/calendar-event-type.md
@@ -18,6 +18,10 @@ Expose the type returned by Google on `calendar events` when requested. Leave de
 ## Approach
 
 Use the existing extra-field selection and scalar renderer. Document the field in command help and the README.
+
+Use the Sheets query handler test pattern: call the list handler with CLI arguments and supply fixture events through the existing Google client interface. Assert on rendered TOON, not field registration or renderer internals. Check `status,eventType` with native types, a regular event titled “Out of office,” an unfamiliar type, and missing and null types. Reuse the fixtures to check default columns, and check that a misspelled field fails validation.
+
+Smoke-test the fork without installing it globally: check command help and run a read-only `calendar events --fields status,eventType` against the intended account. Keep private event details out of the PR.
 
 ## Validation
 
